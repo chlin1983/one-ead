@@ -73,14 +73,32 @@ function applySavedOrder() {
   try {
     const orderList = JSON.parse(saved);
     if (!Array.isArray(orderList) || !orderList.length) return;
+
+    // Detect if new modules were added by the backend that aren't yet in cached localStorage
+    const savedSet = new Set(orderList);
+    const hasMissing = state.modules.some((m) => !savedSet.has(m.id));
+
+    if (hasMissing) {
+      state.modules.forEach((mod, sIdx) => {
+        if (!savedSet.has(mod.id)) {
+          const predId = sIdx > 0 ? state.modules[sIdx - 1].id : null;
+          const predIdx = predId ? orderList.indexOf(predId) : -1;
+          if (predIdx !== -1) {
+            orderList.splice(predIdx + 1, 0, mod.id);
+          } else {
+            orderList.push(mod.id);
+          }
+          savedSet.add(mod.id);
+        }
+      });
+      localStorage.setItem("ead-portal:moduleOrder", JSON.stringify(orderList));
+    }
+
     const orderMap = new Map(orderList.map((id, idx) => [id, idx]));
     state.modules.sort((a, b) => {
-      const hasA = orderMap.has(a.id);
-      const hasB = orderMap.has(b.id);
-      if (hasA && hasB) return orderMap.get(a.id) - orderMap.get(b.id);
-      if (hasA) return -1;
-      if (hasB) return 1;
-      return (a.order || 0) - (b.order || 0);
+      const idxA = orderMap.has(a.id) ? orderMap.get(a.id) : 999;
+      const idxB = orderMap.has(b.id) ? orderMap.get(b.id) : 999;
+      return idxA - idxB;
     });
   } catch (err) {
     console.warn("[portal] Failed to apply local module order:", err);
@@ -432,6 +450,7 @@ function openModule(id, updateHash = true) {
   // First visit this session: create and cache a dedicated iframe for it.
   const frame = document.createElement("iframe");
   frame.title = m.title;
+  frame.allow = "microphone; speaker-selection; clipboard-read; clipboard-write; display-capture";
   frame.src = m.entry + (m.entry.includes("?") ? "&" : "?") + "_v=" + Date.now();
   el.loader.classList.remove("hidden");
   const hideLoader = () => { if (state.activeId === id) el.loader.classList.add("hidden"); };

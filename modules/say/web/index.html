@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Say — Local Speech-to-Text Dictation & Transcription</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-icon-box">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+            <line x1="8" y1="22" x2="16" y2="22"/>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>Say <span class="brand-tag">v3 WebGPU</span></h1>
+          <p>Local AI Dictation & Transcription &bull; 100% Private</p>
+        </div>
+      </div>
+
+      <div class="header-badges">
+        <div class="badge badge-webgpu" id="gpu-badge" title="WebGPU Hardware Acceleration Status">
+          <span class="pulse-dot"></span>
+          <span id="gpu-badge-text">WebGPU Active</span>
+        </div>
+        <div class="badge badge-privacy" title="Audio and transcripts never leave your computer">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <span>Serverless &bull; Client-Side</span>
+        </div>
+        <div class="badge" id="engine-status-badge">
+          <span id="engine-status-text">Whisper Large-v3-Turbo</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn btn-sm" id="new-note-btn" title="Create a new dictation note">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>New Note</span>
+        </button>
+        <button class="btn btn-sm" id="history-btn" title="View past transcripts & notes">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>History</span>
+        </button>
+        <button class="btn btn-icon-only" id="settings-btn" title="AI Model & Audio Settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-workbench">
+      <!-- Left Panel: Control Center & Audio Hub -->
+      <section class="control-panel" aria-label="Audio Controls & Model Engine">
+        <!-- Input Switcher Tabs -->
+        <div class="tab-switcher" role="tablist">
+          <button class="tab-btn active" id="tab-mic-btn" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            </svg>
+            <span>Live Dictation</span>
+          </button>
+          <button class="tab-btn" id="tab-upload-btn" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span>Upload File</span>
+          </button>
+        </div>
+
+        <!-- Mode 1: Microphone Dictation Card -->
+        <div class="audio-card" id="mic-section">
+          <div class="record-btn-wrapper" id="record-wrapper">
+            <div class="record-pulse-ring"></div>
+            <button class="record-btn" id="toggle-record-btn" title="Click to start dictation">
+              <svg id="record-mic-icon" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <svg id="record-stop-icon" style="display: none;" viewBox="0 0 24 24" width="30" height="30" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="record-timer" id="record-timer-display">00:00</div>
+          <div class="record-status-label" id="record-status-label">Click microphone to speak</div>
+
+          <!-- Realtime Audio Visualizer -->
+          <div class="visualizer-container">
+            <canvas id="visualizer-canvas" width="340" height="48"></canvas>
+          </div>
+
+          <!-- Extra Control Row -->
+          <div class="record-controls-row" id="record-controls-row" style="display: none;">
+            <button class="btn btn-sm" id="pause-record-btn" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1"/>
+                <rect x="14" y="4" width="4" height="16" rx="1"/>
+              </svg>
+              <span id="pause-btn-text">Pause</span>
+            </button>
+            <button class="btn btn-sm btn-primary" id="finish-transcribe-btn" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span>Finish & Transcribe</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Mode 2: Audio File Upload Dropzone (hidden by default) -->
+        <div class="audio-card" id="upload-section" style="display: none;">
+          <input type="file" id="audio-file-input" accept="audio/*,.mp3,.wav,.m4a,.aac,.webm,.ogg,.flac" style="display: none;" />
+          <div class="dropzone-box" id="dropzone">
+            <div class="dropzone-icon">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="dropzone-text">Drop audio file here</div>
+            <div class="dropzone-sub">or click to browse (.mp3, .wav, .m4a, .webm, .flac)</div>
+          </div>
+
+          <!-- Audio Preview & Controls -->
+          <div class="audio-preview-card" id="audio-preview-card" style="display: none;">
+            <div class="audio-preview-meta">
+              <span class="file-name-pill" id="file-name-label">filename.mp3</span>
+              <span class="file-duration-pill" id="file-duration-label">00:00</span>
+            </div>
+            <audio id="audio-player" controls preload="metadata"></audio>
+            <button class="btn btn-primary" id="transcribe-uploaded-btn" style="width: 100%;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>Transcribe Audio File</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Fast Language & Task Options -->
+        <div class="config-card">
+          <div class="config-card-header">
+            <span>Transcription Options</span>
+            <span class="brand-tag">Whisper Turbo</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="language-select">Spoken Language</label>
+              <select class="form-select" id="language-select">
+                <option value="auto" selected>Auto Detect</option>
+                <option value="en">English</option>
+                <option value="zh">Chinese (Mandarin)</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="task-select">Task</label>
+              <select class="form-select" id="task-select">
+                <option value="transcribe" selected>Transcribe</option>
+                <option value="translate">Translate to English</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Download & Inference Status Card -->
+        <div class="status-card" id="status-card">
+          <div class="progress-header">
+            <span id="progress-status-title">Status: Ready</span>
+            <span id="progress-percentage">100%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric-pill">
+              <span class="label">Inference Time</span>
+              <span class="value" id="metric-infer-time">—</span>
+            </div>
+            <div class="metric-pill">
+              <span class="label">Speed Ratio</span>
+              <span class="value" id="metric-speed">—</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Document & Transcript Canvas -->
+      <section class="editor-workspace" aria-label="Document and Transcript Editor">
+        <!-- Top Title & Action Bar -->
+        <div class="editor-header-bar">
+          <div class="title-input-wrapper">
+            <input type="text" class="note-title-input" id="note-title" placeholder="Untitled Dictation..." value="Dictation Note" />
+          </div>
+
+          <div class="editor-actions-group">
+            <button class="btn btn-sm" id="timestamps-toggle-btn" title="Toggle Timestamps View">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 14 14"/>
+              </svg>
+              <span id="timestamps-toggle-text">Timestamps: Off</span>
+            </button>
+
+            <button class="btn btn-sm" id="copy-btn" title="Copy text to clipboard">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              <span>Copy</span>
+            </button>
+
+            <!-- Export Dropdown -->
+            <button class="btn btn-sm" id="export-btn" title="Export document">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Export</span>
+            </button>
+
+            <button class="btn btn-sm" id="clear-editor-btn" title="Clear current note">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+              <span>Clear</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Rich Formatting Toolbar -->
+        <div class="format-toolbar" role="toolbar" aria-label="Formatting Toolbar">
+          <button class="toolbar-btn" data-command="bold" title="Bold (Ctrl+B)">
+            <strong>B</strong>
+          </button>
+          <button class="toolbar-btn" data-command="italic" title="Italic (Ctrl+I)">
+            <em>I</em>
+          </button>
+          <button class="toolbar-btn" data-command="strikeThrough" title="Strikethrough">
+            <s>S</s>
+          </button>
+          <div class="toolbar-sep"></div>
+          <button class="toolbar-btn" data-command="formatBlock" data-val="h2" title="Heading 2">
+            H2
+          </button>
+          <button class="toolbar-btn" data-command="formatBlock" data-val="h3" title="Heading 3">
+            H3
+          </button>
+          <div class="toolbar-sep"></div>
+          <button class="toolbar-btn" data-command="insertUnorderedList" title="Bullet List">
+            &bull;
+          </button>
+          <button class="toolbar-btn" data-command="insertOrderedList" title="Numbered List">
+            1.
+          </button>
+          <button class="toolbar-btn" data-command="formatBlock" data-val="blockquote" title="Quote">
+            &ldquo;
+          </button>
+        </div>
+
+        <!-- Document Writing Canvas -->
+        <div class="editor-canvas-container">
+          <div
+            class="editor-canvas"
+            id="editor-canvas"
+            contenteditable="true"
+            spellcheck="true"
+            data-placeholder="Start speaking with the microphone or drop an audio file to transcribe here..."
+          ></div>
+        </div>
+
+        <!-- Footer Stats Bar -->
+        <footer class="editor-footer-bar">
+          <div class="editor-stats-row">
+            <span class="editor-stat-item"><strong id="stat-words">0</strong> words</span>
+            <span class="editor-stat-item"><strong id="stat-chars">0</strong> characters</span>
+            <span class="editor-stat-item"><strong id="stat-read-time">0 min</strong> read</span>
+          </div>
+          <div class="editor-stats-row">
+            <span id="save-status">Auto-saved locally</span>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <!-- Slide-out Settings Drawer -->
+    <div class="drawer-backdrop" id="settings-backdrop"></div>
+    <aside class="drawer" id="settings-drawer" aria-labelledby="settings-heading">
+      <div class="drawer-header">
+        <h2 id="settings-heading">AI Engine & Model Settings</h2>
+        <button class="btn btn-icon-only" id="close-settings-btn" title="Close Settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <div class="form-group">
+          <label class="form-label" for="model-preset-select">Whisper AI Model</label>
+          <select class="form-select" id="model-preset-select">
+            <option value="onnx-community/whisper-large-v3-turbo" selected>
+              Whisper Large-v3-Turbo (Highest Accuracy, Recommended)
+            </option>
+            <option value="onnx-community/whisper-small">
+              Whisper Small (Medium size & balanced)
+            </option>
+            <option value="onnx-community/whisper-base">
+              Whisper Base (Lightweight & fast)
+            </option>
+            <option value="onnx-community/whisper-tiny">
+              Whisper Tiny (Ultra-light for instant testing)
+            </option>
+          </select>
+          <small style="color: var(--text-mute); font-size: 11.5px; margin-top: 4px;">
+            Whisper Large-v3-Turbo runs with FP16/Q4 mixed precision, delivering production-grade accuracy directly in your browser.
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="device-select">Compute Device</label>
+          <select class="form-select" id="device-select">
+            <option value="webgpu" selected>WebGPU (Hardware Accelerated GPU)</option>
+            <option value="wasm">WebAssembly (CPU Fallback)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="dtype-select">Precision / Quantization</label>
+          <select class="form-select" id="dtype-select">
+            <option value="auto" selected>Auto (FP16 Encoder / Q4 Decoder Merged)</option>
+            <option value="q4">4-Bit Quantized (Q4)</option>
+            <option value="fp16">16-Bit Floating Point (FP16)</option>
+            <option value="q8">8-Bit Quantized (Q8)</option>
+          </select>
+        </div>
+
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+          <button class="btn btn-primary" id="preload-model-btn">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Pre-load & Cache Model Now</span>
+          </button>
+
+          <button class="btn" id="clear-cache-btn" style="color: var(--danger); border-color: rgba(239, 68, 68, 0.4);">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span>Clear Browser Model Cache</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Slide-out History Drawer -->
+    <div class="drawer-backdrop" id="history-backdrop"></div>
+    <aside class="drawer" id="history-drawer" aria-labelledby="history-heading">
+      <div class="drawer-header">
+        <h2 id="history-heading">Saved Dictations & Notes</h2>
+        <button class="btn btn-icon-only" id="close-history-btn" title="Close History">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <input type="text" class="form-input" id="search-history-input" placeholder="Search notes..." />
+        <div class="history-list" id="history-list"></div>
+      </div>
+    </aside>
+
+    <!-- Export Modal Dialog -->
+    <div class="drawer-backdrop" id="export-backdrop"></div>
+    <aside class="drawer" id="export-drawer" aria-labelledby="export-heading">
+      <div class="drawer-header">
+        <h2 id="export-heading">Export Document</h2>
+        <button class="btn btn-icon-only" id="close-export-btn" title="Close Export">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button class="btn" id="export-md-btn">
+            <span>Download as Markdown (.md)</span>
+          </button>
+          <button class="btn" id="export-txt-btn">
+            <span>Download as Plain Text (.txt)</span>
+          </button>
+          <button class="btn" id="export-json-btn">
+            <span>Download as JSON with Timestamps (.json)</span>
+          </button>
+          <button class="btn btn-primary" id="export-server-btn">
+            <span>Save to Local Disk (One EAD Scratch)</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
