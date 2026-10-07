@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F1 IPP Filter Simulator</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <style>
+    :root { --accent: #8b5cf6; --accent-soft: rgba(139,92,246,0.13); }
+    .split { grid-template-columns: 320px 1fr; }
+    .status-bar { display: flex; gap: 10px; align-items: center; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+
+    /* Compact "all plots in one window" dashboard grid (replaces tabs). */
+    .dashboard {
+      flex: 1; min-height: 0; overflow: auto;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      padding: 12px 16px; align-content: start;
+    }
+    .dash-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      display: flex; flex-direction: column; min-height: 420px; overflow: hidden;
+    }
+    .dash-panel.wide { grid-column: 1 / -1; }
+    .dash-panel.tall { min-height: 480px; }
+    .dash-panel.taller { min-height: 620px; }
+    .dash-title {
+      font-size: 12.5px; font-weight: 700; color: #0f172a;
+      background: #e2e8f0;
+      padding: 8px 14px; border-bottom: 1px solid #cbd5e1;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
+    }
+    .dash-title .btn-xs {
+      padding: 3px 10px; font-size: 11.5px; border-radius: 6px;
+      border: 1px solid #cbd5e1; background: #ffffff; color: var(--text);
+      cursor: pointer; font-weight: 600;
+    }
+    .dash-title .btn-xs:hover { border-color: var(--accent); color: var(--accent); }
+    .dash-title .hint { font-weight: 400; color: #64748b; font-size: 11px; }
+    .dash-panel .plot { flex: 1; min-height: 0; }
+    .dash-placeholder {
+      height: 100%; display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 24px; color: var(--text-mute); font-size: 12.5px;
+    }
+    .ctrl-scroll {
+      overflow-y: auto;
+      background: var(--bg);
+      padding: 6px 0 16px;
+    }
+    .run-row {
+      padding: 12px 14px;
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 2;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Modern thin gray box with rounded corners for each stage */
+    .stage-section {
+      background: var(--surface);
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      margin: 8px 10px;
+      padding: 6px 0 10px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .stage-section:hover {
+      border-color: #94a3b8;
+    }
+    .stage-section .pane-title {
+      padding: 8px 14px 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .stage-section .field {
+      padding: 6px 14px;
+    }
+    .stage-section .checklist {
+      padding: 6px 14px;
+    }
+  </style>
+  <script src="/shared/plotly.min.js"></script>
+</head>
+<body>
+  <div class="module-root">
+    <div class="split">
+      <div class="pane left ctrl-scroll">
+        <div class="run-row">
+          <button class="btn primary" id="run-btn" style="width:100%; justify-content:center;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Run Pipeline
+          </button>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 1–2 · Mic Input</div>
+          <div class="field">
+            <label>Input source</label>
+            <div class="seg" id="input_source" data-value="synthetic">
+              <button data-v="synthetic" class="active">Synthetic</button><button data-v="hxml">Real HXML</button>
+            </div>
+          </div>
+          <div class="field" id="shape-field">
+            <label>Mic curve shape</label>
+            <select id="shape">
+              <option value="bumpy">Bumpy</option>
+              <option value="flat">Flat</option>
+              <option value="high_boost">High boost</option>
+              <option value="low_boost">Low boost</option>
+              <option value="resonance">Resonance (3 kHz)</option>
+              <option value="random">Random walk</option>
+            </select>
+          </div>
+          <div class="field" id="hxml-field" hidden>
+            <label>Mic input measurement (.hxml)</label>
+            <div style="display:flex; gap:6px;">
+              <button class="btn" id="load-input-btn" style="flex:1; justify-content:center;">Load mic HXML…</button>
+              <button class="btn ghost" id="clear-input-btn" title="Clear" disabled>✕</button>
+            </div>
+            <span class="param-hint" id="input-label" style="font-size:11px; color:var(--text-mute);">No file loaded</span>
+            <input type="file" id="input-file" accept=".hxml" hidden />
+          </div>
+          <div class="field">
+            <label>Amplitude scale <span class="val" id="amp-val">1.0×</span></label>
+            <input type="range" id="amp" min="0.1" max="3.0" step="0.1" value="1.0" />
+            <span class="param-hint" style="font-size:11px; color:var(--text-mute);">Synthetic shapes only — HXML uses real measured levels.</span>
+          </div>
+          <div class="field">
+            <label>Normalisation freq</label>
+            <div class="seg" id="fnorm" data-value="1000">
+              <button data-v="500">500 Hz</button><button data-v="1000" class="active">1 kHz</button><button data-v="2000">2 kHz</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Validation · After-IPP (optional)</div>
+          <div class="field">
+            <label>Measured hardware result (.hxml)</label>
+            <div style="display:flex; gap:6px;">
+              <button class="btn" id="load-after-btn" style="flex:1; justify-content:center;">Load after-IPP HXML…</button>
+              <button class="btn ghost" id="clear-after-btn" title="Clear" disabled>✕</button>
+            </div>
+            <span class="param-hint" id="after-label" style="font-size:11px; color:var(--text-mute);">Simulation only</span>
+            <input type="file" id="after-file" accept=".hxml" hidden />
+          </div>
+          <div class="field">
+            <label>Real IIR filter, e.g. SF3_SS2 (.hxml)</label>
+            <div style="display:flex; gap:6px;">
+              <button class="btn" id="load-filter-btn" style="flex:1; justify-content:center;">Load real filter HXML…</button>
+              <button class="btn ghost" id="clear-filter-btn" title="Clear" disabled>✕</button>
+            </div>
+            <span class="param-hint" id="filter-label" style="font-size:11px; color:var(--text-mute);">No file loaded</span>
+            <input type="file" id="filter-file" accept=".hxml" hidden />
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 3 · LF Floor</div>
+          <div class="field">
+            <div class="seg" id="floor_hz" data-value="100">
+              <button data-v="50">50 Hz</button><button data-v="100" class="active">100 Hz</button><button data-v="200">200 Hz</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 4 · Smoothing</div>
+          <div class="field">
+            <div class="seg" id="smooth_method" data-value="2">
+              <button data-v="0">None</button><button data-v="1">Frac oct</button><button data-v="2" class="active">16-band</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Fractional octave N <span class="val" id="smooth_n-val">3</span></label>
+            <input type="range" id="smooth_n" min="1" max="12" step="1" value="3" />
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 5–6 · FIR</div>
+          <div class="field">
+            <label>FIR taps <span class="val" id="fir_taps-val">1025</span></label>
+            <input type="range" id="fir_taps" min="65" max="1025" step="1" value="1025" />
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 7–8 · IIR</div>
+          <div class="field">
+            <label>Force order</label>
+            <div class="seg" id="force_order" data-value="0">
+              <button data-v="0" class="active">Auto</button><button data-v="12">12</button><button data-v="10">10</button><button data-v="8">8</button><button data-v="6">6</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Tolerance <span class="val" id="tol_db-val">0.25 dB</span></label>
+            <input type="range" id="tol_db" min="0.05" max="1.0" step="0.05" value="0.25" />
+          </div>
+        </div>
+
+        <div class="stage-section">
+          <div class="pane-title">Stage 11 · Quantization</div>
+          <div class="checklist">
+            <label><input type="checkbox" id="quantize" checked /> <span>Enable 19-bit ME quantization</span></label>
+          </div>
+        </div>
+        <div style="height:16px"></div>
+      </div>
+
+      <div class="pane right">
+        <div class="status-bar" id="status-bar">
+          <span class="status">Adjust parameters and run the pipeline.</span>
+        </div>
+        <div class="dashboard" id="dashboard">
+          <div class="dash-panel tall" id="panel-pipeline">
+            <div class="dash-title"><span>Pipeline</span></div>
+            <div class="plot" id="plot-pipeline"></div>
+          </div>
+          <div class="dash-panel tall" id="panel-orders">
+            <div class="dash-title"><span>IIR Orders</span></div>
+            <div class="plot" id="plot-orders"></div>
+          </div>
+          <div class="dash-panel tall" id="panel-quant">
+            <div class="dash-title"><span>Quantization</span></div>
+            <div class="plot" id="plot-quant"></div>
+          </div>
+          <div class="dash-panel tall" id="panel-pz">
+            <div class="dash-title"><span>Pole–Zero</span></div>
+            <div class="plot" id="plot-pz"></div>
+          </div>
+          <div class="dash-panel taller" id="panel-ba">
+            <div class="dash-title"><span>Before / After</span></div>
+            <div class="plot" id="plot-ba"></div>
+          </div>
+          <div class="dash-panel tall" id="panel-smooth">
+            <div class="dash-title">
+              <span>Smoothing compare <span class="hint">Frac-oct SF 1/3/6/9/12 vs 16-band</span></span>
+              <button class="btn-xs" id="smooth-run-btn">Run comparison</button>
+            </div>
+            <div class="plot" id="plot-smooth">
+              <div class="dash-placeholder">Click "Run comparison" to compute (~5s) — not run automatically since it designs 6 filters.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

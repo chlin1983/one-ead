@@ -1,0 +1,330 @@
+{
+  "category_id": "microphone",
+  "category_name": "MEMS & ECM Microphones",
+  "icon": "mic",
+  "description": "Acoustic sensor microphones evaluated by sensitivity, SNR, AOP, current consumption, and frequency response.",
+  "groups": [
+    {
+      "id": "electrical",
+      "name": "Electrical Specifications",
+      "parameters": [
+        {
+          "key": "supply_voltage",
+          "label": "Supply Voltage",
+          "unit": "V",
+          "direction": "nominal",
+          "default_conditions": "Operating range",
+          "aliases": ["Supply Voltage", "Vdd", "Operating Voltage", "Supply voltage (Vdd)"]
+        },
+        {
+          "key": "current_consumption",
+          "label": "Current Consumption (Drain)",
+          "unit": "µA",
+          "direction": "lowest",
+          "default_conditions": "Normal mode",
+          "aliases": ["Supply Current (Drain)", "Current Consumption", "Idd", "Supply Current", "Current Drain", "Supply current"]
+        },
+        {
+          "key": "output_dc_bias",
+          "label": "Output Load Voltage (VL)",
+          "unit": "V",
+          "direction": "nominal",
+          "default_conditions": "after settled (open load)",
+          "aliases": ["Output Load Voltage (V )", "Output Load Voltage (VL)", "Output Load Voltage", "DC Output Voltage", "VL"]
+        },
+        {
+          "key": "output_impedance",
+          "label": "Output Impedance",
+          "unit": "Ω",
+          "direction": "lowest",
+          "default_conditions": "at 1 kHz",
+          "aliases": ["Output Impedance", "Zout", "Output Resistance"]
+        },
+        {
+          "key": "psrr",
+          "label": "PSRR",
+          "unit": "dB",
+          "direction": "highest",
+          "default_conditions": "75 mVpp sine @ 1 kHz",
+          "aliases": ["Power Supply Rejection Ratio (PSRR)", "Power Supply Rejection", "PSRR", "Power supply rejection"]
+        },
+        {
+          "key": "startup_time",
+          "label": "Startup Time",
+          "unit": "ms",
+          "direction": "lowest",
+          "default_conditions": "@ 94dB SPL",
+          "aliases": ["Startup Time @ 94dB SPL", "Startup Time", "Start-up Time", "Settling Time"]
+        },
+        {
+          "key": "startup_peak_current",
+          "label": "Startup Peak Battery Drain",
+          "unit": "µA",
+          "direction": "lowest",
+          "default_conditions": "Peak transient current",
+          "aliases": ["Startup Peak Battery Drain", "Peak Battery Drain", "Ipk", "Startup Peak Current", "Transient Battery Drain"]
+        },
+        {
+          "key": "supply_ramp_time",
+          "label": "Supply Ramp Time",
+          "unit": "ms",
+          "direction": "lowest",
+          "default_conditions": "Time to reach minimum supply voltage",
+          "aliases": ["Supply Ramp time", "Supply Ramp Time", "Ramp Time", "Supply ramp time (tr)", "tr", "*Supply Ramp ti me tr"]
+        },
+        {
+          "key": "supply_off_time",
+          "label": "Supply Off Time",
+          "unit": "ms",
+          "direction": "lowest",
+          "default_conditions": "Supply off between power cycles",
+          "aliases": ["Supply off time", "Supply off time (toff)", "toff", "*Supply off ti me toff"]
+        },
+        {
+          "key": "register_loading_time",
+          "label": "Register Loading Time",
+          "unit": "ms",
+          "direction": "lowest",
+          "default_conditions": "Time to complete register loading",
+          "aliases": ["Register loading time", "Register loading time (tld)", "tld", "*Register loading ti me tld"]
+        },
+        {
+          "key": "supply_threshold",
+          "label": "Supply Threshold Voltage",
+          "unit": "V",
+          "direction": "nominal",
+          "default_conditions": "Minimum threshold level for startup trigger",
+          "aliases": ["Supply threshold", "Supply threshold (vt)", "vt", "*Supply thresh old vt"]
+        },
+        {
+          "key": "transient_current_width",
+          "label": "Transient Current Width",
+          "unit": "µs",
+          "direction": "lowest",
+          "default_conditions": "Pulsing current duration",
+          "aliases": ["Transient current width", "Transient current width (tpw)", "tpw", "*Transient current wi dth tpw"]
+        },
+        {
+          "key": "register_read_duration",
+          "label": "Register Read Duration",
+          "unit": "µs",
+          "direction": "lowest",
+          "default_conditions": "Register read duration",
+          "aliases": ["Register read duration", "Register read duration (trd)", "trd", "*Register read dura tion trd"]
+        }
+      ]
+    },
+    {
+      "id": "acoustic",
+      "name": "Acoustic Specifications",
+      "parameters": [
+        {
+          "key": "acoustic_port_dim",
+          "label": "Acoustic Port Dimension",
+          "unit": "mm",
+          "direction": "nominal",
+          "default_conditions": "Diameter (Ø)",
+          "aliases": ["Acoustic port dimension", "Acoustic Port (AP)", "Acoustic Port Dimension", "Port Dimension", "AP", "Acoustic Port"]
+        },
+        {
+          "key": "sensitivity_30hz",
+          "label": "Sensitivity @ 30 Hz",
+          "unit": "dB",
+          "direction": "nominal",
+          "default_conditions": "re sensitivity @ 1kHz",
+          "aliases": ["Sensitivity @ 30 Hz", "Sensitivity @30Hz", "Sensitivity 30 Hz", "Sensitivity 30Hz", "30 Hz", "@30Hz", "@ 30Hz"]
+        },
+        {
+          "key": "sensitivity_peak",
+          "label": "Sensitivity Peak 1 kHz",
+          "unit": "dB",
+          "direction": "nominal",
+          "default_conditions": "dB re sensitivity @ 1kHz",
+          "aliases": ["Sensitivity Peak 1 kHz", "Sensitivity Peak 1kHz", "Sensitivity Peak", "Peak Sensitivity", "Peak", "Sensitivity @ Peak"]
+        },
+        {
+          "key": "sensitivity_100hz",
+          "label": "Sensitivity @ 100 Hz",
+          "unit": "dBV",
+          "direction": "nominal",
+          "default_conditions": "dB re sensitivity @ 1kHz",
+          "aliases": ["Sensitivity 100 Hz", "Sensitivity @ 100Hz", "Relative Sensitivity 100Hz"]
+        },
+        {
+          "key": "sensitivity_1k",
+          "label": "Sensitivity @ 1 kHz",
+          "unit": "dBV",
+          "direction": "nominal",
+          "default_conditions": "dB re 1V / 1 Pa, 94 dB SPL",
+          "aliases": ["Sensitivity 1 kHz", "Sensitivity @ 1kHz", "Sensitivity 1k Hz", "Sensitivity (1kHz)", "Free-field Sensitivity"]
+        },
+        {
+          "key": "sensitivity_10k",
+          "label": "Sensitivity @ 10 kHz",
+          "unit": "dBV",
+          "direction": "nominal",
+          "default_conditions": "dB re sensitivity @ 1kHz",
+          "aliases": ["Sensitivity 10 kHz", "Sensitivity @ 10kHz", "Relative Sensitivity 10kHz"]
+        },
+        {
+          "key": "snr",
+          "label": "Signal to Noise Ratio (SNR)",
+          "unit": "dBA",
+          "direction": "highest",
+          "default_conditions": "100 Hz to 20 kHz A-weighted",
+          "aliases": ["Signal to Noise Ratio, A-Weighted", "Signal to Noise Ratio", "SNR", "SNR, A-Weighted", "Signal-to-Noise Ratio"]
+        },
+        {
+          "key": "ein",
+          "label": "Equivalent Input Noise (EIN)",
+          "unit": "dB SPL",
+          "direction": "lowest",
+          "default_conditions": "100 Hz to 20 kHz A-weighted",
+          "aliases": ["Input-Referred Noise, A-Weighted", "Equivalent Input Noise", "EIN", "Self-Noise"]
+        },
+        {
+          "key": "aop",
+          "label": "Acoustic Overload Point (AOP)",
+          "unit": "dB SPL",
+          "direction": "highest",
+          "default_conditions": "10% THD @ 1 kHz",
+          "aliases": ["Acoustic Overload Point (AOP)", "Acoustic Overload Point", "AOP", "Max Input SPL"]
+        },
+        {
+          "key": "thd_point",
+          "label": "Input SPL @ Distortion",
+          "unit": "dB SPL",
+          "direction": "highest",
+          "default_conditions": "5% THD @ 1 kHz",
+          "aliases": ["Input SPL amplitude @ distortion", "THD 5% Point", "Distortion Limit"]
+        },
+        {
+          "key": "lfro",
+          "label": "Low Frequency Roll-Off (LFRO)",
+          "unit": "Hz",
+          "direction": "lowest",
+          "default_conditions": "-3 dB re sensitivity @ 1 kHz",
+          "aliases": ["Low Frequency Roll-Off (LFRO)", "LFRO", "Low Frequency Cutoff"]
+        },
+        {
+          "key": "resonance_freq",
+          "label": "Resonance Peak Frequency",
+          "unit": "kHz",
+          "direction": "highest",
+          "default_conditions": "--",
+          "aliases": ["Resonance Peak Frequency", "Resonance Frequency", "Peak Frequency"]
+        },
+        {
+          "key": "resonance_amp",
+          "label": "Resonance Peak Amplitude",
+          "unit": "dB",
+          "direction": "nominal",
+          "default_conditions": "dB re sensitivity @ 1kHz",
+          "aliases": ["Resonance Peak Amplitude", "Resonance Peak", "Peak Amplitude"]
+        },
+        {
+          "key": "phase_250_hz",
+          "label": "Phase @ 250 Hz",
+          "unit": "°",
+          "direction": "nominal",
+          "default_conditions": "Maximum deviation",
+          "aliases": ["Phase 250 Hz", "Phase", "Phase @ 250Hz"]
+        },
+        {
+          "key": "input_referred_noise_1_3rd_octave_100_hz",
+          "label": "Input-Referred Noise, 1/3rd Octave 100 Hz",
+          "unit": "dB SPL",
+          "direction": "lowest",
+          "default_conditions": "@ 100 Hz",
+          "aliases": ["Input-Referred Noise, 1/3rd Octave 100 Hz", "*Input-Referred Noise, 1/3rd Octave 100 Hz", "Input-Referred Noise, 1/3rd Octave (100 Hz)", "100 Hz", "@100 Hz", "100Hz"]
+        },
+        {
+          "key": "input_referred_noise_1_3rd_octave_1_khz",
+          "label": "Input-Referred Noise, 1/3rd Octave 1 kHz",
+          "unit": "dB SPL",
+          "direction": "lowest",
+          "default_conditions": "@ 1 kHz",
+          "aliases": ["Input-Referred Noise, 1/3rd Octave 1 kHz", "*Input-Referred Noise, 1/3rd Octave 1 kHz", "Input-Referred Noise, 1/3rd Octave (1 kHz)", "1 kHz", "@1 kHz", "1kHz"]
+        },
+        {
+          "key": "input_referred_noise_1_3rd_octave_10_khz",
+          "label": "Input-Referred Noise, 1/3rd Octave 10 kHz",
+          "unit": "dB SPL",
+          "direction": "lowest",
+          "default_conditions": "@ 10 kHz",
+          "aliases": ["Input-Referred Noise, 1/3rd Octave 10 kHz", "*Input-Referred Noise, 1/3rd Octave 10 kHz", "Input-Referred Noise, 1/3rd Octave (10 kHz)", "10 kHz", "@10 kHz", "10kHz"]
+        }
+      ]
+    },
+    {
+      "id": "mechanical",
+      "name": "General & Mechanical",
+      "parameters": [
+        {
+          "key": "weight",
+          "label": "Weight",
+          "unit": "g",
+          "direction": "lowest",
+          "default_conditions": "--",
+          "aliases": ["Weight", "*Weight", "Mass"]
+        },
+        {
+          "key": "dimensions",
+          "label": "Dimensions (L x W x H)",
+          "unit": "mm",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Dimensions", "Package Dimensions", "Size", "Outline Dimensions"]
+        },
+        {
+          "key": "port_location",
+          "label": "Port Location",
+          "unit": "",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Port Location", "Sound Port", "Port"]
+        },
+        {
+          "key": "operating_temp",
+          "label": "Operating Temperature",
+          "unit": "°C",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Operating Temperature", "*Operating Temperature", "Operating Temp Range"]
+        },
+        {
+          "key": "storage_temp",
+          "label": "Storage Temperature",
+          "unit": "°C",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Storage Temperature", "*Storage Temperature", "storage_temperature", "Storage Temp Range"]
+        },
+        {
+          "key": "humidity_coefficient",
+          "label": "Humidity Coefficient",
+          "unit": "dB/%RH",
+          "direction": "nominal",
+          "default_conditions": "per %RH",
+          "aliases": ["Humidity Coefficient", "*Humidity Coefficient"]
+        },
+        {
+          "key": "directivity",
+          "label": "Directivity",
+          "unit": "",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Directivity", "Directional Pattern"]
+        },
+        {
+          "key": "polarity",
+          "label": "Polarity",
+          "unit": "",
+          "direction": "nominal",
+          "default_conditions": "Relative to negative terminal",
+          "aliases": ["Polarity", "Acoustic Polarity"]
+        }
+      ]
+    }
+  ]
+}

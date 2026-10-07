@@ -1,0 +1,2180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HXML Viewer</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <style>
+    :root { --accent: #0ea5a5; --accent-soft: rgba(14,165,165,0.13); }
+    .pane.right { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; height: 100%; }
+    .plot-wrap { min-height: 400px; flex: 1 0 auto; padding: 12px 16px 8px; display: flex; flex-direction: column; }
+
+    /* Draggable splitter between the left pane and the plot pane (default width +5% over the
+       shared 320px). grid-template-columns reads the same --pane-w var the drag handler sets. */
+    .split { grid-template-columns: var(--pane-w, 320px) 1fr; position: relative; }
+    .pane-resizer {
+      position: absolute; top: 0; bottom: 0; left: var(--pane-w, 320px); width: 5px; margin-left: -2.5px;
+      background: var(--border); cursor: col-resize; display: flex; align-items: center; justify-content: center;
+      z-index: 5; transition: background 0.15s; user-select: none;
+    }
+    .pane-resizer:hover,
+    .pane-resizer.is-dragging {
+      background: var(--accent);
+    }
+    .pane-resizer-handle {
+      width: 2px;
+      height: 34px;
+      background: var(--text-mute);
+      border-radius: 1px;
+      transition: background 0.15s;
+    }
+    .pane-resizer:hover .pane-resizer-handle,
+    .pane-resizer.is-dragging .pane-resizer-handle {
+      background: #ffffff;
+    }
+
+    /* Left pane layout: 40% top DUT List + 60% bottom Data Explorer */
+    .pane.left {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .left-pane-content {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      width: 100%;
+      overflow: hidden;
+    }
+    .left-pane-content[hidden] {
+      display: none !important;
+    }
+    .dut-section {
+      flex: 3; /* 30% height distribution */
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .dut-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 4px 8px 8px;
+    }
+    .dut-count-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+    .dut-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 9px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      border-radius: 6px;
+      margin-bottom: 2px;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .dut-item:hover {
+      background: var(--surface-2);
+    }
+    .dut-item-color {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+    }
+    .dut-item-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .dut-item-idx {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-mute);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .left-pane-splitter {
+      height: 5px;
+      margin: -0.5px 0;
+      background: var(--border);
+      cursor: row-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+      user-select: none;
+      z-index: 5;
+    }
+    .left-pane-splitter:hover,
+    .left-pane-splitter.is-dragging {
+      background: var(--accent);
+    }
+    .splitter-handle {
+      width: 34px;
+      height: 2px;
+      background: var(--text-mute);
+      border-radius: 1px;
+      transition: background 0.15s;
+    }
+    .left-pane-splitter:hover .splitter-handle,
+    .left-pane-splitter.is-dragging .splitter-handle {
+      background: #ffffff;
+    }
+    .explorer-section {
+      flex: 7; /* 70% height distribution */
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .explorer-section .tree {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 4px 8px 8px;
+    }
+    
+    .pane-title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 6px;
+    }
+    .pane-title-bar .pane-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-mute);
+      padding: 0;
+    }
+    .explorer-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .btn-xs {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-dim);
+      padding: 1px 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-xs:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #select-all-btn,
+    #clear-sel-btn { min-width: 60px; min-height: 24px; padding: 3px 10px; }
+
+    .tree-row.block-item {
+      padding: 7px 10px;
+      font-weight: 600;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 2px;
+      transition: background 0.15s;
+    }
+    .tree-row.block-item:hover { background: var(--surface-2); }
+    .tree-row.block-item.selected { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+    .block-chk {
+      accent-color: var(--accent);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      margin: 0;
+      flex-shrink: 0;
+    }
+    .tree-row.block-item .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .tree-row.block-item .count {
+      font-size: 11px;
+      color: var(--text-mute);
+      font-weight: 500;
+      white-space: nowrap;
+      margin-left: auto;
+    }
+    .tree-row.block-item.selected .count { color: var(--accent); }
+
+    .plot-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 2px 2px 10px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .plot-toolbar-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .plot-blocks-summary {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .plot-info-badge {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 2px 9px;
+      border-radius: 999px;
+    }
+    .curve-search-sticky { position: sticky; top: 0; z-index: 20; display: flex; justify-content: flex-end; align-items: center; gap: 8px; min-height: 48px; padding: 6px 16px; box-sizing: border-box; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .curve-search-controls { display: flex; align-items: center; gap: 3px; width: min(360px, 100%); min-width: 180px; padding: 3px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .curve-search-icon { display: grid; place-items: center; width: 30px; flex: 0 0 30px; color: var(--text-mute); }
+    .curve-search-input { flex: 1; min-width: 0; padding: 6px 10px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
+    .curve-search-next { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: white; cursor: pointer; }
+    .curve-search-next:hover { filter: brightness(0.92); }
+    .curve-search-status { color: var(--text-mute); font-size: 11px; white-space: nowrap; }
+    .curve-search-results { padding: 4px 16px 16px; }
+    .curve-search-results[hidden] { display: none !important; }
+    .curve-search-results-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+    .curve-search-results-title { color: var(--text); font-size: 12px; font-weight: 700; }
+    .curve-search-results-note { color: var(--text-mute); font-size: 11px; }
+    .curve-search-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+    .curve-search-table-wrap table { width: 100%; border-collapse: collapse; }
+    .curve-search-table-wrap th, .curve-search-table-wrap td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+    .curve-search-table-wrap th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--text); font-size: 11px; }
+    .curve-search-table-wrap td { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .curve-search-table-wrap tr:nth-child(even) td { background: var(--surface-2); }
+    .plot-card.curve-search-target { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .scalar-block.curve-search-target { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .plots-grid {
+      display: grid;
+      gap: 14px;
+      width: 100%;
+    }
+    .plots-grid.cols-1 {
+      grid-template-columns: 1fr;
+    }
+    .plots-grid.cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .plots-grid.cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .plots-grid.cols-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    @media (max-width: 1550px) {
+      .plots-grid.cols-4 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 1250px) {
+      .plots-grid.cols-4,
+      .plots-grid.cols-3 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 850px) {
+      .plots-grid.cols-4,
+      .plots-grid.cols-3,
+      .plots-grid.cols-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .plot-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .plot-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px 5px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+      cursor: grab;
+      user-select: none;
+    }
+    .plot-card-header:active {
+      cursor: grabbing;
+    }
+    .plot-card-header button {
+      cursor: pointer;
+    }
+    .plot-card-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .plot-card-close {
+      background: transparent;
+      border: none;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--text-mute);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    .plot-card-close:hover {
+      background: rgba(220, 38, 38, 0.12);
+      color: var(--danger);
+    }
+
+    .plots-grid.single-plot .plot-card {
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      background: var(--surface);
+    }
+    .plots-grid.single-plot .plot-card-header {
+      display: flex;
+    }
+    .plots-grid.cols-1 .plot-item {
+      width: 100%;
+      height: 550px;
+      min-height: 550px;
+    }
+    .plots-grid.cols-2 .plot-item {
+      width: 100%;
+      height: 490px;
+      min-height: 490px;
+    }
+    .plots-grid.cols-3 .plot-item {
+      width: 100%;
+      height: 380px;
+      min-height: 380px;
+    }
+    .plots-grid.cols-4 .plot-item {
+      width: 100%;
+      height: 360px;
+      min-height: 360px;
+    }
+
+    .scalar-section { padding: 4px 16px 20px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+    .scalar-header { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 2px; }
+    .scalar-title { font-size: 12px; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: 0.6px; }
+    .scalar-sub { font-size: 11.5px; color: var(--text-mute); }
+    .scalar-block-label { font-size: 12.5px; font-weight: 700; color: var(--text); margin-top: 8px; margin-bottom: 3px; }
+    .scalar-scroll { max-height: 250px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+    table.data { font-size: 13px; color: var(--text); }
+    table.data th { font-size: 13px; color: var(--text); font-weight: 700; }
+    table.data th.num-col { text-align: right; }
+    table.data th .th-unit { font-weight: normal; color: var(--text-mute); font-size: 11.5px; margin-left: 3px; }
+    table.data thead th { background: var(--surface-2); }
+    #scalar-tables-wrap {
+      --scalar-first-col-w: 270px;
+    }
+    .scalar-scroll table.data {
+      width: 100%;
+      min-width: 100%;
+      table-layout: fixed;
+    }
+    .scalar-scroll table.data th.sticky-col,
+    .scalar-scroll table.data td.sticky-col,
+    .scalar-scroll table.data colgroup col.sticky-col {
+      box-sizing: border-box;
+      width: var(--scalar-first-col-w, 270px);
+      min-width: var(--scalar-first-col-w, 270px);
+      max-width: var(--scalar-first-col-w, 270px);
+    }
+    .scalar-scroll table.data th:not(.sticky-col),
+    .scalar-scroll table.data td:not(.sticky-col) {
+      box-sizing: border-box;
+      min-width: 85px;
+    }
+    table.data thead th.sticky-col { background: var(--surface-2); }
+    table.data td { font-size: 13px; color: var(--text); font-weight: 600; }
+    table.data td.num-cell { text-align: right; font-family: inherit; font-size: 13px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    table.data td.sticky-col { font-size: 13px; color: var(--text); font-weight: 600; }
+    table.data td.sticky-col code { font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text); background: transparent; padding: 0; }
+    table.data .cell-null { color: var(--text-mute); opacity: 0.6; font-weight: normal; }
+    table.data tbody tr:nth-child(even) td { background: var(--surface-2); }
+    table.data tbody tr:nth-child(even) td.sticky-col { background: var(--surface-2); }
+    table.data tbody tr:nth-child(odd) td { background: var(--surface); }
+    table.data tbody tr:nth-child(odd) td.sticky-col { background: var(--surface); }
+    table.data tbody tr:hover td,
+    table.data tbody tr:hover td.sticky-col { background: var(--accent-soft); }
+    .dut-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 8px; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.18); }
+
+    .plot-card-actions { display: flex; align-items: center; gap: 4px; }
+    .plot-card-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 2px 7px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    .plot-card-btn:hover {
+      background: var(--surface-3);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    .hxml-dropdown-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      padding: 5px;
+      z-index: 99999;
+      min-width: 250px;
+      max-width: 380px;
+      max-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      animation: fadeIn 0.15s ease-out;
+    }
+    .hxml-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text);
+      border-radius: 5px;
+      border: none;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.12s, color 0.12s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hxml-dropdown-item:hover {
+      background: var(--surface-3);
+      color: var(--accent);
+    }
+    .hxml-dropdown-item.primary {
+      font-weight: 600;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+    }
+    .hxml-dropdown-item.primary:hover {
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+    .hxml-dropdown-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 3px 0;
+    }
+    .hxml-dropdown-header {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-mute);
+      padding: 4px 8px 2px 8px;
+    }
+
+    .plot-toolbar-right {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+    .layout-selector-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .layout-selector-wrap label {
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .select-xs {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+      outline: none;
+      transition: all 0.15s;
+    }
+    .select-xs:hover, .select-xs:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
+    #fs-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 8888;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: fsFadeIn 0.12s ease-out;
+    }
+    @keyframes fsFadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    #fs-overlay[hidden] { display: none !important; }
+    #fs-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      height: 46px;
+      flex-shrink: 0;
+      background: var(--surface-2);
+      border-bottom: 1.5px solid var(--border-strong);
+      gap: 12px;
+    }
+    #fs-header-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      overflow: hidden;
+      flex: 1;
+    }
+    #fs-header-left svg { flex-shrink: 0; stroke: var(--accent); }
+    #fs-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #fs-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .fs-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 13px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .fs-btn:hover {
+      background: var(--surface-3);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    .fs-btn-close {
+      background: rgba(220,38,38,0.07);
+      border-color: rgba(220,38,38,0.25);
+      color: var(--danger);
+    }
+    .fs-btn-close:hover {
+      background: rgba(220,38,38,0.15);
+      border-color: var(--danger);
+    }
+    #fs-main {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+    #fs-content {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+    }
+    #fs-plot-wrap {
+      height: 88vh;
+      min-height: 480px;
+      max-height: 1200px;
+      flex: none;
+      position: relative;
+      padding: 8px 14px 28px;
+      box-sizing: border-box;
+      margin-right: auto;
+      width: 100%;
+      max-width: 100%;
+    }
+    #fs-plot-div {
+      position: absolute;
+      top: 8px;
+      left: 14px;
+      right: 14px;
+      bottom: 28px;
+    }
+    #fs-plot-wrap.is-custom-size #fs-plot-div {
+      right: auto;
+      bottom: auto;
+    }
+    #fs-plot-wrap.is-custom-size {
+      max-width: none;
+      max-height: none;
+      min-width: 300px;
+      min-height: 200px;
+      background: var(--surface);
+    }
+    #fs-plot-div .draglayer .nsewdrag {
+      cursor: crosshair;
+    }
+    .fs-border-handle {
+      position: absolute;
+      z-index: 100;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+    }
+    .fs-border-r {
+      right: 35px;
+      top: 46px;
+      bottom: 82px;
+      width: 28px;
+      cursor: ew-resize;
+    }
+    .fs-border-b {
+      bottom: 68px;
+      left: 86px;
+      right: 49px;
+      height: 28px;
+      cursor: ns-resize;
+    }
+    .fs-border-c {
+      right: 31px;
+      bottom: 64px;
+      width: 36px;
+      height: 36px;
+      cursor: nwse-resize;
+      z-index: 110;
+    }
+    .fs-resize-icon {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: -0.5px;
+      color: var(--text);
+      background: var(--surface-2);
+      padding: 3px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-strong);
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      opacity: 0;
+      transform: scale(0.85);
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s, border-color 0.15s;
+    }
+    .fs-border-handle:hover .fs-resize-icon,
+    .fs-border-handle.is-dragging .fs-resize-icon {
+      opacity: 1;
+      transform: scale(1);
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--surface);
+      box-shadow: 0 2px 8px rgba(14, 165, 233, 0.35);
+    }
+    .fs-border-handle .fs-resize-icon-vert {
+      transform: rotate(90deg) scale(0.85);
+    }
+    .fs-border-handle:hover .fs-resize-icon-vert,
+    .fs-border-handle.is-dragging .fs-resize-icon-vert {
+      opacity: 1;
+      transform: rotate(90deg) scale(1);
+    }
+    .fs-border-handle .fs-resize-icon-diag {
+      transform: rotate(-45deg) scale(0.85);
+    }
+    .fs-border-handle:hover .fs-resize-icon-diag,
+    .fs-border-handle.is-dragging .fs-resize-icon-diag {
+      opacity: 1;
+      transform: rotate(-45deg) scale(1);
+    }
+    .fs-ruler {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 22px;
+      z-index: 120;
+      pointer-events: none;
+      overflow: hidden;
+      background: rgba(248, 250, 252, 0.95);
+      border-bottom: 1px solid var(--border-strong);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+    .fs-ruler[hidden] { display: none !important; }
+    .fs-ruler-tick {
+      position: absolute;
+      bottom: 0;
+      width: 1px;
+      height: 5px;
+      background: #94a3b8;
+    }
+    .fs-ruler-tick.major { height: 10px; background: #475569; }
+    .fs-ruler-label { position: absolute; top: 1px; transform: translateX(3px); }
+    .fs-ruler-max {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-left: 2px dashed #16a34a;
+      padding-left: 3px;
+      color: #16a34a;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .fs-ruler-mark {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-left: 2px solid #dc2626;
+      padding-left: 3px;
+      color: #dc2626;
+      font-weight: 700;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.9);
+    }
+    .fs-resize-badge {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 60;
+      background: rgba(15, 23, 42, 0.9);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: monospace;
+      padding: 4px 10px;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      pointer-events: none;
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Fullscreen Curve Math & Post-Processing Panel ── */
+    /* ── Fullscreen Curve Math & Post-Processing Panel ── */
+    .fs-math-panel {
+      width: 390px;
+      min-width: 340px;
+      max-width: 480px;
+      border-left: 1.5px solid var(--border-strong);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.06);
+      transition: width 0.15s ease;
+    }
+    .fs-math-panel[hidden] {
+      display: none !important;
+    }
+    .fs-math-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .fs-math-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .fs-math-title svg {
+      stroke: var(--accent);
+    }
+    .fs-math-close-btn {
+      background: transparent;
+      border: none;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--text-mute);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .fs-math-close-btn:hover {
+      background: rgba(220, 38, 38, 0.12);
+      color: var(--danger);
+    }
+    .fs-math-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ── Dropdown-Driven Feature Selector & Details Card ── */
+    .fs-math-feature-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .fs-math-feature-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .fs-math-feature-select {
+      height: 34px;
+      padding: 4px 10px;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      outline: none;
+      font-family: inherit;
+      cursor: pointer;
+      width: 100%;
+      box-sizing: border-box;
+      transition: all 0.15s ease;
+    }
+    .fs-math-feature-select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+    .fs-math-feature-select optgroup {
+      font-weight: 700;
+      color: var(--text-dim);
+      background: var(--surface-2);
+    }
+    .fs-math-feature-select option {
+      font-weight: 500;
+      color: var(--text);
+      background: var(--surface);
+      padding: 4px 8px;
+    }
+
+    /* ── Dynamic Details Card (Only selected feature shown) ── */
+    .fs-math-details-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      animation: fsMathFadeIn 0.15s ease;
+    }
+    @keyframes fsMathFadeIn {
+      from { opacity: 0; transform: translateY(2px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fs-math-details-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .fs-math-details-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .fs-math-details-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+    }
+    .fs-math-scope-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 5px 9px;
+      border-radius: 5px;
+      border: 1px solid rgba(14, 165, 233, 0.2);
+    }
+    .fs-math-active-badge {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 5px 9px;
+      border-radius: 5px;
+    }
+
+    .fs-math-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .fs-math-row label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .fs-math-select,
+    .fs-math-input {
+      height: 30px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 11.5px;
+      outline: none;
+      font-family: inherit;
+      box-sizing: border-box;
+      width: 100%;
+    }
+    .fs-math-select:focus,
+    .fs-math-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+    .fs-math-input::placeholder {
+      color: var(--text-dim);
+      opacity: 0.8;
+      font-style: italic;
+    }
+    .fs-math-pills {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .fs-math-pill-btn {
+      flex: 1 1 calc(50% - 6px);
+      min-width: 90px;
+      text-align: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fs-math-pill-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+      background: var(--surface-2);
+    }
+    .fs-math-pill-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 1px 4px rgba(14, 165, 233, 0.25);
+    }
+    .fs-math-card-btn {
+      width: 100%;
+      height: 32px;
+      font-weight: 600;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border-radius: 6px;
+    }
+    .fs-math-btn-row {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+    }
+    .fs-math-btn-row .fs-math-card-btn {
+      flex: 1;
+    }
+
+    /* ── Active Calculated Curves List ── */
+    .fs-math-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ── 4. Active Calculated Curves List ── */
+    .fs-math-card-list {
+      gap: 6px;
+    }
+    .fs-math-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 0 0 3px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .fs-math-link-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-mute);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0;
+    }
+    .fs-math-link-btn:hover {
+      color: var(--danger);
+      text-decoration: underline;
+    }
+    .fs-math-calc-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-height: 40px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .fs-math-calc-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 11px;
+      transition: background 0.15s;
+    }
+    .fs-math-calc-item:hover {
+      background: var(--surface-3);
+    }
+    .fs-math-calc-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
+    }
+    .fs-math-calc-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-weight: 600;
+    }
+    .fs-math-calc-btns {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+    .fs-math-icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-mute);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+    }
+    .fs-math-icon-btn:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    .fs-math-icon-btn.delete:hover {
+      color: var(--danger);
+      background: rgba(220, 38, 38, 0.12);
+    }
+    .fs-math-empty-note {
+      font-size: 11px;
+      color: var(--text-mute);
+      font-style: italic;
+      text-align: center;
+      padding: 12px 6px;
+    }
+    .fs-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Expand button on each plot card */
+    .plot-card-expand {
+      background: transparent;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 2px 7px;
+      border-radius: 4px;
+      transition: all 0.15s;
+      line-height: 1.4;
+    }
+    .plot-card-expand:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Drag-to-Merge styles */
+    /* Draggable Plotly Legend */
+    .plot-item g.legend,
+    #fs-plot-div g.legend {
+      cursor: grab;
+      pointer-events: all;
+    }
+    .plot-item g.legend.is-dragging,
+    #fs-plot-div g.legend.is-dragging {
+      cursor: grabbing !important;
+    }
+    .plot-item g.legend rect.bg,
+    #fs-plot-div g.legend rect.bg {
+      fill: #ffffff !important;
+      fill-opacity: 1 !important;
+      stroke: #000000 !important;
+      stroke-width: 1px !important;
+      shape-rendering: crispEdges;
+    }
+    .plot-item g.legend text.legendtext,
+    #fs-plot-div g.legend text.legendtext {
+      fill: #000000 !important;
+      font-weight: 500;
+    }
+    #fs-plot-div g.legend .traces,
+    #fs-plot-div g.legend .legendtoggle,
+    #fs-plot-div g.legend text.legendtext {
+      cursor: pointer;
+      pointer-events: all;
+    }
+
+    .drag-grip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 20px;
+      height: 100%;
+      cursor: grab;
+      color: var(--text-mute);
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      margin-right: 2px;
+      user-select: none;
+    }
+    .drag-grip:hover {
+      color: var(--text-dim);
+      background: rgba(0,0,0,0.05);
+    }
+    .drag-grip:active { cursor: grabbing; }
+
+    .plot-card.is-reordering {
+      opacity: 0.45;
+      box-shadow: 0 0 0 2px #6366f1;
+    }
+    .plot-card.reorder-target {
+      outline: 2.5px solid #6366f1;
+      outline-offset: -2px;
+      box-shadow: 0 0 0 4px rgba(99,102,241,0.15), 0 4px 18px rgba(99,102,241,0.18);
+      overflow: visible;
+    }
+    .plot-card.reorder-target::before {
+      content: "↩ Insert here";
+      position: absolute;
+      top: -14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #6366f1;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 12px;
+      border-radius: 999px;
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(99,102,241,0.35);
+      z-index: 10;
+    }
+    .plot-card.is-dragging {
+      opacity: 0.45;
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    .plot-card.drop-target {
+      outline: 2.5px dashed var(--accent);
+      outline-offset: -2px;
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 4px var(--accent-soft), 0 4px 18px rgba(14,165,165,0.20);
+      animation: dropPulse 0.9s ease-in-out infinite alternate;
+      overflow: visible;
+    }
+    @keyframes dropPulse {
+      from { box-shadow: 0 0 0 2px var(--accent-soft), 0 2px 10px rgba(14,165,165,0.15); }
+      to   { box-shadow: 0 0 0 6px var(--accent-soft), 0 6px 24px rgba(14,165,165,0.30); }
+    }
+    .plot-card.drop-target::after {
+      content: "⊕ Merge here";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 7px 18px;
+      border-radius: 999px;
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 4px 14px rgba(14,165,165,0.40);
+      letter-spacing: 0.03em;
+      z-index: 10;
+    }
+    /* Merged plot card distinct styling */
+    .plot-card-merged {
+      border: 1.5px solid var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft), 0 2px 8px rgba(14,165,165,0.12);
+    }
+    .plot-card-merged .plot-card-header {
+      background: linear-gradient(90deg, var(--accent-soft) 0%, var(--surface-2) 100%);
+      border-bottom-color: var(--accent);
+    }
+    .merged-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent) !important;
+    }
+    .merged-title svg {
+      flex-shrink: 0;
+      stroke: var(--accent);
+    }
+    .merged-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Y-Axis Scale Settings Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    .modal-card {
+      position: fixed;
+      pointer-events: auto;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.08);
+      width: 520px;
+      max-width: 95vw;
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: modalFadeIn 0.15s ease-out;
+      user-select: auto;
+    }
+    .modal-card.is-dragging {
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--accent);
+      transition: none !important;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.97); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+      cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    .modal-header:active,
+    .modal-card.is-dragging .modal-header {
+      cursor: grabbing;
+    }
+    .modal-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+    .modal-close-btn {
+      background: transparent;
+      border: none;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--text-mute);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .modal-close-btn:hover {
+      background: rgba(220, 38, 38, 0.12);
+      color: var(--danger);
+    }
+    .modal-body {
+      padding: 14px 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      max-height: calc(92vh - 110px);
+    }
+    .modal-target-plot {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 5px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .form-group label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .form-group input,
+    .form-group select {
+      height: 32px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12.5px;
+      outline: none;
+      font-family: inherit;
+    }
+    .form-group input:focus,
+    .form-group select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+    .form-check {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      user-select: none;
+    }
+    .form-check label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .modal-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .modal-footer .spacer {
+      flex: 1;
+    }
+
+    /* Confirmation Dialog Modal */
+    .confirm-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 20000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .confirm-modal-backdrop[hidden] {
+      display: none !important;
+    }
+    .confirm-modal-card {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.08);
+      width: 420px;
+      max-width: 92vw;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      animation: modalFadeIn 0.15s ease-out;
+    }
+    .confirm-modal-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .confirm-modal-icon {
+      color: #f59e0b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .confirm-modal-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .confirm-modal-body {
+      padding: 16px;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--text-dim);
+    }
+    .confirm-modal-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 10px 16px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .btn.danger {
+      background: #dc2626;
+      color: #fff;
+      border: 1px solid #b91c1c;
+    }
+    .btn.danger:hover {
+      background: #b91c1c;
+    }
+
+    /* Axis tab bar inside the modal */
+    .axis-tab-bar {
+      display: flex;
+      gap: 4px;
+      padding: 2px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .axis-tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 6px 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: inherit;
+    }
+    .axis-tab:hover {
+      background: var(--surface);
+      color: var(--text);
+    }
+    .axis-tab.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 1px 4px rgba(99,102,241,0.25);
+    }
+    .axis-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .axis-panel[hidden] {
+      display: none !important;
+    }
+
+    /* HXML Export Dropdown Menu */
+    .hxml-dropdown-menu {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.10);
+      z-index: 99999;
+      min-width: 260px;
+      max-width: 420px;
+      max-height: 360px;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 12px;
+      animation: modalFadeIn 0.12s ease-out;
+    }
+    .hxml-dropdown-header {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-mute);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 5px 8px 3px;
+    }
+    .hxml-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      color: var(--text);
+      background: transparent;
+      border: none;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      transition: background 0.12s, color 0.12s;
+      width: 100%;
+      box-sizing: border-box;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hxml-dropdown-item:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .hxml-dropdown-item .item-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .hxml-dropdown-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+      border: none;
+    }
+
+    /* MATLAB-style Plot Right-Click Context Menu */
+    .plot-context-menu {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border-strong, #cbd5e1);
+      border-radius: 9px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
+      z-index: 10002;
+      min-width: 290px;
+      max-width: 360px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      font-size: 12px;
+      color: var(--text);
+      animation: modalFadeIn 0.12s ease-out;
+    }
+    .pcm-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .pcm-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pcm-close {
+      background: transparent;
+      border: none;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      color: var(--text-mute);
+      padding: 0 2px;
+    }
+    .pcm-close:hover { color: var(--text); }
+    .pcm-section-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-mute);
+      margin-top: 2px;
+    }
+    .pcm-trace-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 200px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .pcm-trace-row {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 6px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .pcm-trace-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .pcm-trace-label {
+      font-weight: 600;
+      font-size: 11.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+    .pcm-color-btn-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pcm-color-input {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid var(--border-strong, #cbd5e1);
+      border-radius: 4px;
+      cursor: pointer;
+      background: transparent;
+    }
+    .pcm-quick-swatches {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .pcm-swatch {
+      width: 15px;
+      height: 15px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.2);
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .pcm-swatch:hover {
+      transform: scale(1.25);
+      box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 3px var(--accent);
+      z-index: 1;
+    }
+    .pcm-btn-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .pcm-pill-btn {
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 4px;
+      cursor: pointer;
+      color: var(--text);
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .pcm-pill-btn:hover, .pcm-pill-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .pcm-action-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text);
+      text-align: left;
+      width: 100%;
+      box-sizing: border-box;
+      transition: background 0.12s, color 0.12s;
+    }
+    .pcm-action-btn:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+  <script src="/shared/plotly.min.js"></script>
+</head>
+<body>
+  <div class="module-root">
+    <div class="toolbar">
+      <button class="btn primary" id="open-btn">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Open HXML file(s)
+      </button>
+      <button class="btn ghost" id="clear-btn" disabled>Clear</button>
+      <span class="spacer"></span>
+      <span class="status" id="status">No files loaded</span>
+      <input type="file" id="file-input" accept=".hxml" multiple hidden />
+    </div>
+
+    <div class="split">
+      <div class="pane left" id="left-pane">
+        <div class="dropzone" id="dropzone">
+          Drop <strong>.hxml</strong> files here<br />or use <em>Open HXML file(s)</em>
+        </div>
+
+        <div class="left-pane-content" id="left-pane-content" hidden>
+          <!-- Top Section: DUT Name List (40% height) -->
+          <div class="dut-section" id="dut-section">
+            <div class="pane-title-bar">
+              <span class="pane-title">DUT List</span>
+              <span class="dut-count-badge" id="dut-count-badge"></span>
+            </div>
+            <div class="dut-list" id="dut-list"></div>
+          </div>
+
+          <!-- Draggable height splitter between DUTs and Data Explorer -->
+          <div class="left-pane-splitter" id="left-pane-splitter" title="Drag to adjust height">
+            <div class="splitter-handle"></div>
+          </div>
+
+          <!-- Bottom Section: Data Explorer (60% height) -->
+          <div class="explorer-section" id="explorer-section">
+            <div class="pane-title-bar" id="explorer-title">
+              <span class="pane-title" title="Click to view single plot · Hold Ctrl to select multiple">Data Explorer</span>
+              <div class="explorer-actions">
+                <button class="btn-xs" id="select-all-btn" title="Select all curve blocks">All</button>
+                <button class="btn-xs" id="clear-sel-btn" title="Clear selection">Clear</button>
+              </div>
+            </div>
+            <div class="tree" id="tree"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Draggable width splitter between the left pane and the plot pane -->
+      <div class="pane-resizer" id="pane-resizer" title="Drag to resize panels">
+        <div class="pane-resizer-handle"></div>
+      </div>
+
+      <div class="pane right" id="right-pane">
+        <div class="curve-search-sticky">
+          <div class="curve-search-controls">
+            <span class="curve-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></span>
+            <input id="curve-search-input" class="curve-search-input" type="search" name="hxml-curve-search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search curves or DUT" aria-label="Search plotted curves" />
+            <button class="curve-search-next" id="curve-search-next-btn" type="button" title="Next matching plot or values" aria-label="Next matching plot or values">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13"/><path d="m13 6 6 6-6 6"/></svg>
+            </button>
+          </div>
+          <span class="curve-search-status" id="curve-search-status" aria-live="polite"></span>
+        </div>
+        <div class="empty" id="empty">Select one or more curve data blocks on the left to plot them.</div>
+        <div class="plot-wrap" id="plot-wrap" hidden>
+          <div class="plot-toolbar" id="plot-toolbar">
+            <div class="plot-toolbar-title">
+              <span class="plot-blocks-summary" id="plot-blocks-summary"></span>
+              <span class="plot-info-badge" id="plot-info-badge"></span>
+            </div>
+            <div class="plot-toolbar-right">
+              <div class="layout-selector-wrap">
+                <label for="plots-per-row-select">Plots in a row:</label>
+                <select id="plots-per-row-select" class="select-xs" title="Choose number of plots displayed in each row">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              <button class="btn ghost btn-sm" id="clear-plots-btn" title="Close all open plots">Close all plots</button>
+            </div>
+          </div>
+          <div class="plots-grid cols-1" id="plots-grid"></div>
+        </div>
+        <section class="curve-search-results" id="curve-search-results" hidden aria-label="Curve sample values"></section>
+        <div class="scalar-section" id="scalar-card" hidden>
+          <div class="scalar-header">
+            <span class="scalar-title">Scalar Values</span>
+            <span class="scalar-sub" id="scalar-sub"></span>
+          </div>
+          <div id="scalar-tables-wrap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Axis Scale Settings Modal (Y + X tabs) -->
+  <div class="modal-backdrop" id="yaxis-modal-backdrop" hidden>
+    <div class="modal-card" id="yaxis-modal" style="min-width:480px;max-width:560px;">
+      <div class="modal-header">
+        <span class="modal-title">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Plot Properties & Scales
+        </span>
+        <button class="modal-close-btn" id="yaxis-modal-close" title="Close dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-target-plot" id="yaxis-target-plot" style="margin-bottom: 10px;"></div>
+        <!-- Plot Title Field -->
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label for="plot-title-input" style="font-weight: 700; margin-bottom: 5px; display: block; font-size: 12.5px; color: var(--text);">Plot Title</label>
+          <input type="text" id="plot-title-input" placeholder="Enter plot title" style="width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; background: var(--surface); color: var(--text);" />
+        </div>
+        <!-- Axis Tab Bar -->
+        <div class="axis-tab-bar">
+          <button class="axis-tab active" id="axis-tab-y" data-axis="y">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 20V4M5 11l7-7 7 7"/></svg>
+            Y-Axis
+          </button>
+          <button class="axis-tab" id="axis-tab-x" data-axis="x">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 12h16M13 5l7 7-7 7"/></svg>
+            X-Axis
+          </button>
+          <button class="axis-tab" id="axis-tab-lines" data-axis="lines">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 17l6-6 4 4 8-8"/></svg>
+            Line Colors & Styles
+          </button>
+          <button class="axis-tab" id="axis-tab-curves" data-axis="curves">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            Curve Names
+          </button>
+        </div>
+        <!-- Y-Axis Panel -->
+        <div class="axis-panel" id="axis-panel-y">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="yaxis-min-input">Min Value (Y-min)</label>
+              <input type="number" id="yaxis-min-input" step="any" placeholder="Auto" />
+            </div>
+            <div class="form-group">
+              <label for="yaxis-max-input">Max Value (Y-max)</label>
+              <input type="number" id="yaxis-max-input" step="any" placeholder="Auto" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="yaxis-step-input">Tick Interval (dtick)</label>
+              <input type="number" id="yaxis-step-input" step="any" placeholder="Auto (e.g. 10, 5, 2)" />
+            </div>
+            <div class="form-group">
+              <label for="yaxis-scale-type">Scale Type</label>
+              <select id="yaxis-scale-type">
+                <option value="linear">Linear</option>
+                <option value="log">Logarithmic</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <!-- X-Axis Panel -->
+        <div class="axis-panel" id="axis-panel-x" hidden>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="xaxis-min-input">Min Value (X-min)</label>
+              <input type="number" id="xaxis-min-input" step="any" placeholder="Auto" />
+            </div>
+            <div class="form-group">
+              <label for="xaxis-max-input">Max Value (X-max)</label>
+              <input type="number" id="xaxis-max-input" step="any" placeholder="Auto" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="xaxis-step-input">Tick Interval (dtick)</label>
+              <input type="number" id="xaxis-step-input" step="any" placeholder="Auto (e.g. 1000, 500)" />
+            </div>
+            <div class="form-group">
+              <label for="xaxis-scale-type">Scale Type</label>
+              <select id="xaxis-scale-type">
+                <option value="linear">Linear</option>
+                <option value="log">Logarithmic</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <!-- Lines Panel -->
+        <div class="axis-panel" id="axis-panel-lines" hidden>
+          <div id="modal-lines-list" style="display:flex; flex-direction:column; gap:8px; max-height:240px; overflow-y:auto; padding:4px 0;"></div>
+        </div>
+        <!-- Curve Names Panel -->
+        <div class="axis-panel" id="axis-panel-curves" hidden>
+          <div style="font-size: 11.5px; color: var(--text-mute); margin-bottom: 2px;">
+            Customize the name for each curve / DUT in this plot:
+          </div>
+          <div id="modal-curves-list" style="display:flex; flex-direction:column; gap:8px; max-height:240px; overflow-y:auto; padding:4px 0;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn ghost btn-sm" id="yaxis-reset-btn" title="Reset active axis to auto range">Reset to Auto</button>
+        <span class="spacer"></span>
+        <button class="btn secondary btn-sm" id="yaxis-cancel-btn">Cancel</button>
+        <button class="btn primary btn-sm" id="yaxis-apply-btn">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmation Dialog Modal -->
+  <div class="confirm-modal-backdrop" id="confirm-modal-backdrop" hidden>
+    <div class="confirm-modal-card" id="confirm-modal-card" role="dialog" aria-modal="true">
+      <div class="confirm-modal-header">
+        <div class="confirm-modal-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div class="confirm-modal-title" id="confirm-modal-title">Confirm Reset</div>
+      </div>
+      <div class="confirm-modal-body" id="confirm-modal-message">
+        Are you sure you want to reset all customized curve names?
+      </div>
+      <div class="confirm-modal-footer">
+        <button class="btn secondary btn-sm" id="confirm-modal-no-btn">No, Cancel</button>
+        <button class="btn danger btn-sm" id="confirm-modal-yes-btn">Yes, Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Plot Overlay -->
+  <div id="fs-overlay" hidden>
+    <div id="fs-header">
+      <div id="fs-header-left">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+        <span id="fs-title">Plot</span>
+      </div>
+      <div id="fs-header-right">
+        <button id="fs-copy-btn" class="fs-btn" title="Copy plot image to clipboard">📋 Copy</button>
+        <button id="fs-save-btn" class="fs-btn" title="Save plot image as PNG (prompts for file name)">💾 Save</button>
+        <button id="fs-reset-size-btn" class="fs-btn" title="Reset plot width and height back to full screen" hidden>↺ Reset Size</button>
+        <button id="fs-hxml-btn" class="fs-btn" title="Export this plot as .hxml file">📄 HXML</button>
+        <button id="fs-toggle-all-btn" class="fs-btn" title="Hide or show all curves at once"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Hide All</button>
+        <button id="fs-refresh-btn" class="fs-btn" title="Reset plot view & zoom to default (refresh plot)">↺ Refresh</button>
+        <button id="fs-scale-btn" class="fs-btn" title="Configure plot properties & axis scales (or right-click)">⚙ Property</button>
+        <button id="fs-math-btn" class="fs-btn" title="Toggle Curve Math & Post-Processing Panel (M)">⚡ Curve Math</button>
+        <button id="fs-close-btn" class="fs-btn fs-btn-close" title="Exit fullscreen (Esc)">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Exit Fullscreen
+        </button>
+      </div>
+    </div>
+    <div id="fs-main">
+      <div id="fs-ruler" class="fs-ruler" hidden aria-hidden="true"></div>
+      <div id="fs-content">
+        <div id="fs-plot-wrap">
+          <div id="fs-plot-div"></div>
+          <!-- Handles directly on the plot's black borderline (appear on hover) -->
+          <div id="fs-border-handle-r" class="fs-border-handle fs-border-r" title="Drag black border to resize width">
+            <span class="fs-resize-icon">&lt;-&gt;</span>
+          </div>
+          <div id="fs-border-handle-b" class="fs-border-handle fs-border-b" title="Drag black border to resize height">
+            <span class="fs-resize-icon fs-resize-icon-vert">&lt;-&gt;</span>
+          </div>
+          <div id="fs-border-handle-c" class="fs-border-handle fs-border-c" title="Drag corner to resize diagonally">
+            <span class="fs-resize-icon fs-resize-icon-diag">&lt;-&gt;</span>
+          </div>
+          <div id="fs-resize-badge" class="fs-resize-badge" hidden>1000 × 500 px</div>
+        </div>
+        <section class="curve-search-results" id="fs-curve-table" aria-label="Fullscreen plot sample values"></section>
+      </div>
+
+      <!-- Right Panel: Curve Math & Post-Processing -->
+      <aside id="fs-math-panel" class="fs-math-panel" hidden aria-label="Curve Math and Processing Panel">
+        <div class="fs-math-header">
+          <div class="fs-math-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <span>Curve Post-Processing</span>
+          </div>
+          <button class="fs-math-close-btn" id="fs-math-close-btn" title="Close Panel (M)">&times;</button>
+        </div>
+
+        <div class="fs-math-body">
+          <!-- 1. TWO-LEVEL STEPPED FEATURE SELECTION -->
+          <div class="fs-math-feature-box">
+            <div class="fs-math-row">
+              <label for="fs-math-cat-select" class="fs-math-feature-label">1. Main Feature</label>
+              <select id="fs-math-cat-select" class="fs-math-feature-select">
+                <option value="single" selected>🎛️ Single Curve Processing</option>
+                <option value="two">⚖️ Compare Two Curves</option>
+                <option value="multi">📊 Multi-Curve Processing</option>
+                <option value="analysis">📐 Curve Analysis</option>
+              </select>
+            </div>
+            <div class="fs-math-row" style="margin-top: 5px;">
+              <label for="fs-math-sub-select" class="fs-math-feature-label">2. Sub Feature / Operation</label>
+              <select id="fs-math-sub-select" class="fs-math-feature-select"></select>
+            </div>
+          </div>
+
+          <!-- 2. DYNAMIC DETAILS CONTAINER (Only details of selected feature are rendered here) -->
+          <div id="fs-math-details-container" class="fs-math-details-card"></div>
+
+          <!-- 3. ACTIVE CALCULATED CURVES LIST -->
+          <div class="fs-math-card fs-math-card-list">
+            <div class="fs-math-section-header">
+              <span>Calculated Curves (<span id="fs-math-calc-count">0</span>)</span>
+              <button type="button" class="fs-math-link-btn" id="fs-math-clear-all-btn" title="Remove all calculated curves">Clear All</button>
+            </div>
+            <div id="fs-math-calc-list" class="fs-math-calc-list">
+              <div class="fs-math-empty-note">No calculated curves yet.</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script src="app.js?v=drag_sync_19"></script>
+</body>
+</html>

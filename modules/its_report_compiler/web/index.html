@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ITS Report Compiler</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <script src="/shared/plotly.min.js"></script>
+  <style>
+    :root { --accent: #e08a1e; --accent-soft: rgba(224,138,30,0.13); }
+    /* Measured parameter values use the module accent instead of the generic pass/fail colors. */
+    table.data td.measured.cell-pass { color: var(--accent); }
+    /* Opaque hover tint for the sticky Serial No. column: a translucent background here
+       lets scrolled-away column content bleed/ghost through during horizontal scroll. */
+    table.data tbody tr:hover .sticky-col { background: #fbf0e2; }
+
+    /* Sticky statistic footer rows inside the table */
+    table.data tfoot td, table.data tfoot th {
+      position: sticky; bottom: 0; z-index: 3;
+      background: var(--surface-3); font-weight: 700; color: var(--text);
+      border-top: 2px solid var(--border-strong); font-variant-numeric: tabular-nums;
+    }
+    table.data tfoot .stat-name {
+      z-index: 4; left: 0; text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; color: var(--text-dim);
+      background: var(--surface-3); /* override the generic .sticky-col background so it matches the footer row */
+    }
+    table.data tfoot tr:not(:last-child) td, table.data tfoot tr:not(:last-child) th { border-bottom: 1px solid var(--border); }
+    table.data tfoot td.box-cell { padding: 3px 8px; }
+    table.data tfoot td.box-cell svg { display: block; }
+
+    /* Give the table toolbar a flexible gap so the Statistics button sits left */
+    .table-toolbar .spacer { flex: 1; }
+
+    /* Toggled-on state for ghost buttons (Statistics, Split view) */
+    .btn.ghost.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* Clickable parameter headers */
+    table.data th.param-th { cursor: pointer; }
+    table.data th.param-th:hover { background: #f9f0e1; }
+    table.data th.param-th.active { background: #f9f0e1; box-shadow: inset 0 0 0 2px var(--accent); }
+    /* Highlight the whole selected column, not just its header, so it's easy to track down the table. */
+    table.data td.active { background: #fdf6ea; box-shadow: inset 1px 0 0 var(--accent), inset -1px 0 0 var(--accent); }
+    table.data tfoot td.active { background: #f9f0e1; }
+
+    /* Docked statistics panel (shares the interface with the table) */
+    .stats-panel {
+      display: flex; flex-direction: column; height: 340px; min-height: 340px;
+      border-top: 2px solid var(--border-strong); background: var(--surface);
+    }
+    .stats-panel-head {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+    }
+    .stats-panel-head h3 { font-size: 13.5px; font-weight: 700; color: var(--text); }
+    .stats-panel-head .stats-hint { font-size: 12px; color: var(--text-mute); }
+    .stats-panel-head .spacer { flex: 1; }
+    .stats-close { border: none; background: none; cursor: pointer; color: var(--text-mute); padding: 4px; border-radius: 6px; display: grid; place-items: center; }
+    .stats-close:hover { color: var(--text); background: var(--surface-2); }
+    .stats-panel-body { flex: 1; display: grid; grid-template-columns: 1fr 220px; gap: 14px; padding: 12px 14px; overflow: auto; }
+    .stats-plot { min-height: 260px; }
+    /* Plotly's layout.font/textfont only control size/color, not weight - bold the rendered
+       SVG axis tick labels, axis titles, and bar value labels since the user wants heavier text. */
+    .stats-plot .xtick text,
+    .stats-plot .ytick text,
+    .stats-plot .g-xtitle text,
+    .stats-plot .g-ytitle text,
+    .stats-plot .bartext {
+      font-weight: 700 !important;
+    }
+    .stats-summary { display: flex; flex-direction: column; gap: 2px; align-self: start; }
+    .stats-summary .stat-row {
+      display: flex; justify-content: space-between; gap: 10px; padding: 6px 11px;
+      font-size: 12.5px; border: 1px solid var(--border); border-bottom: none;
+    }
+    .stats-summary .stat-row:first-child { border-top-left-radius: var(--radius-sm); border-top-right-radius: var(--radius-sm); }
+    .stats-summary .stat-row:last-child { border-bottom: 1px solid var(--border); border-bottom-left-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm); }
+    .stats-summary .stat-row:nth-child(even) { background: var(--surface-2); }
+    .stats-summary .stat-label { color: var(--text-mute); }
+    .stats-summary .stat-value { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+    .stats-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--text-mute); font-size: 13px; text-align: center; }
+
+    /* Split-compare layout: two independent panels side by side */
+    .workspace { flex: 1; display: flex; min-height: 0; }
+    .panel { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+    .panel-divider { width: 6px; flex-shrink: 0; background: var(--border); }
+    /* Resizable parameter list: width is a CSS var so the drag handle and grid track stay in sync */
+    .panel .split { grid-template-columns: var(--pane-w, 320px) 1fr; position: relative; }
+    .workspace.is-split .panel .split { --pane-w: 230px; }
+    .pane-resizer {
+      position: absolute; top: 0; bottom: 0; left: var(--pane-w, 320px); width: 5px; margin-left: -2.5px;
+      cursor: col-resize; z-index: 5; background: var(--border); transition: background 0.15s;
+    }
+    .pane-resizer:hover, .pane-resizer.active { background: var(--accent); }
+    .panel-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 6px; font-size: 11.5px; font-weight: 700;
+      color: #fff; flex-shrink: 0;
+    }
+    #panel-a .panel-badge { background: #4f8cff; }
+    #panel-b .panel-badge { background: #a855f7; }
+  </style>
+</head>
+<body>
+  <div class="module-root">
+    <div class="workspace" id="workspace">
+      <div class="panel" id="panel-a"></div>
+      <div class="panel-divider" id="panel-divider" hidden></div>
+      <div class="panel" id="panel-b" hidden></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

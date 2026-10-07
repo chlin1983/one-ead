@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Dashboard</title>
+    <script src="./tailwindcss.js"></script>
+    <script>
+      if (!window.tailwind) {
+        document.write('<script src="https://cdn.tailwindcss.com"><\/script>');
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'selector',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            },
+            colors: {
+              slate: {
+                850: '#1e293b',
+                900: '#0f172a',
+              },
+              purple: {
+                50: '#faf5ff',
+                100: '#f3e8ff',
+                200: '#e9d5ff',
+                300: '#d8b4fe',
+                400: '#c084fc',
+                500: '#a855f7',
+                600: '#9333ea',
+                700: '#7e22ce',
+                800: '#6b21a8',
+                900: '#581c87',
+              },
+              indigo: {
+                50: '#faf5ff',
+                100: '#f3e8ff',
+                200: '#e9d5ff',
+                300: '#d8b4fe',
+                400: '#c084fc',
+                500: '#a855f7',
+                600: '#9333ea',
+                700: '#7e22ce',
+                800: '#6b21a8',
+                900: '#581c87',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #e2e8f0;
+      }
+      .dark body {
+        background-color: #0f172a;
+      }
+      /* Custom scrollbar for webkit */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #475569;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #64748b;
+      }
+      .dashboard-sidebar-resizer {
+        position: relative;
+        z-index: 45;
+        flex: 0 0 8px;
+        width: 8px;
+        margin: 0 -4px;
+        cursor: col-resize;
+        touch-action: none;
+        outline: none;
+      }
+      .dashboard-sidebar-resizer::after {
+        content: "";
+        position: absolute;
+        inset: 0 1.5px;
+        background: transparent;
+        transition: background 0.15s;
+      }
+      .dashboard-sidebar-resizer:hover::after,
+      .dashboard-sidebar-resizer:focus-visible::after,
+      .dashboard-sidebar-resizer.is-dragging::after {
+        background: #a855f7;
+      }
+      @media (max-width: 767px) {
+        .dashboard-sidebar-resizer { display: none; }
+      }
+    </style>
+
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "d3": "https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm"
+  }
+}
+</script>
+  <script type="module" crossorigin src="./assets/index-DFIJxSGW.js"></script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (() => {
+        const minWidth = 208;
+        const maxWidth = 420;
+
+        function installSidebarResizer() {
+          const sidebar = document.querySelector("#root aside:not([data-resizable-sidebar])");
+          if (!sidebar || !sidebar.parentElement) return;
+
+          const parent = sidebar.parentElement;
+          const resizer = document.createElement("div");
+          resizer.className = "dashboard-sidebar-resizer";
+          resizer.setAttribute("role", "separator");
+          resizer.setAttribute("aria-orientation", "vertical");
+          resizer.setAttribute("aria-label", "Resize dashboard sidebar");
+          resizer.tabIndex = 0;
+          sidebar.dataset.resizableSidebar = "true";
+          parent.insertBefore(resizer, sidebar.nextSibling);
+
+          const setWidth = (width) => {
+            const boundedWidth = Math.max(minWidth, Math.min(maxWidth, width));
+            sidebar.style.width = `${boundedWidth}px`;
+            sidebar.style.flex = `0 0 ${boundedWidth}px`;
+            resizer.setAttribute("aria-valuenow", String(boundedWidth));
+          };
+          setWidth(320);
+
+          resizer.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            const startX = event.clientX;
+            const startWidth = sidebar.getBoundingClientRect().width;
+            resizer.classList.add("is-dragging");
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            resizer.setPointerCapture(event.pointerId);
+
+            const onMove = (moveEvent) => setWidth(startWidth + moveEvent.clientX - startX);
+            const onEnd = () => {
+              resizer.classList.remove("is-dragging");
+              document.body.style.cursor = "";
+              document.body.style.userSelect = "";
+              resizer.removeEventListener("pointermove", onMove);
+              resizer.removeEventListener("pointerup", onEnd);
+              resizer.removeEventListener("pointercancel", onEnd);
+            };
+
+            resizer.addEventListener("pointermove", onMove);
+            resizer.addEventListener("pointerup", onEnd);
+            resizer.addEventListener("pointercancel", onEnd);
+          });
+
+          resizer.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 16 : -16;
+            setWidth(sidebar.getBoundingClientRect().width + direction);
+          });
+        }
+
+        const observer = new MutationObserver(installSidebarResizer);
+        observer.observe(document.getElementById("root"), { childList: true, subtree: true });
+        installSidebarResizer();
+      })();
+    </script>
+</body>
+</html>

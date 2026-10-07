@@ -1,0 +1,92 @@
+{
+  "category_id": "receiver",
+  "category_name": "Balanced Armature Receivers",
+  "icon": "volume-2",
+  "description": "Miniature electroacoustic transducers for hearing instruments and in-ear monitors.",
+  "groups": [
+    {
+      "id": "acoustic",
+      "name": "Electroacoustic Specifications",
+      "parameters": [
+        {
+          "key": "sensitivity_spl",
+          "label": "Sensitivity @ 1 kHz",
+          "unit": "dB SPL",
+          "direction": "highest",
+          "default_conditions": "@ 1 kHz, 100 mV / 1 mW, IEC711 coupler",
+          "aliases": ["Sensitivity @ 1 kHz", "Sensitivity", "SPL @ 1kHz", "Output Sound Pressure Level"]
+        },
+        {
+          "key": "mpo_peak_spl",
+          "label": "Peak Output (MPO)",
+          "unit": "dB SPL",
+          "direction": "highest",
+          "default_conditions": "Maximum peak output",
+          "aliases": ["Peak Output", "MPO", "Maximum Power Output", "Peak SPL"]
+        },
+        {
+          "key": "nominal_impedance",
+          "label": "Nominal Impedance",
+          "unit": "Ω",
+          "direction": "nominal",
+          "default_conditions": "@ 1 kHz or 500 Hz",
+          "aliases": ["Nominal Impedance", "Impedance @ 1kHz", "Nominal AC Impedance"]
+        },
+        {
+          "key": "dcr",
+          "label": "DC Resistance (DCR)",
+          "unit": "Ω",
+          "direction": "nominal",
+          "default_conditions": "DC measurement",
+          "aliases": ["DC Resistance", "DCR", "Coil Resistance"]
+        },
+        {
+          "key": "thd",
+          "label": "Total Harmonic Distortion (THD)",
+          "unit": "%",
+          "direction": "lowest",
+          "default_conditions": "@ 500 Hz, 100 dB SPL",
+          "aliases": ["THD", "Distortion", "Total Harmonic Distortion"]
+        },
+        {
+          "key": "max_power",
+          "label": "Max Power Handling",
+          "unit": "mW",
+          "direction": "highest",
+          "default_conditions": "Continuous rated input",
+          "aliases": ["Max Power", "Maximum Power Rating", "Power Rating"]
+        }
+      ]
+    },
+    {
+      "id": "mechanical",
+      "name": "Physical & Mechanical",
+      "parameters": [
+        {
+          "key": "dimensions",
+          "label": "Dimensions (L x W x H)",
+          "unit": "mm",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Dimensions", "Package Dimensions", "Outer Dimensions"]
+        },
+        {
+          "key": "spout_location",
+          "label": "Spout Location & Type",
+          "unit": "",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Spout Location", "Port Type", "Nozzle Location"]
+        },
+        {
+          "key": "weight",
+          "label": "Weight",
+          "unit": "g",
+          "direction": "lowest",
+          "default_conditions": "--",
+          "aliases": ["Weight", "Mass"]
+        }
+      ]
+    }
+  ]
+}

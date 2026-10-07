@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Balanced Armature Driver & Receiver — Interactive Physics & Acoustic Simulator</title>
+  <meta name="description" content="Interactive electromechanical and acoustic simulator of Balanced Armature (BA) receivers used in IEMs and hearing aids, based on Tyll Hertsens' InnerFidelity technical study.">
+
+  <!-- Fonts are provided by the system stacks in styles.css so the app works
+       fully offline (no external CDN requests that could hang the load). -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-badge">
+          <span class="pulse-dot"></span>
+          <span>Acoustic Lab</span>
+        </div>
+        <div class="brand-title">
+          <h1>Balanced Armature Receiver Simulator</h1>
+          <span class="brand-subtitle">Electromechanical & Acoustic Physics Engine • Based on <em>BA.pdf (Tyll Hertsens / Knowles & Sonion)</em></span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Audio Synth Controls -->
+        <div class="audio-control-group">
+          <button id="audio-toggle-btn" class="btn btn-audio" title="Enable Web Audio synthesis to hear the simulated frequency">
+            <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+            <span id="audio-btn-label">Sound Off</span>
+          </button>
+          <div class="volume-slider-wrap" title="Master Audio Output Volume">
+            <span class="vol-icon">🔈</span>
+            <input type="range" id="audio-volume" min="0" max="0.5" step="0.01" value="0.15">
+          </div>
+        </div>
+
+        <button id="tour-btn" class="btn btn-secondary">
+          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="10 8 16 12 10 16 10 8"></polygon>
+          </svg>
+          <span>Guided Tour</span>
+        </button>
+
+        <button id="preset-selector-btn" class="btn btn-primary">
+          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="4" y1="21" x2="4" y2="14"></line>
+            <line x1="4" y1="10" x2="4" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12" y2="3"></line>
+            <line x1="20" y1="21" x2="20" y2="16"></line>
+            <line x1="20" y1="12" x2="20" y2="3"></line>
+            <line x1="1" y1="14" x2="7" y2="14"></line>
+            <line x1="9" y1="8" x2="15" y2="8"></line>
+            <line x1="17" y1="16" x2="23" y2="16"></line>
+          </svg>
+          <span>Presets</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Preset Dropdown Menu -->
+    <div id="presets-menu" class="dropdown-menu hidden">
+      <div class="dropdown-header">Configuration Presets from BA.pdf</div>
+      <button class="dropdown-item" data-preset="standard">
+        <strong>Sonion 26A01C Standard Baseline</strong>
+        <span>Standard 0.16mm armature, sealed back volume, undamped</span>
+      </button>
+      <button class="dropdown-item" data-preset="wideband">
+        <strong>Sonion 2600 Wideband Armature</strong>
+        <span>0.19mm thicker & narrower (stiffer, low mass) for extended treble</span>
+      </button>
+      <button class="dropdown-item" data-preset="highmass">
+        <strong>High-Mass Armature (Max Bass)</strong>
+        <span>Increased magnetic flux capacity for elevated low-end output</span>
+      </button>
+      <button class="dropdown-item" data-preset="ferrofluid">
+        <strong>Knowles Ferrofluid Damped (FED)</strong>
+        <span>Magnetic fluid in gap, smoothing mechanical peak by ~8 dB</span>
+      </button>
+      <button class="dropdown-item" data-preset="iem-acoustic">
+        <strong>IEM Tuning with 10mm Tube + 1000Ω Damper</strong>
+        <span>Realistic earphone acoustic coupling with Brown acoustic filter</span>
+      </button>
+      <button class="dropdown-item" data-preset="vintage-radio">
+        <strong>1920s Crystal Radio (See-Saw Pivot)</strong>
+        <span>Historic see-saw rocker armature comparison</span>
+      </button>
+    </div>
+
+    <!-- Main Grid Layout -->
+    <main class="main-layout">
+      
+      <!-- Left Column: Visual Transducer Simulation & Frequency Response -->
+      <section class="simulation-column">
+        
+        <!-- View Mode Navigation Tabs -->
+        <div class="view-tabs-bar">
+          <div class="tabs-left">
+            <button class="tab-btn active" data-view="cutaway">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+              <span>Modern BA Cross-Section (Diving Board)</span>
+            </button>
+            <button class="tab-btn" data-view="flux">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="2" x2="12" y2="22"></line>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+              </svg>
+              <span>Magnetic Flux & Balance Vectors</span>
+            </button>
+            <button class="tab-btn" data-view="vintage">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M4 17l16-10"></path>
+              </svg>
+              <span>1920s See-Saw Pivot (Crystal Radio)</span>
+            </button>
+          </div>
+
+          <div class="simulation-playback-controls">
+            <button id="play-pause-btn" class="btn-icon" title="Pause / Resume Motion">
+              <span id="play-icon">⏸</span>
+            </button>
+            <button id="step-forward-btn" class="btn-icon" title="Step Forward 1 Frame">
+              <span>⏭</span>
+            </button>
+            <div class="speed-control" title="Slow Motion Factor (Essential for high frequencies)">
+              <span class="speed-label">Speed:</span>
+              <select id="sim-speed-select">
+                <option value="1">1.0x Realtime</option>
+                <option value="0.25">0.25x Slow</option>
+                <option value="0.05" selected>0.05x Ultra-Slow</option>
+                <option value="0.01">0.01x Frozen Motion</option>
+              </select>
+            </div>
+            <button id="shock-test-btn" class="btn btn-danger btn-sm" title="Simulate 1.5m drop onto hard floor (Elastic limit test)">
+              ⚡ Drop Shock Test
+            </button>
+          </div>
+        </div>
+
+        <!-- Canvas Display Container -->
+        <div class="canvas-viewport" id="canvas-container">
+          <canvas id="transducer-canvas"></canvas>
+
+          <!-- Real-time HUD telemetry overlays -->
+          <div class="telemetry-overlay">
+            <div class="telemetry-card">
+              <div class="telemetry-label">Signal Polarity / Phase</div>
+              <div class="telemetry-value" id="hud-phase">+0.0° (AC Peak)</div>
+            </div>
+            <div class="telemetry-card">
+              <div class="telemetry-label">Armature Deflection</div>
+              <div class="telemetry-value" id="hud-deflection">0.00 µm</div>
+            </div>
+            <div class="telemetry-card">
+              <div class="telemetry-label">Net Magnetic Force</div>
+              <div class="telemetry-value" id="hud-force">0.00 mN</div>
+            </div>
+            <div class="telemetry-card">
+              <div class="telemetry-label">Front Cavity Pressure</div>
+              <div class="telemetry-value" id="hud-pressure">0.00 Pa</div>
+            </div>
+          </div>
+
+          <!-- Component Hover / Click Info Callout -->
+          <div id="inspector-tooltip" class="inspector-tooltip hidden">
+            <div class="tooltip-header">
+              <span class="tooltip-tag" id="tooltip-number">1</span>
+              <strong id="tooltip-title">Component Name</strong>
+            </div>
+            <p id="tooltip-desc">Description will appear here.</p>
+            <div class="tooltip-footer">
+              <span id="tooltip-citation">Ref: BA.pdf page 3</span>
+            </div>
+          </div>
+
+          <!-- Shock indicator banner -->
+          <div id="shock-banner" class="shock-banner hidden">
+            ⚠️ MECHANICAL SHOCK EVENT! Armature excursion exceeded safe limits. Damping & bumpers engaged.
+          </div>
+        </div>
+
+        <!-- Lower Section: Acoustic Frequency Response Curve (Bode Plot) -->
+        <div class="response-panel">
+          <div class="response-header">
+            <div class="response-title-group">
+              <h3>Acoustic Frequency Response (Output SPL dB vs Frequency)</h3>
+              <span class="response-subtitle">2cc Coupler Simulation with Dual Resonance Peaks (Motor & Tubing)</span>
+            </div>
+            <div class="response-legend">
+              <div class="legend-item">
+                <span class="legend-dot current-curve"></span>
+                <span>Active Tuned Profile</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot baseline-curve"></span>
+                <span>Standard Baseline (Sonion 26A01C)</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot operating-point"></span>
+                <span id="current-op-freq">Operating Frequency: 1,000 Hz</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="response-canvas-wrap">
+            <canvas id="response-canvas"></canvas>
+          </div>
+          
+          <div class="response-annotations">
+            <div class="annotation-box peak1">
+              <strong>1st Peak (~2.2 kHz - Armature Resonance)</strong>
+              <span>Governed by armature mass/stiffness, magnet bias, and back volume air stiffness.</span>
+            </div>
+            <div class="annotation-box peak2">
+              <strong>2nd Peak (~5.5 kHz - Acoustic / Tube Resonance)</strong>
+              <span>Governed by diaphragm mass, sound tube length, diameter, and in-tube damping filters.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- =========================================================
+             Advanced Analysis Panel — Kim & Allen (2013) Two-Port
+             ABCD Matrix · Input Impedance · Nonlinear RK4 THD Solver
+             ========================================================= -->
+        <div class="advanced-panel response-panel">
+          <div class="response-header">
+            <div class="response-title-group">
+              <h3>Advanced Analysis — Kim &amp; Allen (2013)</h3>
+              <span class="response-subtitle">Two-Port ABCD Network · Electrical Input Impedance |Z<sub>in</sub>(f)| · Nonlinear RK4 THD Solver</span>
+            </div>
+            <div class="adv-tab-bar">
+              <button class="adv-tab active" id="adv-tab-impedance" data-adv="impedance">⚡ Impedance |Z(f)|</button>
+              <button class="adv-tab" id="adv-tab-thd" data-adv="thd">📊 THD Harmonics</button>
+            </div>
+          </div>
+
+          <!-- Impedance View -->
+          <div id="adv-view-impedance" class="adv-view">
+            <div class="response-canvas-wrap">
+              <canvas id="impedance-canvas"></canvas>
+            </div>
+            <div class="response-annotations">
+              <div class="annotation-box peak1">
+                <strong>Impedance Peak at Mechanical Resonance</strong>
+                <span>Gyrator back-EMF (Lenz's Law) raises Z<sub>in</sub> at f<sub>res</sub>. Peak height = R<sub>e</sub> + Bl²/R<sub>m</sub>. This signature is absent in transformer-based models — it is the key insight from Kim &amp; Allen (2013).</span>
+              </div>
+              <div class="annotation-box peak2">
+                <strong>Semi-Inductor √f Roll-Up (High Frequency)</strong>
+                <span>Eddy currents and skin effect in the armature core cause Z<sub>in</sub> to rise as √f at high frequencies — modeled by the R<sub>e2</sub>/L<sub>e2</sub> semi-inductor element.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- THD View -->
+          <div id="adv-view-thd" class="adv-view hidden">
+            <div class="thd-toolbar">
+              <div class="thd-toolbar-inner">
+                <div class="thd-control">
+                  <label for="thd-drive-select">Drive Level</label>
+                  <select id="thd-drive-select" class="form-select thd-select">
+                    <option value="0.5">0.5 mA (Low)</option>
+                    <option value="1.5" selected>1.5 mA (Nominal)</option>
+                    <option value="3.0">3.0 mA (High)</option>
+                    <option value="5.0">5.0 mA (Clip)</option>
+                  </select>
+                </div>
+                <div class="thd-control">
+                  <label for="thd-freq-select">Test Frequency</label>
+                  <select id="thd-freq-select" class="form-select thd-select">
+                    <option value="100">100 Hz (Bass)</option>
+                    <option value="250">250 Hz</option>
+                    <option value="500">500 Hz</option>
+                    <option value="1000" selected>1 kHz (Mid)</option>
+                    <option value="2200">2.2 kHz (Peak 1)</option>
+                    <option value="5000">5 kHz (High)</option>
+                  </select>
+                </div>
+                <button id="run-thd-btn" class="btn btn-primary">⚙ Run THD Analysis</button>
+                <div id="thd-badge" class="thd-badge hidden">THD: —</div>
+              </div>
+            </div>
+            <div class="response-canvas-wrap">
+              <canvas id="thd-canvas"></canvas>
+            </div>
+            <div id="thd-status" class="thd-status param-hint">
+              Click "Run THD Analysis" to solve the nonlinear coupled ODEs (RK4 method) and extract harmonic distortion via DFT. Parameters: Bl(x), k(x) nonlinear coefficients from the Kim &amp; Allen panel.
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Right Column: Interactive Parameter Control Deck -->
+      <aside class="controls-column">
+        
+        <!-- Tab 1: Signal Generator -->
+        <div class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon-bubble">⚡</span>
+              <h3>Signal Generator & Drive Current</h3>
+            </div>
+            <span class="badge">Motor Input</span>
+          </div>
+          <div class="panel-body">
+            
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="freq-slider">Signal Frequency (f)</label>
+                <span class="value-badge" id="freq-display">1,000 Hz</span>
+              </div>
+              <input type="range" id="freq-slider" min="20" max="20000" step="1" value="1000">
+              
+              <!-- Quick Frequency Bands Buttons -->
+              <div class="frequency-presets-row">
+                <button class="freq-btn" data-freq="80">Sub 80Hz</button>
+                <button class="freq-btn" data-freq="250">Bass 250Hz</button>
+                <button class="freq-btn active" data-freq="1000">1 kHz Mid</button>
+                <button class="freq-btn" data-freq="2300">Peak 1 (~2.3k)</button>
+                <button class="freq-btn" data-freq="5500">Peak 2 (~5.5k)</button>
+                <button class="freq-btn" data-freq="10000">10 kHz Treble</button>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="amp-slider">Coil Drive Current (AC mA)</label>
+                <span class="value-badge" id="amp-display">1.50 mA</span>
+              </div>
+              <input type="range" id="amp-slider" min="0.1" max="5.0" step="0.1" value="1.5">
+              <div class="param-hint">Higher coil current induces stronger magnetic flux $\Delta B$ and larger excursion.</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Waveform Type</label>
+              </div>
+              <div class="pill-selector" id="waveform-selector">
+                <button class="pill-btn active" data-wave="sine">Sine Tone</button>
+                <button class="pill-btn" data-wave="square">Square</button>
+                <button class="pill-btn" data-wave="sweep">Auto Sweep</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Tab 2: Internal Transducer Variables (from BA.pdf Page 3-6) -->
+        <div class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon-bubble">🧲</span>
+              <h3>Internal Transducer Design</h3>
+            </div>
+            <span class="badge badge-accent">BA.pdf p.3-6</span>
+          </div>
+          <div class="panel-body">
+            
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Armature Geometry & Mass</label>
+              </div>
+              <div class="segmented-control" id="armature-type-selector">
+                <button class="seg-btn active" data-armature="standard">
+                  <strong>Standard</strong>
+                  <span>0.16mm</span>
+                </button>
+                <button class="seg-btn" data-armature="wideband">
+                  <strong>Wideband</strong>
+                  <span>0.19mm Stiff/Narrow</span>
+                </button>
+                <button class="seg-btn" data-armature="highmass">
+                  <strong>High-Mass</strong>
+                  <span>Max Bass Flux</span>
+                </button>
+              </div>
+              <div class="param-hint" id="armature-explanation">
+                <strong>Standard 26A01C</strong>: Balanced compliance and flux capacity for general earphone use.
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ferrofluid-select">Knowles Ferrofluid Damping</label>
+                <span class="value-badge" id="ferrofluid-display">0 dB (None)</span>
+              </div>
+              <select id="ferrofluid-select" class="form-select">
+                <option value="0">None (Undamped - sharp resonant spikes)</option>
+                <option value="3">3 dB Damping (Light fluid layer)</option>
+                <option value="5">5 dB Damping (Standard Knowles injection)</option>
+                <option value="8">8 dB Damping (Heavy fluid layer)</option>
+                <option value="10">10 dB Damping (Maximum peak suppression)</option>
+              </select>
+              <div class="param-hint">
+                Ferrofluid held in place by magnet poles. Damps mechanical peaks and provides shock absorption without reducing base sensitivity!
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Rear Volume & Casing Venting</label>
+              </div>
+              <div class="checkbox-row">
+                <label class="custom-toggle">
+                  <input type="checkbox" id="housing-vent-toggle">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">Housing Laser Vent Active</span>
+                </label>
+              </div>
+              <div class="param-hint">
+                Small vents in housing effectively enlarge the internal acoustic back volume, lowering air-spring stiffness and raising bass displacement.
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Diaphragm Laser Compensation Holes</label>
+              </div>
+              <div class="checkbox-row">
+                <label class="custom-toggle">
+                  <input type="checkbox" id="diaphragm-holes-toggle">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">Laser Holes in Membrane</span>
+                </label>
+              </div>
+              <div class="param-hint">
+                Laser-cut micro holes in the surround relieve the 2nd peak and roll off excess bass pressure (Page 7).
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Tab 3: External IEM Acoustic Tuning (from BA.pdf Page 7-9) -->
+        <div class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon-bubble">🎵</span>
+              <h3>External IEM Acoustic Tuning</h3>
+            </div>
+            <span class="badge badge-warning">BA.pdf p.7-9</span>
+          </div>
+          <div class="panel-body">
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="tube-length-slider">Sound Tubing Length</label>
+                <span class="value-badge" id="tube-len-display">10 mm (Standard)</span>
+              </div>
+              <input type="range" id="tube-length-slider" min="0" max="25" step="1" value="10">
+              <div class="slider-ticks">
+                <span>0mm (Direct)</span>
+                <span>10mm (Common)</span>
+                <span>15mm</span>
+                <span>20mm</span>
+                <span>25mm</span>
+              </div>
+              <div class="param-hint">
+                Longer tubing acts as an acoustic transmission line, shifting the 2nd resonance peak downwards in frequency.
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Sound Tubing Diameter</label>
+              </div>
+              <div class="segmented-control" id="tube-diameter-selector">
+                <button class="seg-btn active" data-diameter="1.35">
+                  <strong>1.35 mm</strong>
+                  <span>Smooth / Damped</span>
+                </button>
+                <button class="seg-btn" data-diameter="1.91">
+                  <strong>1.91 mm</strong>
+                  <span>Wider / Peaky Treble</span>
+                </button>
+              </div>
+              <div class="param-hint">
+                Wider tube diameter narrows the response curve in low/mid treble, making the peak narrower and taller (Page 7).
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="filter-select">In-Tube Acoustic Damper Filter</label>
+                <span class="value-badge" id="filter-display">Undamped</span>
+              </div>
+              <select id="filter-select" class="form-select">
+                <option value="0">No Damper (Open Tube - High Spikes)</option>
+                <option value="320">320 Ω — Grey Damper</option>
+                <option value="680">680 Ω — Orange Damper</option>
+                <option value="1000">1000 Ω — Brown Damper (Common)</option>
+                <option value="1500">1500 Ω — Green Damper</option>
+                <option value="2200">2200 Ω — Red Damper (Heavy Smoothing)</option>
+              </select>
+              <div class="param-hint">
+                Acoustic resistance dampers calibrated in acoustic Ohms suppress harsh peaks between 1 kHz and 8 kHz.
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label>Damper Filter Location in Tube</label>
+              </div>
+              <div class="segmented-control" id="filter-pos-selector">
+                <button class="seg-btn active" data-pos="near">
+                  <strong>Near Driver</strong>
+                  <span>Stiff Air / Max Damping</span>
+                </button>
+                <button class="seg-btn" data-pos="far">
+                  <strong>Near Eartip</strong>
+                  <span>Elastic Air / Softer</span>
+                </button>
+              </div>
+              <div class="param-hint">
+                When located near the receiver nozzle, air is stiff so the driver forcefully pushes air through the filter. Further down the tube, air elasticity cushions the effect.
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Tab 4: Multi-Driver Cross-Over Architecture (from BA.pdf Page 9) -->
+        <div class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon-bubble">🎛️</span>
+              <h3>Multi-Driver IEM Architecture</h3>
+            </div>
+            <span class="badge">Sony XBA Series</span>
+          </div>
+          <div class="panel-body">
+            <div class="multidriver-selector">
+              <button class="driver-preset-btn active" data-drivers="1">
+                <strong>1x Single Full-Range</strong>
+                <span>Direct armature driver</span>
+              </button>
+              <button class="driver-preset-btn" data-drivers="2">
+                <strong>2x Woofer + Tweeter</strong>
+                <span>Bass BA + Highs BA</span>
+              </button>
+              <button class="driver-preset-btn" data-drivers="3">
+                <strong>3x Super-Woofer + Woofer + Tweeter</strong>
+                <span>Deep Sub-bass + Dedicated Tweeter</span>
+              </button>
+            </div>
+            <div class="param-hint" id="multidriver-desc">
+              Single driver carries entire frequency spectrum. Limited sub-bass and drops off above 10 kHz.
+            </div>
+          </div>
+        </div>
+
+        <!-- =========================================================
+             Kim & Allen (2013) Physics Model Parameters
+             ========================================================= -->
+        <div class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon-bubble">⚛️</span>
+              <h3>Kim &amp; Allen Physics Model</h3>
+            </div>
+            <span class="badge" style="background:rgba(168,85,247,0.18);color:#a855f7;border-color:rgba(168,85,247,0.35);">KimAllen13</span>
+          </div>
+          <div class="panel-body">
+
+            <div class="ka-section-title">⚡ Electromagnetic Domain</div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-bl-slider">Force Factor (Bl)</label>
+                <span class="value-badge" id="ka-bl-display">0.36 T·m</span>
+              </div>
+              <input type="range" id="ka-bl-slider" min="0.1" max="0.8" step="0.01" value="0.36">
+              <div class="param-hint">Transduction coefficient [T·m]. Higher Bl → more efficient motor. Sets impedance peak height: Z<sub>peak</sub> ≈ R<sub>e</sub> + Bl²/R<sub>m</sub>.</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-re2-slider">Eddy Current Resistance (Re2)</label>
+                <span class="value-badge" id="ka-re2-display">10 Ω</span>
+              </div>
+              <input type="range" id="ka-re2-slider" min="1" max="50" step="1" value="10">
+              <div class="param-hint">Semi-inductor resistance [Ω]. Magnitude of Z<sub>eddy</sub> = R<sub>e2</sub>·√(ω/ω<sub>eddy</sub>). Causes Z<sub>in</sub> to roll up as √f at high frequencies (skin effect).</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-le2-slider">Eddy Current Inductance (Le2)</label>
+                <span class="value-badge" id="ka-le2-display">0.050 mH</span>
+              </div>
+              <input type="range" id="ka-le2-slider" min="0.005" max="0.3" step="0.005" value="0.050">
+              <div class="param-hint">Semi-inductor inductance [mH]. Eddy corner frequency f<sub>eddy</sub> = R<sub>e2</sub>/(2π·L<sub>e2</sub>). Lower L<sub>e2</sub> → skin effect onset starts at lower frequency.</div>
+            </div>
+
+            <div class="ka-section-title">⚙ Mechanical Domain</div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-mass-slider">Effective Moving Mass (m<sub>eff</sub>)</label>
+                <span class="value-badge" id="ka-mass-display">1.8 µg</span>
+              </div>
+              <input type="range" id="ka-mass-slider" min="0.3" max="8.0" step="0.1" value="1.8">
+              <div class="param-hint">Armature + drive pin + diaphragm [×10⁻⁶ kg]. Increase → lower f<sub>res</sub>. Decrease → higher f<sub>res</sub> and bandwidth.</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-km-slider">Linear Stiffness (K<sub>m</sub>)</label>
+                <span class="value-badge" id="ka-km-display">343 N/m</span>
+              </div>
+              <input type="range" id="ka-km-slider" min="50" max="1500" step="10" value="343">
+              <div class="param-hint">Suspension spring constant [N/m]. f<sub>res</sub> = (1/2π)√(K<sub>m</sub>/m<sub>eff</sub>). Lower stiffness → more bass displacement, lower resonance.</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-rm-slider">Mechanical Damping (R<sub>m</sub>)</label>
+                <span class="value-badge" id="ka-rm-display">6.5 mNs/m</span>
+              </div>
+              <input type="range" id="ka-rm-slider" min="1.0" max="40.0" step="0.5" value="6.5">
+              <div class="param-hint">Viscous + material damping [×10⁻³ N·s/m]. Q = √(K<sub>m</sub>·m<sub>eff</sub>)/R<sub>m</sub>. Lower R<sub>m</sub> → sharper resonance peak and higher THD at resonance.</div>
+            </div>
+
+            <div class="ka-section-title">📊 THD Nonlinear Coefficients</div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-k3-slider">Stiffness Hardening (k<sub>3</sub>)</label>
+                <span class="value-badge" id="ka-k3-display">8.0 ×10¹¹</span>
+              </div>
+              <input type="range" id="ka-k3-slider" min="0" max="30" step="0.5" value="8.0">
+              <div class="param-hint">3rd-order stiffness [×10¹¹ N/m³]: k(x) = K<sub>m</sub> + k<sub>3</sub>·x². Even-symmetric → generates odd harmonics (H3, H5, H7).</div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="ka-kbl-slider">Bl Displacement Curvature (k<sub>Bl</sub>)</label>
+                <span class="value-badge" id="ka-kbl-display">1.0 ×10¹⁰</span>
+              </div>
+              <input type="range" id="ka-kbl-slider" min="0" max="20" step="0.5" value="1.0">
+              <div class="param-hint">Force factor drop-off [×10¹⁰/m²]: Bl(x) = Bl₀/(1+k<sub>Bl</sub>·x²). Even-symmetric → generates odd harmonics (H3, H5). Primary source of distortion at resonance.</div>
+            </div>
+
+            <!-- Live Computed Parameters -->
+            <div class="ka-computed-box">
+              <div class="ka-computed-row">
+                <span>Resonance f<sub>res</sub>:</span>
+                <strong id="ka-fres-display">2199 Hz</strong>
+              </div>
+              <div class="ka-computed-row">
+                <span>Q-factor:</span>
+                <strong id="ka-q-display">3.73</strong>
+              </div>
+              <div class="ka-computed-row">
+                <span>Z<sub>in</sub> at DC:</span>
+                <strong id="ka-zdc-display">22 Ω</strong>
+              </div>
+              <div class="ka-computed-row">
+                <span>Z<sub>in</sub> at Resonance:</span>
+                <strong id="ka-zpeak-display">~42 Ω</strong>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </aside>
+
+    </main>
+
+    <!-- Guided Tour Modal Overlay -->
+    <div id="tour-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="tour-step-badge">Step <span id="tour-step-num">1</span> of 5</div>
+          <h2 id="tour-title">1. The Balanced Armature Principle</h2>
+          <button id="close-tour-btn" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="tour-content">
+          <!-- Populated by simulator.js -->
+        </div>
+        <div class="modal-footer">
+          <button id="prev-tour-btn" class="btn btn-secondary">Previous</button>
+          <div class="tour-indicators" id="tour-dots"></div>
+          <button id="next-tour-btn" class="btn btn-primary">Next</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="simulator.js"></script>
+</body>
+</html>

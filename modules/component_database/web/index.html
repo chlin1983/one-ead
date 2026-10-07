@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Component Database</title>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="style.css?v=5.20" />
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- Top Primary Control Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <!-- View Switcher Tabs -->
+        <nav class="segment-tabs" role="tablist">
+          <button class="segment-tab active" data-tab="catalog" id="tab-catalog" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span>Catalog</span>
+            <span class="count-pill" id="badge-total-parts">2</span>
+          </button>
+          <button class="segment-tab" data-tab="matrix" id="tab-matrix" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+            <span>Comparison Matrix</span>
+            <span class="count-pill accent" id="badge-pinned-parts">2</span>
+          </button>
+          <button class="segment-tab" data-tab="inspector" id="tab-inspector" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>Datasheet Inspector</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <!-- Pin/Unpin every catalog component to the Comparison Matrix in one click -->
+        <button class="action-btn" id="btn-pin-all" title="Pin or unpin all catalog components for the Comparison Matrix">
+          📌 Pin All
+        </button>
+
+        <!-- Quick Upload: pick a category first, then upload one or more PDFs into it -->
+        <div class="upload-group" title="1. Choose the component category  2. Upload the PDF(s)">
+          <span class="upload-group-label">Upload to:</span>
+          <select id="select-header-upload-category" class="modern-select">
+            <option value="microphone">Microphone</option>
+            <option value="receiver">Receiver</option>
+            <option value="telecoil">Telecoil</option>
+          </select>
+          <label class="action-btn upload-btn" id="btn-header-upload" title="Upload one or more datasheet PDFs — specs are auto-extracted and added to the catalog">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload PDF
+            <input type="file" id="input-header-pdf-upload" accept=".pdf" multiple hidden />
+          </label>
+        </div>
+
+        <!-- Search Input -->
+        <div class="modern-search">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="search-ico"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="catalog-search" placeholder="Search by part number, manufacturer, tag..." autocomplete="off" />
+          <button class="clear-search-btn" id="btn-clear-search" hidden>&times;</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Secondary Filter Bar (Only visible in Catalog) -->
+    <div class="filter-bar" id="catalog-filter-bar">
+      <div class="category-selectors">
+        <button class="filter-pill active" data-category="all">All Components <span class="pill-num" id="cat-count-all">2</span></button>
+        <button class="filter-pill" data-category="microphone">Microphones <span class="pill-num" id="cat-count-mic">2</span></button>
+        <button class="filter-pill" data-category="receiver">Receivers <span class="pill-num" id="cat-count-rec">0</span></button>
+        <button class="filter-pill" data-category="telecoil">Telecoils <span class="pill-num" id="cat-count-tel">0</span></button>
+      </div>
+
+      <div class="view-mode-toggle">
+        <span class="filter-status-text" id="status-results-count">2 components listed</span>
+        <div class="toggle-buttons">
+          <button class="mode-btn active" id="btn-mode-grid" title="Card Grid View">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </button>
+          <button class="mode-btn" id="btn-mode-table" title="Data Table View">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="content-container">
+
+      <!-- ========================================== -->
+      <!-- VIEW 1: CATALOG VIEW                       -->
+      <!-- ========================================== -->
+      <section class="tab-panel active" id="panel-catalog">
+        <!-- Cards Grid View -->
+        <div class="cards-grid" id="cards-container">
+          <!-- Dynamically populated -->
+        </div>
+
+        <!-- Table View (hidden by default) -->
+        <div class="table-view-container" id="catalog-table-container" hidden>
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th style="width: 40px;">Pin</th>
+                <th>Part Number</th>
+                <th>Manufacturer</th>
+                <th>Category</th>
+                <th>Primary Specs</th>
+                <th>Package</th>
+                <th>Datasheet</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="catalog-table-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VIEW 2: COMPARISON MATRIX VIEW             -->
+      <!-- ========================================== -->
+      <section class="tab-panel" id="panel-matrix">
+        <!-- Matrix Top Action Bar -->
+        <div class="matrix-header-bar">
+          <div class="matrix-title-area">
+            <h2 class="matrix-heading">Parametric Decision Matrix</h2>
+            <div class="pinned-tags-list" id="matrix-pinned-tags">
+              <!-- Pinned item chips -->
+            </div>
+          </div>
+
+          <div class="matrix-options">
+            <label class="modern-switch-label">
+              <input type="checkbox" id="switch-diff-only" />
+              <span class="switch-ui"></span>
+              <span class="switch-title">Hide Identical Specs</span>
+            </label>
+
+            <label class="modern-switch-label">
+              <input type="checkbox" id="switch-best-in-class" checked />
+              <span class="switch-ui"></span>
+              <span class="switch-title">Highlight Best Values</span>
+            </label>
+
+            <div class="matrix-btn-group">
+              <button class="action-btn" id="btn-export-csv" title="Export CSV">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export CSV
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Matrix Split View Container: Table on Left, PDF on Right -->
+        <div class="matrix-split-container" id="matrix-split-container">
+          <div class="matrix-viewport" id="matrix-scroll-pane">
+            <!-- Dynamic Comparison Table -->
+          </div>
+
+          <!-- Drag Resizer Splitter Handle -->
+          <div class="matrix-resizer" id="matrix-split-resizer" title="Drag to adjust width of the PDF viewer" hidden>
+            <div class="matrix-resizer-handle"></div>
+          </div>
+
+          <!-- Side-by-Side Datasheet PDF Viewer Panel -->
+          <div class="matrix-pdf-panel" id="matrix-pdf-panel" hidden>
+            <div class="matrix-pdf-bar">
+              <div class="matrix-pdf-meta">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span class="matrix-pdf-title" id="matrix-pdf-title">Datasheet</span>
+                <!-- Page Navigation -->
+                <div class="matrix-page-nav">
+                  <button class="page-nav-btn" id="btn-pdf-prev-page" title="Previous Page" onclick="changeMatrixPdfPage(-1)">&lsaquo;</button>
+                  <span class="matrix-pdf-page-badge" id="matrix-pdf-page-badge">Page 1</span>
+                  <button class="page-nav-btn" id="btn-pdf-next-page" title="Next Page" onclick="changeMatrixPdfPage(1)">&rsaquo;</button>
+                </div>
+              </div>
+              <div class="matrix-pdf-actions">
+                <!-- Zoom Controls -->
+                <div class="matrix-zoom-group">
+                  <button class="action-btn-icon" id="btn-matrix-zoom-out" title="Zoom Out" onclick="adjustMatrixZoom(-15)">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                  </button>
+                  <button class="zoom-level-btn" id="btn-matrix-zoom-fit" title="Fit to Width (No side margins)" onclick="resetMatrixZoom()">Fit Width</button>
+                  <button class="action-btn-icon" id="btn-matrix-zoom-in" title="Zoom In" onclick="adjustMatrixZoom(15)">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                  </button>
+                </div>
+                <!-- Mode Toggle -->
+                <button id="matrix-pdf-mode-btn" class="action-btn-text" title="Switch view between Fit-Width Document and PDF Plugin" onclick="toggleMatrixPdfMode()">
+                  <span id="matrix-mode-label">📑 PDF Plugin</span>
+                </button>
+                <button id="matrix-pdf-expand-btn" class="action-btn-icon" title="Toggle wide layout view (Expand / Restore)" onclick="toggleMatrixPdfExpand()">
+                  <svg id="matrix-pdf-expand-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                </button>
+                <a id="matrix-pdf-popout-link" href="#" target="_blank" class="action-btn-icon" title="Open PDF in new browser tab">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+                <button class="matrix-pdf-close-btn" id="btn-close-matrix-pdf" title="Close datasheet panel" onclick="closeMatrixPdf()">&times;</button>
+              </div>
+            </div>
+
+            <!-- Fit-Width Vector Document Viewer (Eliminates side white space!) -->
+            <div class="matrix-vector-scroll-wrapper" id="matrix-vector-wrapper">
+              <div class="matrix-page-stage" id="matrix-page-stage">
+                <div class="matrix-svg-host" id="matrix-svg-host">
+                  <div class="matrix-doc-loading">Loading datasheet page...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Fallback Browser PDF Frame -->
+            <div class="matrix-pdf-frame-wrapper" id="matrix-pdf-wrapper" style="display: none;">
+              <iframe id="matrix-pdf-frame" class="matrix-pdf-iframe" src="" title="Datasheet PDF Preview"></iframe>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VIEW 3: INGESTION INSPECTOR VIEW           -->
+      <!-- ========================================== -->
+      <section class="tab-panel" id="panel-inspector">
+        <div class="split-workspace" id="inspector-split-workspace">
+          <!-- Left Pane: Datasheet PDF -->
+          <div class="split-pane split-left">
+            <div class="pane-topbar">
+              <div class="topbar-title">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>Datasheet Source Document</span>
+              </div>
+              <div class="topbar-actions">
+                <button class="action-btn" id="btn-toggle-staging" title="Hide or show the Automated Parameter Staging panel">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                  <span id="btn-toggle-staging-label">Hide Table</span>
+                </button>
+                <button class="action-btn" id="btn-compare-pdf" title="Compare this datasheet against another one, side by side">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/></svg>
+                  Compare
+                </button>
+                <select id="select-inspector-pdf" class="modern-select">
+                  <option value="">Select a datasheet...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pdf-compare-workspace" id="pdf-compare-workspace">
+              <!-- Primary PDF Column -->
+              <div class="pdf-column" id="pdf-column-primary">
+                <!-- PDF Viewer Sub-Toolbar (Pop Out / Clear Highlight) -->
+                <div class="pdf-sub-toolbar" id="pdf-sub-toolbar">
+                  <div class="pdf-tool-group">
+                    <a href="#" class="btn-pdf-popout" id="btn-pdf-popout" target="_blank" title="Open PDF in new browser tab" hidden>
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      Pop Out
+                    </a>
+                    <button class="btn-pdf-clear-highlight" id="btn-pdf-clear-highlight" onclick="clearInspectorPdfHighlight()" title="Clear yellow highlights and view original document" hidden>
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      Clear Highlight
+                    </button>
+                  </div>
+                </div>
+
+                <div class="pdf-stage" id="pdf-stage-container">
+                  <iframe id="inspector-pdf-frame" src="" title="PDF Viewer"></iframe>
+                  <div class="pdf-empty-hero" id="pdf-empty-hero">
+                    <div class="hero-icon-wrap">
+                      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <h3>No Datasheet Loaded</h3>
+                    <p>Choose an existing component datasheet from the list or upload a PDF to stage its specs.</p>
+                    <button class="btn-primary-action" id="btn-load-sample-mm60">
+                      Load Knowles MM60 Datasheet
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Draggable Splitter between the two compared PDFs (default 50:50, freely adjustable) -->
+              <div class="pdf-compare-resizer" id="pdf-compare-resizer" hidden>
+                <div class="inspector-resizer-handle"></div>
+              </div>
+
+              <!-- Secondary ("Compare With") PDF Column, only shown in compare mode -->
+              <div class="pdf-column pdf-column-compare" id="pdf-column-compare" hidden>
+                <div class="pane-topbar pdf-compare-topbar">
+                  <div class="topbar-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span>Compare With</span>
+                  </div>
+                  <div class="topbar-actions">
+                    <select id="select-inspector-pdf-compare" class="modern-select">
+                      <option value="">Select a datasheet...</option>
+                    </select>
+                    <button class="btn-pdf-clear-highlight" id="btn-close-compare" title="Close comparison">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                <div class="pdf-stage" id="pdf-stage-container-compare">
+                  <iframe id="inspector-pdf-frame-compare" src="" title="Compare PDF Viewer"></iframe>
+                  <div class="pdf-empty-hero" id="pdf-empty-hero-compare">
+                    <div class="hero-icon-wrap">
+                      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <h3>Select a Datasheet</h3>
+                    <p>Pick a datasheet above to compare it side by side with the source document.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Draggable Splitter (default 50:50, freely adjustable) -->
+          <div class="inspector-resizer" id="inspector-resizer">
+            <div class="inspector-resizer-handle"></div>
+          </div>
+
+          <!-- Right Pane: Extracted Specs Staging -->
+          <div class="split-pane split-right">
+            <div class="pane-topbar">
+              <div class="topbar-title">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span>Automated Parameter Staging</span>
+                <span class="badge-status" id="badge-staged-count">0 Specs</span>
+                <span class="badge-status badge-success" id="badge-staged-matched">0 Matched</span>
+                <span class="badge-status badge-warning" id="badge-staged-review">0 Review</span>
+              </div>
+
+              <div class="topbar-actions">
+                <button class="action-btn" id="btn-re-run-extract" disabled>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  Re-parse
+                </button>
+              </div>
+            </div>
+
+            <!-- Staging Component Metadata Card -->
+            <div class="staging-meta-card">
+              <div class="meta-row commit-mode-row">
+                <div class="meta-item commit-mode-item">
+                  <label>Save As</label>
+                  <div class="commit-mode-toggle" id="commit-mode-toggle">
+                    <button type="button" class="btn-mode-toggle active" data-mode="create" id="btn-mode-create">+ Create New Component</button>
+                    <button type="button" class="btn-mode-toggle" data-mode="update" id="btn-mode-update">⟳ Update Existing Component</button>
+                  </div>
+                </div>
+                <div class="meta-item commit-target-item" id="commit-target-item" hidden>
+                  <label>Component To Update</label>
+                  <select id="select-update-target" class="modern-select">
+                    <option value="">Select existing component...</option>
+                  </select>
+                </div>
+                <div class="commit-action-item">
+                  <button class="btn-primary-action" id="btn-commit-database" disabled>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    Commit to Database
+                  </button>
+                  <span class="commit-success-note" id="commit-success-note" hidden>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    Committed!
+                  </span>
+                </div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-item">
+                  <label><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Part Number</label>
+                  <input type="text" id="input-staging-part" placeholder="e.g. MM60-63230-B66" />
+                </div>
+                <div class="meta-item">
+                  <label><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Manufacturer</label>
+                  <input type="text" id="input-staging-mfr" placeholder="e.g. Knowles" />
+                </div>
+                <div class="meta-item">
+                  <label><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Category</label>
+                  <select id="select-staging-category" class="modern-select">
+                    <option value="microphone">Microphone</option>
+                    <option value="receiver">Receiver</option>
+                    <option value="telecoil">Telecoil</option>
+                  </select>
+                </div>
+                <div class="meta-item">
+                  <label><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Package Type</label>
+                  <input type="text" id="input-staging-package" placeholder="e.g. LGA Bottom Port" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Staging Filter & Search Toolbar -->
+            <div class="staging-filter-toolbar">
+              <div class="staging-search-wrap">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="staging-search" placeholder="Filter extracted parameters (e.g. sensitivity, SNR, voltage)..." autocomplete="off" />
+                <button class="clear-staging-search-btn" id="btn-clear-staging-search" hidden>&times;</button>
+              </div>
+
+              <div class="staging-filter-pills" id="staging-filter-pills">
+                <button class="staging-pill active" data-filter="all">All <span class="pill-badge" id="filter-cnt-all">0</span></button>
+                <button class="staging-pill" data-filter="acoustic">🔊 Acoustic <span class="pill-badge" id="filter-cnt-acoustic">0</span></button>
+                <button class="staging-pill" data-filter="electrical">⚡ Electrical <span class="pill-badge" id="filter-cnt-electrical">0</span></button>
+                <button class="staging-pill" data-filter="mechanical">📐 Mechanical <span class="pill-badge" id="filter-cnt-mechanical">0</span></button>
+                <button class="staging-pill" data-filter="review">⚠️ Needs Review <span class="pill-badge" id="filter-cnt-review">0</span></button>
+              </div>
+            </div>
+
+            <!-- Staging Table Container (Structured Grouped Sections) -->
+            <div class="staging-table-viewport" id="staging-table-viewport">
+              <div id="staging-sections-container">
+                <div class="staging-empty-state">
+                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  <h4>No Parameters Staged</h4>
+                  <p>Select a datasheet on the left to extract tables and parameters automatically.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Full Specs Detail Modal -->
+    <div class="modal-overlay" id="specs-modal" hidden>
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <h3 class="modal-title" id="modal-title-part">MM60-63230-B66</h3>
+            <div class="modal-subtags">
+              <span class="tag-brand" id="modal-tag-mfr">Knowles</span>
+              <span class="tag-cat" id="modal-tag-cat">Microphone</span>
+            </div>
+          </div>
+          <button class="modal-close" id="btn-modal-close">&times;</button>
+        </div>
+        <div class="modal-content" id="modal-specs-content">
+          <!-- Dynamic specs table -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="notification-toast" id="app-toast" hidden></div>
+  </div>
+
+  <script src="app.js?v=6.20"></script>
+</body>
+</html>

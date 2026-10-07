@@ -1,0 +1,52 @@
+{
+  "category_id": "telecoil",
+  "category_name": "Telecoils & Induction Pickups",
+  "icon": "radio",
+  "description": "Inductive magnetic field sensors for hearing aids and assistive listening systems.",
+  "groups": [
+    {
+      "id": "electromagnetic",
+      "name": "Electromagnetic Specifications",
+      "parameters": [
+        {
+          "key": "sensitivity",
+          "label": "Sensitivity",
+          "unit": "mV/A/m",
+          "direction": "highest",
+          "default_conditions": "@ 1 kHz, 100 mA/m",
+          "aliases": ["Sensitivity", "Output Sensitivity", "Magnetic Sensitivity"]
+        },
+        {
+          "key": "dc_resistance",
+          "label": "DC Resistance (DCR)",
+          "unit": "Ω",
+          "direction": "nominal",
+          "default_conditions": "DC measurement",
+          "aliases": ["DC Resistance", "DCR", "Coil Resistance"]
+        },
+        {
+          "key": "inductance",
+          "label": "Inductance",
+          "unit": "mH",
+          "direction": "nominal",
+          "default_conditions": "@ 1 kHz",
+          "aliases": ["Inductance", "Coil Inductance"]
+        }
+      ]
+    },
+    {
+      "id": "mechanical",
+      "name": "Physical Dimensions",
+      "parameters": [
+        {
+          "key": "dimensions",
+          "label": "Dimensions (L x W x H)",
+          "unit": "mm",
+          "direction": "nominal",
+          "default_conditions": "--",
+          "aliases": ["Dimensions", "Outer Dimensions", "Size"]
+        }
+      ]
+    }
+  ]
+}
