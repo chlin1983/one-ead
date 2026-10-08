@@ -36,3 +36,12 @@ Thumbs.db
 # IDE & Editor
 .vscode/
 .idea/
+
+# Large ONNX models & dictation scratch & user recordings
+modules/say/web/models/
+modules/say/data/
+*.onnx
+*.onnx_data
+scratch/dictations/
+
+

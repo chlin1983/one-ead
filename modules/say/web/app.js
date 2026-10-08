@@ -1,6 +1,11 @@
 /**
  * Say — Voice Dictation & Audio Transcription App
  * High-accuracy local Whisper Large-v3-Turbo with WebGPU acceleration
+ *
+ * Supported Capabilities:
+ * - Phase 1: Real-time streaming dictation via in-browser Voice Activity Detection (VAD)
+ * - Phase 2: Domain-specific vocabulary prompt biasing for electroacoustic engineering
+ * - Phase 4: Air-gapped offline model status & local disk management
  */
 
 import {
@@ -8,13 +13,33 @@ import {
   formatTime,
   formatTimestampRange,
   AudioVisualizer,
+  VoiceActivityDetector,
 } from './audio-utils.js';
+
+// Domain Presets for Phase 2
+const VOCABULARY_PRESETS = {
+  electroacoustics: {
+    prompt: 'Electroacoustic engineering: THD, MEMS, SPL, SNR, F0, Qts, ANC, IEC 60318-4.',
+    terms: [
+      'THD', 'THD+N', 'MEMS', 'SPL', 'dBSPL', 'FR', 'SNR', 'Rub & Buzz',
+      'F0', 'Qms', 'Qes', 'Qts', 'Vas', 'Bl', 'Mms', 'Cms', 'Re', 'Le',
+      'Balanced Armature', 'IEC 60318-4', '711 coupler', 'Helmholtz resonator',
+      'PZT', 'ECM', 'PDM', 'I2S', 'TDM', 'ANC', 'PNC', 'HRTF'
+    ],
+  },
+  general: {
+    prompt: '',
+    terms: [],
+  },
+};
 
 // DOM Elements
 const el = {
   // Badges & Header
   gpuBadge: document.getElementById('gpu-badge'),
   gpuBadgeText: document.getElementById('gpu-badge-text'),
+  vadBadge: document.getElementById('vad-badge'),
+  vadText: document.getElementById('vad-text'),
   engineStatusText: document.getElementById('engine-status-text'),
   newNoteBtn: document.getElementById('new-note-btn'),
   historyBtn: document.getElementById('history-btn'),
@@ -25,6 +50,10 @@ const el = {
   tabUploadBtn: document.getElementById('tab-upload-btn'),
   micSection: document.getElementById('mic-section'),
   uploadSection: document.getElementById('upload-section'),
+
+  // Engine Mode: Stream vs Batch
+  modeStreamBtn: document.getElementById('mode-stream-btn'),
+  modeBatchBtn: document.getElementById('mode-batch-btn'),
 
   // Microphone Controls
   recordWrapper: document.getElementById('record-wrapper'),
@@ -51,6 +80,18 @@ const el = {
   // Configuration
   languageSelect: document.getElementById('language-select'),
   taskSelect: document.getElementById('task-select'),
+  modelQuickSelect: document.getElementById('model-quick-select'),
+
+  // Glossary & Custom Vocabulary
+  glossaryBtn: document.getElementById('glossary-btn'),
+  glossaryDrawer: document.getElementById('glossary-drawer'),
+  glossaryBackdrop: document.getElementById('glossary-backdrop'),
+  closeGlossaryBtn: document.getElementById('close-glossary-btn'),
+  customTermInput: document.getElementById('custom-term-input'),
+  addCustomTermBtn: document.getElementById('add-custom-term-btn'),
+  customTermsContainer: document.getElementById('custom-terms-container'),
+  customTermsCount: document.getElementById('custom-terms-count'),
+  builtinTermsGrid: document.getElementById('builtin-terms-grid'),
 
   // Status & Metrics
   progressStatusTitle: document.getElementById('progress-status-title'),
@@ -71,6 +112,10 @@ const el = {
   statChars: document.getElementById('stat-chars'),
   statReadTime: document.getElementById('stat-read-time'),
   saveStatus: document.getElementById('save-status'),
+  noteAudioBar: document.getElementById('note-audio-bar'),
+  noteAudioPlayer: document.getElementById('note-audio-player'),
+  noteAudioStatus: document.getElementById('note-audio-status'),
+  retranscribeNoteAudioBtn: document.getElementById('retranscribe-note-audio-btn'),
 
   // Drawers & Modals
   settingsBackdrop: document.getElementById('settings-backdrop'),
@@ -81,6 +126,11 @@ const el = {
   dtypeSelect: document.getElementById('dtype-select'),
   preloadModelBtn: document.getElementById('preload-model-btn'),
   clearCacheBtn: document.getElementById('clear-cache-btn'),
+
+  // Phase 4 Offline Models Elements
+  offlineLargeStatus: document.getElementById('offline-large-status'),
+  offlineTinyStatus: document.getElementById('offline-tiny-status'),
+  downloadOfflineBtn: document.getElementById('download-offline-btn'),
 
   historyBackdrop: document.getElementById('history-backdrop'),
   historyDrawer: document.getElementById('history-drawer'),
@@ -104,6 +154,7 @@ const state = {
   currentNoteId: null,
   currentChunks: [],
   timestampsEnabled: false,
+  engineMode: 'stream', // 'stream' (Real-time VAD) or 'batch' (Record & Stop)
   isRecording: false,
   isPaused: false,
   recordStartTime: 0,
@@ -114,16 +165,21 @@ const state = {
   recordedAudioChunks: [],
   audioContext: null,
   analyserNode: null,
+  sourceNode: null,
   visualizer: null,
+  vad: null,
+  activeStreamingParagraph: null,
+  streamChunkCounter: 0,
   uploadedFile: null,
   activeAudioUrl: null,
+  currentNoteAudioBlob: null,
 
   // Hardware & Model Configuration
   webgpuAvailable: false,
   gpuAdapterName: '',
   hasFp16: false,
-  selectedModel: 'onnx-community/whisper-large-v3-turbo',
-  selectedDevice: 'webgpu',
+  selectedModel: 'onnx-community/whisper-tiny',
+  selectedDevice: 'wasm',
   selectedDtype: 'auto',
   worker: null,
   isWorkerBusy: false,
@@ -175,6 +231,110 @@ function updateGpuBadge(active, text, title = '') {
 }
 
 /**
+ * Electroacoustic Terms & Custom User Vocabulary Storage
+ */
+const CUSTOM_TERMS_KEY = 'say_custom_terms_v1';
+
+function getCustomTerms() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_TERMS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveCustomTerms(terms) {
+  try {
+    localStorage.setItem(CUSTOM_TERMS_KEY, JSON.stringify(terms));
+  } catch (_) {}
+}
+
+function addCustomTerm(term) {
+  const clean = term.trim();
+  if (!clean) return;
+  const terms = getCustomTerms();
+  if (!terms.some((t) => t.toLowerCase() === clean.toLowerCase())) {
+    terms.push(clean);
+    saveCustomTerms(terms);
+    renderGlossaryUI();
+    showToast(`Added custom term: "${clean}"`, 'success');
+  } else {
+    showToast(`Term "${clean}" already in glossary.`, 'info');
+  }
+}
+
+function removeCustomTerm(termToRemove) {
+  let terms = getCustomTerms();
+  terms = terms.filter((t) => t.toLowerCase() !== termToRemove.toLowerCase());
+  saveCustomTerms(terms);
+  renderGlossaryUI();
+  showToast(`Removed "${termToRemove}"`, 'info');
+}
+
+function renderGlossaryUI() {
+  if (!el.customTermsContainer || !el.builtinTermsGrid) return;
+
+  const customTerms = getCustomTerms();
+  if (el.customTermsCount) {
+    el.customTermsCount.textContent = `${customTerms.length} term${customTerms.length === 1 ? '' : 's'}`;
+  }
+
+  // Render user custom pills
+  if (customTerms.length === 0) {
+    el.customTermsContainer.innerHTML = `<span style="font-size: 12px; color: var(--text-mute); font-style: italic;">No custom terms added yet. Add one above.</span>`;
+  } else {
+    el.customTermsContainer.innerHTML = customTerms
+      .map(
+        (t) => `
+        <span class="term-pill custom">
+          <span>${escapeHtml(t)}</span>
+          <button class="term-pill-remove" data-term="${escapeHtml(t)}" title="Remove term">&times;</button>
+        </span>
+      `
+      )
+      .join('');
+
+    el.customTermsContainer.querySelectorAll('.term-pill-remove').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeCustomTerm(btn.dataset.term);
+      });
+    });
+  }
+
+  // Render built-in terms
+  const builtin = VOCABULARY_PRESETS.electroacoustics.terms;
+  el.builtinTermsGrid.innerHTML = builtin
+    .map(
+      (t) => `
+      <span class="term-pill">
+        <span>${escapeHtml(t)}</span>
+      </span>
+    `
+    )
+    .join('');
+}
+
+/**
+ * Resolves vocabulary prompting & domain terms.
+ * Automatically recognizes all electroacoustic terms by default, merged with any custom user terms.
+ */
+function getVocabularyConfiguration() {
+  const basePrompt = VOCABULARY_PRESETS.electroacoustics.prompt;
+  const baseTerms = VOCABULARY_PRESETS.electroacoustics.terms;
+  const customTerms = getCustomTerms();
+
+  const allTerms = Array.from(new Set([...baseTerms, ...customTerms]));
+  const extraPrompt = customTerms.length > 0 ? ` Custom project terms: ${customTerms.join(', ')}.` : '';
+
+  return {
+    initial_prompt: basePrompt + extraPrompt,
+    customTerms: allTerms,
+  };
+}
+
+/**
  * Initializes the Web Worker running Transformers.js v3
  */
 function initWorker() {
@@ -185,7 +345,7 @@ function initWorker() {
   state.worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
   state.worker.addEventListener('message', (event) => {
-    const { type, status, message, data, output, stats, durationSec, modelId, device } = event.data;
+    const { type, status, message, data, output, stats, durationSec, modelId, device, chunkId } = event.data;
 
     if (type === 'progress') {
       handleDownloadProgress(data);
@@ -193,9 +353,21 @@ function initWorker() {
       handleStatusUpdate(status, message, durationSec, modelId, device);
     } else if (type === 'complete') {
       handleTranscriptionComplete(output, stats);
+    } else if (type === 'stream_chunk_complete') {
+      handleStreamChunkComplete(chunkId, output, stats);
     } else if (type === 'error') {
       handleWorkerError(event.data);
     }
+  });
+
+  state.worker.addEventListener('error', (err) => {
+    console.error('[Say Worker Thread Error]', err);
+    state.isWorkerBusy = false;
+    el.progressStatusTitle.textContent = `Worker Error: ${err.message || 'Worker thread execution error'}`;
+    el.progressBarFill.style.width = '0%';
+    el.progressPercentage.textContent = 'Error';
+    el.engineStatusText.textContent = 'Engine Error';
+    showToast(`Worker error: ${err.message || 'Check browser console'}`, 'error');
   });
 }
 
@@ -226,24 +398,26 @@ function handleStatusUpdate(status, message, durationSec, modelId, device) {
     state.isWorkerBusy = false;
     el.progressBarFill.style.width = '100%';
     el.progressPercentage.textContent = '100%';
-    el.progressStatusTitle.textContent = `Status: Ready (${device ? device.toUpperCase() : 'WebGPU'})`;
-    el.engineStatusText.textContent = modelId ? modelId.split('/').pop() : 'Whisper Turbo';
+    el.progressStatusTitle.textContent = `Status: Ready (${device ? device.toUpperCase() : 'AI Engine'})`;
+    const isTiny = (modelId || state.selectedModel).includes('whisper-tiny');
+    el.engineStatusText.textContent = isTiny ? 'Whisper Tiny (Instant)' : 'Whisper Turbo';
     if (durationSec) {
       showToast(`Model ready in ${durationSec}s`, 'success');
     }
   } else if (status === 'transcribing') {
     state.isWorkerBusy = true;
-    el.progressStatusTitle.textContent = 'Transcribing audio...';
-    el.progressBarFill.style.width = '100%';
-    el.progressPercentage.textContent = 'Processing';
+    el.progressStatusTitle.textContent = 'Transcribing speech...';
+    el.progressBarFill.style.width = '80%';
+    el.progressPercentage.textContent = 'Transcribing';
   }
 }
 
 function handleTranscriptionComplete(output, stats) {
   state.isWorkerBusy = false;
-  el.progressStatusTitle.textContent = 'Transcription Complete';
+  el.progressStatusTitle.textContent = 'Status: Ready';
   el.progressBarFill.style.width = '100%';
-  el.progressPercentage.textContent = 'Done';
+  el.progressPercentage.textContent = '100%';
+  el.recordStatusLabel.textContent = 'Transcription complete';
 
   if (stats) {
     el.metricInferTime.textContent = `${stats.inferenceTimeSec}s`;
@@ -257,15 +431,56 @@ function handleTranscriptionComplete(output, stats) {
 
   const rawText = (output.text || '').trim();
   const chunks = output.chunks || [];
-
   state.currentChunks.push(...chunks);
 
-  // Append new text to editor
   insertTranscriptionIntoEditor(rawText, chunks);
 
   updateWordCounts();
   saveCurrentNote();
   showToast('Transcription finished!', 'success');
+}
+
+/**
+ * Phase 1: Real-Time Stream Chunk Complete Callback
+ */
+function handleStreamChunkComplete(chunkId, output, stats) {
+  if (stats) {
+    el.metricInferTime.textContent = `${stats.inferenceTimeSec}s`;
+    el.metricSpeed.textContent = stats.speedMultiplier || '—';
+  }
+
+  const text = (output?.text || '').trim();
+  if (!text) return;
+
+  const chunks = output.chunks || [];
+  state.currentChunks.push(...chunks);
+
+  // Smoothly append streamed sentence to active paragraph
+  if (!state.activeStreamingParagraph || !document.body.contains(state.activeStreamingParagraph)) {
+    state.activeStreamingParagraph = document.createElement('p');
+    state.activeStreamingParagraph.className = 'transcript-paragraph highlight';
+    el.editorCanvas.appendChild(state.activeStreamingParagraph);
+  }
+
+  const sentenceSpan = document.createElement('span');
+  if (state.timestampsEnabled && chunks.length > 0) {
+    const start = chunks[0].timestamp?.[0] ?? 0;
+    const end = chunks[chunks.length - 1].timestamp?.[1] ?? 0;
+    sentenceSpan.innerHTML = `<span class="timestamp-chip" data-time="${start}">${formatTimestampRange(start, end)}</span> ${escapeHtml(text)} `;
+  } else {
+    sentenceSpan.textContent = text + ' ';
+  }
+
+  state.activeStreamingParagraph.appendChild(sentenceSpan);
+  el.editorCanvas.scrollTop = el.editorCanvas.scrollHeight;
+
+  // Flash highlight removal
+  setTimeout(() => {
+    state.activeStreamingParagraph?.classList.remove('highlight');
+  }, 1200);
+
+  updateWordCounts();
+  saveCurrentNote();
 }
 
 function handleWorkerError(errData) {
@@ -289,6 +504,11 @@ function handleWorkerError(errData) {
  * Inserts transcribed text or formatted timestamp chunks into the editor canvas
  */
 function insertTranscriptionIntoEditor(rawText, chunks) {
+  // Clean up any empty trailing paragraphs from active streaming placeholders
+  el.editorCanvas.querySelectorAll('.transcript-paragraph').forEach((p) => {
+    if (!p.textContent.trim()) p.remove();
+  });
+
   if (state.timestampsEnabled && chunks.length > 0) {
     let html = '';
     chunks.forEach((chunk) => {
@@ -309,7 +529,6 @@ function insertTranscriptionIntoEditor(rawText, chunks) {
     el.editorCanvas.appendChild(p);
   }
 
-  // Auto scroll to bottom of editor
   el.editorCanvas.scrollTop = el.editorCanvas.scrollHeight;
 }
 
@@ -320,7 +539,7 @@ function escapeHtml(str) {
 }
 
 /**
- * Audio Recording Logic
+ * Audio Recording Logic with Phase 1 VAD Streaming
  */
 async function startRecording() {
   try {
@@ -335,13 +554,23 @@ async function startRecording() {
     });
 
     state.mediaStream = stream;
+
+    // Audio is stored one file per note id; reusing a note that already has audio would overwrite it.
+    const currentStored = getStoredNotes().find((n) => n.id === state.currentNoteId);
+    if (currentStored?.hasAudio || state.currentNoteAudioBlob) {
+      createNewNote();
+      state.currentNoteAudioBlob = null;
+    }
+
     state.recordedAudioChunks = [];
+    state.streamChunkCounter = 0;
 
     // Initialize AudioContext & Visualizer
-    state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-    const sourceNode = state.audioContext.createMediaStreamSource(stream);
+    state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    await state.audioContext.resume();
+    state.sourceNode = state.audioContext.createMediaStreamSource(stream);
     state.analyserNode = state.audioContext.createAnalyser();
-    sourceNode.connect(state.analyserNode);
+    state.sourceNode.connect(state.analyserNode);
 
     if (!state.visualizer) {
       state.visualizer = new AudioVisualizer(el.visualizerCanvas);
@@ -349,7 +578,42 @@ async function startRecording() {
     state.visualizer.attach(state.analyserNode);
     state.visualizer.start();
 
-    // Setup MediaRecorder
+    // Phase 1: Real-time Streaming with Voice Activity Detection (VAD)
+    if (state.engineMode === 'stream') {
+      state.activeStreamingParagraph = document.createElement('p');
+      state.activeStreamingParagraph.className = 'transcript-paragraph highlight';
+      el.editorCanvas.appendChild(state.activeStreamingParagraph);
+
+      state.vad = new VoiceActivityDetector({
+        audioContext: state.audioContext,
+        sourceNode: state.sourceNode,
+        sampleRate: state.audioContext.sampleRate,
+        energyThreshold: 0.0035,
+        silenceDurationMs: 450,
+        minSpeechDurationMs: 180,
+        onSpeechStart: () => {
+          el.vadBadge.classList.add('speaking');
+          el.vadText.textContent = 'Speaking...';
+          el.recordStatusLabel.textContent = 'Speech detected — transcribing in real-time';
+        },
+        onSpeechEnd: (pcmChunk) => {
+          el.vadBadge.classList.remove('speaking');
+          el.vadText.textContent = 'Processing sentence...';
+          dispatchStreamChunk(pcmChunk);
+        },
+        onVADStatus: (isSpeaking) => {
+          if (!isSpeaking && el.vadBadge.classList.contains('speaking')) {
+            el.vadBadge.classList.remove('speaking');
+            el.vadText.textContent = 'Listening...';
+          }
+        },
+      });
+      state.vad.start();
+      el.vadBadge.classList.remove('speaking');
+      el.vadText.textContent = 'VAD Listening';
+    }
+
+    // Parallel MediaRecorder for full playback preview
     let mimeType = 'audio/webm;codecs=opus';
     if (!MediaRecorder.isTypeSupported(mimeType)) {
       mimeType = MediaRecorder.isTypeSupported('audio/ogg') ? 'audio/ogg' : '';
@@ -365,7 +629,7 @@ async function startRecording() {
       }
     };
 
-    state.mediaRecorder.start(250); // Slice every 250ms
+    state.mediaRecorder.start(250);
 
     // Update UI
     state.isRecording = true;
@@ -376,7 +640,9 @@ async function startRecording() {
     el.micSection.classList.add('recording');
     el.recordMicIcon.style.display = 'none';
     el.recordStopIcon.style.display = 'block';
-    el.recordStatusLabel.textContent = 'Listening... Speak clearly';
+    el.recordStatusLabel.textContent = state.engineMode === 'stream'
+      ? 'Live Streaming Active — Speak naturally'
+      : 'Recording... Speak clearly';
     el.recordControlsRow.style.display = 'flex';
     el.pauseBtnText.textContent = 'Pause';
 
@@ -406,13 +672,19 @@ async function stopRecordingAndTranscribe() {
   el.recordMicIcon.style.display = 'block';
   el.recordStopIcon.style.display = 'none';
   el.recordControlsRow.style.display = 'none';
-  el.recordStatusLabel.textContent = 'Processing audio...';
+  el.recordStatusLabel.textContent = 'Finishing dictation...';
+
+  if (state.vad) {
+    state.vad.stop();
+    state.vad = null;
+    el.vadBadge.classList.remove('speaking');
+    el.vadText.textContent = 'VAD Ready';
+  }
 
   if (state.visualizer) {
     state.visualizer.stop();
   }
 
-  // Stop media tracks
   if (state.mediaStream) {
     state.mediaStream.getTracks().forEach((t) => t.stop());
   }
@@ -422,34 +694,58 @@ async function stopRecordingAndTranscribe() {
     state.mediaRecorder.stop();
   });
 
+  const recordedBlob = new Blob(state.recordedAudioChunks, {
+    type: state.mediaRecorder.mimeType || 'audio/webm',
+  });
+
   if (state.audioContext) {
     try {
       await state.audioContext.close();
     } catch (_) {}
   }
 
-  const recordedBlob = new Blob(state.recordedAudioChunks, {
-    type: state.mediaRecorder.mimeType || 'audio/webm',
-  });
-
-  if (recordedBlob.size < 100) {
-    el.recordStatusLabel.textContent = 'Recording was too short.';
-    return;
+  if (recordedBlob.size > 100) {
+    if (!state.currentNoteId) {
+      state.currentNoteId = 'note_' + Date.now();
+    }
+    setAudioPreview(recordedBlob, 'Microphone Recording');
+    setNoteAudioPlayer(recordedBlob, state.currentNoteId);
+    uploadRecordingToDisk(state.currentNoteId, recordedBlob);
   }
 
-  // Create preview playback
-  setAudioPreview(recordedBlob, 'Microphone Recording');
+  // Determine if stream chunks successfully produced text in the editor
+  const hasStreamedContent = state.streamChunkCounter > 0 &&
+    state.activeStreamingParagraph &&
+    state.activeStreamingParagraph.textContent.trim().length > 0;
 
-  // Decode to 16kHz Float32Array PCM
-  try {
-    el.recordStatusLabel.textContent = 'Decoding audio for Whisper...';
-    const { pcm16k } = await decodeAudioBlob(recordedBlob);
-    dispatchTranscription(pcm16k);
-    el.recordStatusLabel.textContent = 'Transcribing with WebGPU...';
-  } catch (err) {
-    console.error('[Say] Audio decode failed:', err);
-    showToast(`Audio decoding error: ${err.message}`, 'error');
-    el.recordStatusLabel.textContent = 'Decoding failed.';
+  // If in batch mode, OR if stream mode completed without any transcribed text,
+  // transcribe the full recorded audio so speech is NEVER lost!
+  if (state.engineMode === 'batch' || !hasStreamedContent) {
+    if (recordedBlob.size < 100) {
+      el.recordStatusLabel.textContent = 'Recording was too short.';
+      return;
+    }
+    try {
+      // Remove any empty trailing paragraph placeholder left by stream mode
+      if (state.activeStreamingParagraph && !state.activeStreamingParagraph.textContent.trim()) {
+        state.activeStreamingParagraph.remove();
+        state.activeStreamingParagraph = null;
+      }
+
+      el.recordStatusLabel.textContent = 'Transcribing speech automatically...';
+      el.progressStatusTitle.textContent = 'Transcribing recording...';
+      el.progressBarFill.style.width = '60%';
+      el.progressPercentage.textContent = 'Processing';
+
+      const { pcm16k } = await decodeAudioBlob(recordedBlob);
+      dispatchTranscription(pcm16k);
+    } catch (err) {
+      console.error('[Say] Audio decode/transcribe failed:', err);
+      showToast(`Audio decoding error: ${err.message}`, 'error');
+      el.recordStatusLabel.textContent = 'Decoding failed.';
+    }
+  } else {
+    el.recordStatusLabel.textContent = 'Live dictation complete.';
   }
 }
 
@@ -457,38 +753,72 @@ function pauseRecording() {
   if (!state.isRecording || !state.mediaRecorder) return;
 
   if (state.isPaused) {
-    // Resume
     state.mediaRecorder.resume();
     state.recordStartTime = Date.now();
     state.isPaused = false;
     el.pauseBtnText.textContent = 'Pause';
     el.recordStatusLabel.textContent = 'Listening... Speak clearly';
     if (state.visualizer) state.visualizer.start();
+    if (state.vad) state.vad.start();
   } else {
-    // Pause
     state.mediaRecorder.pause();
     state.recordElapsedMs += Date.now() - state.recordStartTime;
     state.isPaused = true;
     el.pauseBtnText.textContent = 'Resume';
     el.recordStatusLabel.textContent = 'Recording paused';
     if (state.visualizer) state.visualizer.stop();
+    if (state.vad) state.vad.stop();
   }
 }
 
 /**
- * Dispatches audio PCM Float32Array to Web Worker for Whisper processing
+ * Phase 1: Dispatches an individual VAD sentence chunk to Web Worker
  */
-function dispatchTranscription(audioPcmFloat32) {
-  if (!state.worker) {
-    initWorker();
-  }
+function dispatchStreamChunk(audioPcmFloat32) {
+  if (!state.worker) initWorker();
+  state.streamChunkCounter++;
 
+  const vocabConfig = getVocabularyConfiguration();
   const options = {
     language: el.languageSelect.value,
     task: el.taskSelect.value,
     return_timestamps: true,
     chunk_length_s: 30,
     stride_length_s: 5,
+    initial_prompt: vocabConfig.initial_prompt,
+    customTerms: vocabConfig.customTerms,
+  };
+
+  state.worker.postMessage({
+    type: 'transcribe_stream_chunk',
+    payload: {
+      audio: audioPcmFloat32,
+      chunkId: state.streamChunkCounter,
+      options,
+      modelId: state.selectedModel,
+      device: state.selectedDevice,
+      dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
+    },
+  });
+}
+
+/**
+ * Dispatches full audio PCM Float32Array to Web Worker for Whisper processing
+ */
+function dispatchTranscription(audioPcmFloat32) {
+  if (!state.worker) {
+    initWorker();
+  }
+
+  const vocabConfig = getVocabularyConfiguration();
+  const options = {
+    language: el.languageSelect.value,
+    task: el.taskSelect.value,
+    return_timestamps: true,
+    chunk_length_s: 30,
+    stride_length_s: 5,
+    initial_prompt: vocabConfig.initial_prompt,
+    customTerms: vocabConfig.customTerms,
   };
 
   const payload = {
@@ -566,7 +896,89 @@ function updateWordCounts() {
   el.statReadTime.textContent = `${readMins} min`;
 }
 
-function createNewNote() {
+function setNoteAudioPlayer(blobOrUrl, noteId) {
+  if (!el.noteAudioBar || !el.noteAudioPlayer) return;
+  el.noteAudioBar.style.display = 'flex';
+  if (typeof blobOrUrl === 'string') {
+    state.currentNoteAudioBlob = null;
+    el.noteAudioPlayer.src = blobOrUrl;
+  } else {
+    state.currentNoteAudioBlob = blobOrUrl;
+    el.noteAudioPlayer.src = URL.createObjectURL(blobOrUrl);
+  }
+  if (el.noteAudioStatus) {
+    el.noteAudioStatus.textContent = 'Preserved on disk';
+  }
+}
+
+async function transcribeCurrentNoteAudio() {
+  if (!el.noteAudioPlayer || !el.noteAudioPlayer.src) {
+    showToast('No audio recording loaded for this note.', 'info');
+    return;
+  }
+
+  try {
+    el.progressStatusTitle.textContent = 'Preparing audio for Whisper...';
+    el.progressBarFill.style.width = '25%';
+    el.progressPercentage.textContent = 'Loading';
+
+    let blob;
+    if (state.currentNoteAudioBlob instanceof Blob) {
+      blob = state.currentNoteAudioBlob;
+    } else {
+      const res = await fetch(el.noteAudioPlayer.src);
+      blob = await res.blob();
+    }
+
+    el.progressStatusTitle.textContent = 'Decoding audio for Whisper...';
+    el.progressBarFill.style.width = '45%';
+    el.progressPercentage.textContent = 'Decoding';
+
+    const { pcm16k, duration } = await decodeAudioBlob(blob);
+    el.progressStatusTitle.textContent = `Transcribing ${formatTime(duration)} audio...`;
+    el.progressBarFill.style.width = '65%';
+    el.progressPercentage.textContent = 'Processing';
+
+    dispatchTranscription(pcm16k);
+    showToast('Transcribing audio recording...', 'info');
+  } catch (err) {
+    console.error('[Say] Transcribe note audio failed:', err);
+    showToast(`Failed to transcribe audio: ${err.message}`, 'error');
+  }
+}
+
+async function uploadRecordingToDisk(noteId, blob) {
+  try {
+    if (el.noteAudioStatus) {
+      el.noteAudioStatus.textContent = 'Saving audio to disk...';
+    }
+    const res = await fetch(`/api/say/recordings/${encodeURIComponent(noteId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      body: blob,
+    });
+    if (res.ok) {
+      if (el.noteAudioStatus) {
+        el.noteAudioStatus.textContent = 'Saved on disk';
+      }
+      const notes = getStoredNotes();
+      const n = notes.find((x) => x.id === noteId);
+      if (n) {
+        n.hasAudio = true;
+        n.audioUrl = `/api/say/recordings/${noteId}`;
+        n.audioSizeBytes = blob.size;
+        localStorage.setItem('say_notes_v1', JSON.stringify(notes));
+        renderHistoryList();
+      }
+      saveCurrentNote(false);
+      showToast('Audio recording saved to disk', 'success');
+    }
+  } catch (err) {
+    console.error('[Say] Failed to upload audio recording:', err);
+  }
+}
+
+function createNewNote(persist = true) {
   state.currentNoteId = 'note_' + Date.now();
   state.currentChunks = [];
 
@@ -579,12 +991,23 @@ function createNewNote() {
 
   el.noteTitle.value = `Dictation — ${dateStr}`;
   el.editorCanvas.innerHTML = '';
+  if (el.noteAudioBar) el.noteAudioBar.style.display = 'none';
+  if (el.noteAudioPlayer) {
+    el.noteAudioPlayer.pause();
+    el.noteAudioPlayer.src = '';
+  }
   updateWordCounts();
-  saveCurrentNote();
-  showToast('Created new note', 'success');
+  if (persist) {
+    saveCurrentNote(false);
+    showToast('Created new note', 'success');
+  } else {
+    renderHistoryList();
+  }
 }
 
-function saveCurrentNote() {
+let saveTimeout = null;
+
+function saveCurrentNote(debounce = false) {
   if (!state.currentNoteId) {
     state.currentNoteId = 'note_' + Date.now();
   }
@@ -600,8 +1023,12 @@ function saveCurrentNote() {
 
   const storedNotes = getStoredNotes();
   const existingIdx = storedNotes.findIndex((n) => n.id === state.currentNoteId);
-
   if (existingIdx !== -1) {
+    if (storedNotes[existingIdx].hasAudio) {
+      note.hasAudio = true;
+      note.audioUrl = storedNotes[existingIdx].audioUrl || `/api/say/recordings/${state.currentNoteId}`;
+      note.audioSizeBytes = storedNotes[existingIdx].audioSizeBytes;
+    }
     storedNotes[existingIdx] = note;
   } else {
     storedNotes.unshift(note);
@@ -610,6 +1037,28 @@ function saveCurrentNote() {
   localStorage.setItem('say_notes_v1', JSON.stringify(storedNotes));
   el.saveStatus.textContent = 'Auto-saved locally';
   renderHistoryList();
+
+  if (debounce) {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => syncNoteToServer(note), 600);
+  } else {
+    syncNoteToServer(note);
+  }
+}
+
+async function syncNoteToServer(note) {
+  try {
+    const res = await fetch(`/api/say/notes/${encodeURIComponent(note.id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(note),
+    });
+    if (res.ok) {
+      el.saveStatus.textContent = '✓ Saved to disk';
+    }
+  } catch (err) {
+    console.warn('[Say] Note disk sync failed (cached locally):', err);
+  }
 }
 
 function getStoredNotes() {
@@ -621,7 +1070,7 @@ function getStoredNotes() {
   }
 }
 
-function loadNote(noteId) {
+function loadNote(noteId, keepDrawerOpen = false) {
   const notes = getStoredNotes();
   const note = notes.find((n) => n.id === noteId);
   if (!note) return;
@@ -631,21 +1080,47 @@ function loadNote(noteId) {
   el.noteTitle.value = note.title;
   el.editorCanvas.innerHTML = note.html || escapeHtml(note.content || '');
   updateWordCounts();
-  closeAllDrawers();
+
+  if (el.noteAudioBar && el.noteAudioPlayer) {
+    if (note.hasAudio || note.audioUrl) {
+      el.noteAudioBar.style.display = 'flex';
+      const audioUrl = note.audioUrl || `/api/say/recordings/${note.id}`;
+      el.noteAudioPlayer.src = audioUrl;
+      if (el.noteAudioStatus) {
+        el.noteAudioStatus.textContent = 'Preserved on disk';
+      }
+    } else {
+      el.noteAudioBar.style.display = 'none';
+      el.noteAudioPlayer.pause();
+      el.noteAudioPlayer.src = '';
+    }
+  }
+
+  el.saveStatus.textContent = 'Loaded note from disk';
+  if (!keepDrawerOpen) closeAllDrawers();
 }
 
-function deleteNote(noteId, event) {
+async function deleteNote(noteId, event) {
   if (event) event.stopPropagation();
+
+  try {
+    fetch(`/api/say/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+  } catch (_) {}
+
   let notes = getStoredNotes();
   notes = notes.filter((n) => n.id !== noteId);
   localStorage.setItem('say_notes_v1', JSON.stringify(notes));
 
   if (state.currentNoteId === noteId) {
-    createNewNote();
-  } else {
-    renderHistoryList();
+    // Open the next remaining note instead of spawning (and persisting) a new empty one.
+    if (notes.length > 0) {
+      loadNote(notes[0].id, true);
+    } else {
+      createNewNote(false);
+    }
   }
-  showToast('Note deleted', 'info');
+  renderHistoryList();
+  showToast('Note and audio deleted from disk', 'info');
 }
 
 function renderHistoryList(filterQuery = '') {
@@ -673,12 +1148,18 @@ function renderHistoryList(filterQuery = '') {
         minute: '2-digit',
       });
       const preview = (note.content || 'Empty note').slice(0, 70);
+      const audioPill = note.hasAudio
+        ? `<span class="history-audio-pill" title="Recorded audio preserved on disk">🎙️ Audio</span>`
+        : '';
 
       return `
         <div class="history-item${activeClass}" data-id="${note.id}">
           <div class="history-item-top">
             <span class="history-item-title">${escapeHtml(note.title)}</span>
-            <span class="history-item-date">${dateStr}</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              ${audioPill}
+              <span class="history-item-date">${dateStr}</span>
+            </div>
           </div>
           <div class="history-item-preview">${escapeHtml(preview)}</div>
           <div style="margin-top: 4px; display: flex; justify-content: flex-end;">
@@ -689,7 +1170,6 @@ function renderHistoryList(filterQuery = '') {
     })
     .join('');
 
-  // Attach click events
   el.historyList.querySelectorAll('.history-item').forEach((item) => {
     item.addEventListener('click', (e) => {
       if (e.target.closest('.delete-note-btn')) return;
@@ -702,6 +1182,52 @@ function renderHistoryList(filterQuery = '') {
       deleteNote(btn.dataset.deleteId, e);
     });
   });
+}
+
+/**
+ * Phase 4: Fetch and Render Offline Disk Models Status
+ */
+async function fetchLocalModelsStatus() {
+  try {
+    const res = await fetch('/api/say/models');
+    if (!res.ok) return;
+    const models = await res.json();
+    for (const m of models) {
+      if (m.key === 'whisper-large-v3-turbo' && el.offlineLargeStatus) {
+        el.offlineLargeStatus.textContent = m.is_ready
+          ? `Ready on Disk (${m.total_size_formatted})`
+          : 'Not on Disk (Downloads on first use)';
+        el.offlineLargeStatus.classList.toggle('ready', m.is_ready);
+      }
+      if (m.key === 'whisper-tiny' && el.offlineTinyStatus) {
+        el.offlineTinyStatus.textContent = m.is_ready
+          ? `Ready on Disk (${m.total_size_formatted})`
+          : 'Not on Disk';
+        el.offlineTinyStatus.classList.toggle('ready', m.is_ready);
+      }
+    }
+  } catch (err) {
+    console.warn('[Say] Could not query local models:', err);
+  }
+}
+
+async function triggerOfflineModelDownload() {
+  const modelPreset = state.selectedModel.includes('turbo') ? 'whisper-large-v3-turbo' : 'whisper-tiny';
+  showToast(`Starting disk download for ${modelPreset}...`, 'info');
+
+  try {
+    const res = await fetch('/api/say/models/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelPreset }),
+    });
+    if (res.ok) {
+      showToast('Download started in background. Check terminal/settings for progress.', 'success');
+      setTimeout(fetchLocalModelsStatus, 4000);
+    }
+  } catch (err) {
+    showToast(`Download failed: ${err.message}`, 'error');
+  }
 }
 
 /**
@@ -782,6 +1308,8 @@ function closeAllDrawers() {
   el.historyBackdrop.classList.remove('open');
   el.exportDrawer.classList.remove('open');
   el.exportBackdrop.classList.remove('open');
+  if (el.glossaryDrawer) el.glossaryDrawer.classList.remove('open');
+  if (el.glossaryBackdrop) el.glossaryBackdrop.classList.remove('open');
 }
 
 /**
@@ -801,6 +1329,21 @@ function wireEvents() {
     el.tabMicBtn.classList.remove('active');
     el.micSection.style.display = 'none';
     el.uploadSection.style.display = 'flex';
+  });
+
+  // Phase 1: Mode Switcher (Stream vs Batch)
+  el.modeStreamBtn.addEventListener('click', () => {
+    state.engineMode = 'stream';
+    el.modeStreamBtn.classList.add('active');
+    el.modeBatchBtn.classList.remove('active');
+    showToast('Engine mode: Real-Time Streaming (VAD)');
+  });
+
+  el.modeBatchBtn.addEventListener('click', () => {
+    state.engineMode = 'batch';
+    el.modeBatchBtn.classList.add('active');
+    el.modeStreamBtn.classList.remove('active');
+    showToast('Engine mode: Batch Record & Transcribe');
   });
 
   // Record Button
@@ -841,6 +1384,41 @@ function wireEvents() {
 
   el.transcribeUploadedBtn.addEventListener('click', transcribeUploadedFile);
 
+  // Electroacoustic Glossary Drawer Events
+  if (el.glossaryBtn) {
+    el.glossaryBtn.addEventListener('click', () => {
+      closeAllDrawers();
+      renderGlossaryUI();
+      el.glossaryDrawer.classList.add('open');
+      el.glossaryBackdrop.classList.add('open');
+    });
+  }
+
+  if (el.closeGlossaryBtn) {
+    el.closeGlossaryBtn.addEventListener('click', closeAllDrawers);
+  }
+
+  if (el.glossaryBackdrop) {
+    el.glossaryBackdrop.addEventListener('click', closeAllDrawers);
+  }
+
+  if (el.addCustomTermBtn && el.customTermInput) {
+    const handleAddTerm = () => {
+      const term = el.customTermInput.value.trim();
+      if (term) {
+        addCustomTerm(term);
+        el.customTermInput.value = '';
+      }
+    };
+    el.addCustomTermBtn.addEventListener('click', handleAddTerm);
+    el.customTermInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAddTerm();
+      }
+    });
+  }
+
   // Formatting Toolbar
   document.querySelectorAll('.toolbar-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -854,10 +1432,12 @@ function wireEvents() {
   // Editor Actions
   el.editorCanvas.addEventListener('input', () => {
     updateWordCounts();
-    saveCurrentNote();
+    saveCurrentNote(true);
   });
 
-  el.noteTitle.addEventListener('input', saveCurrentNote);
+  el.noteTitle.addEventListener('input', () => {
+    saveCurrentNote(true);
+  });
 
   el.copyBtn.addEventListener('click', async () => {
     const text = el.editorCanvas.innerText;
@@ -879,7 +1459,7 @@ function wireEvents() {
       el.editorCanvas.innerHTML = '';
       state.currentChunks = [];
       updateWordCounts();
-      saveCurrentNote();
+      saveCurrentNote(false);
     }
   });
 
@@ -890,19 +1470,28 @@ function wireEvents() {
     showToast(`Timestamps ${state.timestampsEnabled ? 'enabled' : 'disabled'}`);
   });
 
-  // Clickable Timestamps jump audio player
   el.editorCanvas.addEventListener('click', (e) => {
     const chip = e.target.closest('.timestamp-chip');
-    if (chip && chip.dataset.time && el.audioPlayer.src) {
+    if (chip && chip.dataset.time) {
       const time = parseFloat(chip.dataset.time);
-      el.audioPlayer.currentTime = time;
-      el.audioPlayer.play();
+      if (el.noteAudioPlayer && el.noteAudioPlayer.src) {
+        el.noteAudioPlayer.currentTime = time;
+        el.noteAudioPlayer.play();
+      } else if (el.audioPlayer && el.audioPlayer.src) {
+        el.audioPlayer.currentTime = time;
+        el.audioPlayer.play();
+      }
     }
   });
+
+  if (el.retranscribeNoteAudioBtn) {
+    el.retranscribeNoteAudioBtn.addEventListener('click', transcribeCurrentNoteAudio);
+  }
 
   // Drawers
   el.settingsBtn.addEventListener('click', () => {
     closeAllDrawers();
+    fetchLocalModelsStatus();
     el.settingsDrawer.classList.add('open');
     el.settingsBackdrop.classList.add('open');
   });
@@ -963,11 +1552,36 @@ function wireEvents() {
 
   el.exportServerBtn.addEventListener('click', exportToServer);
 
-  // Settings Controls
-  el.modelPresetSelect.addEventListener('change', (e) => {
-    state.selectedModel = e.target.value;
-    el.engineStatusText.textContent = state.selectedModel.split('/').pop();
-  });
+  // Phase 4: Download offline models button
+  el.downloadOfflineBtn.addEventListener('click', triggerOfflineModelDownload);
+
+  // Model Selection Synchronizer
+  const updateModelSelection = (newModel) => {
+    state.selectedModel = newModel;
+    if (el.modelPresetSelect) el.modelPresetSelect.value = newModel;
+    if (el.modelQuickSelect) el.modelQuickSelect.value = newModel;
+    const isTiny = newModel.includes('whisper-tiny');
+    el.engineStatusText.textContent = isTiny ? 'Whisper Tiny (Instant)' : 'Whisper Turbo';
+    showToast(`Model: ${isTiny ? 'Whisper Tiny (~0.3s Instant)' : 'Whisper Turbo (Studio)'}`, 'info');
+
+    // Trigger preload in worker immediately on switch
+    if (state.worker) {
+      state.worker.postMessage({
+        type: 'load',
+        payload: {
+          modelId: state.selectedModel,
+          device: isTiny ? 'wasm' : state.selectedDevice,
+          dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
+        },
+      });
+    }
+  };
+
+  if (el.modelQuickSelect) {
+    el.modelQuickSelect.addEventListener('change', (e) => updateModelSelection(e.target.value));
+  }
+
+  el.modelPresetSelect.addEventListener('change', (e) => updateModelSelection(e.target.value));
 
   el.deviceSelect.addEventListener('change', (e) => {
     state.selectedDevice = e.target.value;
@@ -1018,19 +1632,72 @@ function wireEvents() {
 }
 
 /**
+ * Synchronizes notes between server disk storage and browser cache
+ */
+async function syncNotesWithDisk() {
+  try {
+    const res = await fetch('/api/say/notes');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const serverNotes = await res.json();
+    const localNotes = getStoredNotes();
+
+    const noteMap = new Map();
+    // 1. Populate with server notes (ground truth on disk)
+    for (const sn of serverNotes) {
+      noteMap.set(sn.id, sn);
+    }
+    // 2. If browser cache contains local notes not yet on disk, sync them up
+    for (const ln of localNotes) {
+      if (!noteMap.has(ln.id)) {
+        noteMap.set(ln.id, ln);
+        syncNoteToServer(ln);
+      }
+    }
+
+    const mergedNotes = Array.from(noteMap.values()).sort(
+      (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+    );
+    localStorage.setItem('say_notes_v1', JSON.stringify(mergedNotes));
+    renderHistoryList();
+
+    if (mergedNotes.length > 0) {
+      loadNote(mergedNotes[0].id);
+    } else {
+      createNewNote();
+    }
+  } catch (err) {
+    console.warn('[Say] Could not sync notes from server disk:', err);
+    const localNotes = getStoredNotes();
+    renderHistoryList();
+    if (localNotes.length > 0) {
+      loadNote(localNotes[0].id);
+    } else {
+      createNewNote();
+    }
+  }
+}
+
+/**
  * Application Entry Point
  */
 async function initApp() {
   wireEvents();
+  renderGlossaryUI();
   await detectHardwareAcceleration();
   initWorker();
+  fetchLocalModelsStatus();
+  await syncNotesWithDisk();
 
-  // Load latest note or create new note
-  const notes = getStoredNotes();
-  if (notes.length > 0) {
-    loadNote(notes[0].id);
-  } else {
-    createNewNote();
+  // Background warm-up: preload Whisper Large-v3-Turbo weights into WebGPU
+  if (state.worker) {
+    state.worker.postMessage({
+      type: 'load',
+      payload: {
+        modelId: state.selectedModel,
+        device: state.selectedDevice,
+        dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
+      },
+    });
   }
 }
 

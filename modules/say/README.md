@@ -15,30 +15,46 @@
 
 ---
 
-## 2. Technical Implementation Summary
+## 2. Advanced Features Implemented
 
-### A. Core Engine (`worker.js`)
-- Runs in a dedicated background Web Worker to keep the 60fps main UI completely fluid.
-- Dynamically loads `@huggingface/transformers` v3.8.1 with ONNX WebGPU runtime.
-- Employs long-form sliding window audio processing (`chunk_length_s: 30`, `stride_length_s: 5`) for arbitrary audio durations.
-- Graceful hardware fallback: automatically tests `navigator.gpu` and switches to WebAssembly (CPU) if the client device lacks WebGPU.
+### Phase 1: Real-Time Streaming Dictation (In-Browser VAD)
+- **Voice Activity Detection (`VoiceActivityDetector`)**: Operates on live audio frames (2048 samples, ~128ms) measuring RMS energy and tracking dynamic noise floors.
+- **Natural Sentence Slicing**: When the speaker takes a breath (silence threshold 650ms), VAD detects the sentence boundary and dispatches the accumulated slice to the Web Worker.
+- **Pre-Roll Ring Buffer**: Retains 250ms of audio prior to speech onset so opening plosives and consonants are never clipped.
+- **Live Visual Activity Badge**: Header badge lights up green with `Speaking...` during speech and transitions to `VAD Listening` during pauses.
 
-### B. Audio Preprocessing Pipeline (`audio-utils.js`)
-- **Microphone Capture**: Captures 16kHz mono audio stream with built-in echo cancellation and noise suppression.
-- **Hardware-Accelerated Resampling**: Uses `OfflineAudioContext` for anti-aliased sample-rate conversion to 16,000 Hz `Float32Array`.
-- **Live Canvas Visualizer**: Connected to an `AnalyserNode` rendering real-time frequency waves while dictating.
-- **Universal Audio Decoder**: Supports drag-and-drop decoding for `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`, and `.webm`.
+### Phase 2: Domain-Specific Vocabulary Biasing (Electroacoustics)
+- **Prompt Biasing**: Injects domain-specific acoustic engineering keywords into Whisper's decoder conditioning tokens.
+- **Electroacoustic Normalizer**: Automatically recognizes and formats specialized audio engineering acronyms and terms:
+  - Distortion & Levels: `THD`, `THD+N`, `SPL`, `dBSPL`, `SNR`, `Rub & Buzz`
+  - Transducers: `Balanced Armature`, `MEMS`, `ECM`, `PZT`, `F0`
+  - Thiele-Small Parameters: `Qts`, `Qms`, `Qes`, `Vas`, `Bl`, `Mms`, `Cms`, `Re`, `Le`
+  - Interfaces & Test Standards: `I2S`, `TDM`, `PDM`, `ANC`, `PNC`, `HRTF`, `IEC 60318-4`, `711 coupler`
+- **Custom Glossary Support**: Selectable custom dropdown allowing users to input their own comma-separated project acronyms.
 
-### C. Document Workspace & Storage (`index.html`, `app.js`, `styles.css`)
-- **Notion-Style Writing Canvas**: Rich text formatting (Bold, Italic, Strikethrough, Headings, Bullet Lists, Blockquotes).
-- **Interactive Timestamps**: Segment chips `[00:03 → 00:08]` that allow seeking the built-in audio player directly to that spoken segment.
-- **Local Persistence**: Saves all notes to `localStorage` (`say_notes_v1`) with instant search and restore.
-- **Multi-Format Export**: Export to Markdown (`.md`), Plain Text (`.txt`), JSON with timestamped segments (`.json`), or save directly to local disk via `/api/say/export`.
+### Phase 4: Air-Gapped Model Bundling & Offline Disk Serving
+- **CLI Pre-caching Script (`download_model.py`)**:
+  - Run `python modules/say/download_model.py --model whisper-large-v3-turbo` (or `--model whisper-tiny`).
+  - Downloads all required ONNX weights directly from Hugging Face into `modules/say/web/models/`.
+- **Offline Local FastAPI Serving**:
+  - Local models are served directly through One EAD at `/modules/say/models/<model_dir>/`.
+  - Endpoint `GET /api/say/models` provides instant on-disk readiness and file size diagnostics.
+  - One-click "Download to Disk" button right in the Settings drawer for effortless in-browser caching.
+  - Zero internet access required once models are saved to disk.
 
-### D. Portal Integration (`server/`, `shell/`)
-- Module registered in `modules/say/module.py` and `server/plugin_order.json`.
-- Iframe sandbox permissions configured with `allow="microphone; ..."` in `shell/portal.js`.
-- Portal shell automatically syncs themes (dark/light) with the plugin.
+### Permanent Disk Persistence (Audio & Transcripts)
+- **100% Crash-Proof & Restart-Proof**: All recorded audio clips and transcripts are saved directly to the local server disk.
+- **Dedicated On-Disk Storage**:
+  - Transcripts & Note Metadata: `modules/say/data/notes/{note_id}.json`
+  - Raw Audio Files: `modules/say/data/recordings/{note_id}.webm`
+- **Dual-Layer Auto-Sync**:
+  - In-browser `localStorage` provides instant 0ms startup rendering.
+  - Background asynchronous sync persists all changes to the FastAPI disk backend.
+  - When One EAD restarts, `initApp()` automatically rehydrates all notes and recordings from disk.
+- **Integrated Audio Playback & Timestamp Scrubbing**:
+  - Dedicated note audio bar appears with seekable `<audio>` controls for each recorded session.
+  - Clicking any timestamp badge (`[00:04]`) in the transcript immediately jumps the audio player to that exact moment and plays it back.
+  - Past recordings can be replayed anytime across application and system restarts.
 
 ---
 
@@ -47,32 +63,38 @@
 ```
 modules/say/
 ├── __init__.py                  # Exposes PortalModule MODULE
-├── module.py                    # PortalModule metadata & FastAPI backend router
+├── module.py                    # PortalModule metadata & FastAPI backend router (CRUD & audio streaming)
+├── download_model.py            # CLI script to download ONNX weights for air-gapped setups
 ├── README.md                    # Technical documentation & implementation reference
+├── data/                        # Persistent disk storage (gitignored)
+│   ├── notes/                   # JSON notes with timestamps and chunk metadata
+│   └── recordings/              # WebM audio recordings
 └── web/
-    ├── index.html               # Semantic UI, audio player, editor canvas, modals
+    ├── index.html               # Semantic UI, note audio player, editor canvas, modals
     ├── styles.css               # Styling, dark/light theme tokens, animations
     ├── app.js                   # UI logic, audio capture, WebGPU diagnostics, editor
-    ├── worker.js                # Web Worker for WebGPU Whisper inference
-    ├── audio-utils.js           # 16kHz resampler, audio decoder, visualizer
+    ├── worker.js                # Web Worker for WebGPU Whisper inference & normalizer
+    ├── audio-utils.js           # 16kHz resampler, audio decoder, VAD, visualizer
+    ├── models/                  # Offline cached ONNX weights (gitignored)
     └── vendor/
-        └── transformers.web.js  # Vendored @huggingface/transformers v3.8.1
+        ├── transformers.min.js  # Vendored @huggingface/transformers v3.8.1 (ORT bundled)
+        └── ort-wasm-simd-threaded.jsep.{mjs,wasm}  # ONNX Runtime WASM
 ```
 
 ---
 
-## 4. Future Roadmap & Improvement Plan
+## 4. How to Use
 
-### Phase 1: Real-Time Interim Streaming (Voice Activity Detection)
-- Integrate client-side **Silero VAD** (or WebRTC VAD) to segment speech dynamically at natural pauses.
-- Stream interim live transcriptions into the document as the user is speaking, updating the paragraph in real time.
-
-### Phase 2: Domain-Specific Vocabulary Prompting
-- Supply initial prompt biasing tokens to Whisper's decoder (e.g., electroacoustic terms like *THD*, *MEMS*, *balanced armature*, *dBSPL*, *impedance curve*).
-- Greatly increases transcription accuracy for specialized engineering acronyms.
-
-### Phase 3: Text-to-Speech (TTS) Verification
-- Add an in-browser neural TTS engine (such as Kokoro or Supertonic ONNX) to read back dictated notes or meeting action items directly from the document editor.
-
-### Phase 4: Local Model Caching & Air-Gapped Deployment
-- Provide a CLI utility (`python -m modules.say.download_weights`) allowing air-gapped engineering environments to download ONNX checkpoints directly onto local disk for 100% offline distribution.
+1. Launch One EAD: `python run.py` (or `start.bat`).
+2. Open `http://127.0.0.1:8100/` and navigate to **Say — Voice Dictation**.
+3. Choose your engine mode:
+   - **Live Streaming (VAD)**: Real-time sentence-by-sentence streaming into your document.
+   - **Batch Record**: Standard voice memo mode (record, review, and transcribe).
+4. Select your **Domain Vocabulary**:
+   - Default: **Electroacoustics (THD, MEMS, dBSPL, etc.)**
+   - Or enter custom terms in the input box.
+5. In air-gapped lab environments, run:
+   ```bash
+   python modules/say/download_model.py --model whisper-large-v3-turbo
+   ```
+   to permanently bundle the model weights on disk with zero external network dependency.
