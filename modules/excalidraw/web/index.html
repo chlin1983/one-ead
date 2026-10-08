@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Excalidraw — Virtual Whiteboard</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="excalidraw-app-root">
+    <!-- Top Action & Navigation Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="board-title-chip" id="board-title-chip" title="Click to rename whiteboard">
+          <span id="current-board-name">Whiteboard 1</span>
+          <button type="button" class="chip-edit-btn" id="btn-edit-board-name" title="Rename whiteboard">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="save-status-badge" id="save-status-badge">
+          <span class="status-dot"></span>
+          <span class="status-text" id="save-status-text">Saved to disk</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <button class="btn btn-sm" id="btn-new-board" type="button" title="Create new blank whiteboard">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          New Board
+        </button>
+
+        <button class="btn btn-sm" id="btn-toggle-drawer" type="button" title="Toggle saved whiteboards drawer">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          Drawings (<span id="boards-count">1</span>)
+        </button>
+
+        <button class="btn ghost btn-sm" id="btn-open-tab" type="button" title="Open whiteboard canvas in a new browser tab">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          Open in Tab
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Stage -->
+    <main class="workspace-stage">
+      <!-- Full-bleed Whiteboard Canvas Frame -->
+      <iframe id="canvas-frame" title="Excalidraw Canvas" allow="clipboard-read; clipboard-write"></iframe>
+
+      <!-- Slide-out Saved Drawings Drawer -->
+      <aside id="boards-drawer" class="boards-drawer" hidden>
+        <div class="drawer-header">
+          <div class="drawer-title-wrap">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <h3>Saved Drawings</h3>
+          </div>
+          <button class="btn ghost icon-btn" id="btn-close-drawer" title="Close drawer">&times;</button>
+        </div>
+
+        <div class="drawer-actions-bar">
+          <input type="text" id="drawer-search-input" class="search-input" placeholder="Search drawings..." />
+          <button class="btn primary btn-sm" id="drawer-new-btn" title="Create new blank whiteboard">+ New</button>
+        </div>
+
+        <div id="boards-list" class="boards-list">
+          <!-- Dynamically populated boards cards -->
+        </div>
+
+        <div class="drawer-footer">
+          <span class="disk-status-label">💾 Stored on local disk (drawings/)</span>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

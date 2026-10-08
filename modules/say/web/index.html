@@ -37,8 +37,12 @@
           </svg>
           <span>Serverless &bull; Client-Side</span>
         </div>
+        <div class="badge badge-vad" id="vad-badge" title="Voice Activity Detection Status">
+          <span class="vad-dot"></span>
+          <span id="vad-text">VAD Ready</span>
+        </div>
         <div class="badge" id="engine-status-badge">
-          <span id="engine-status-text">Whisper Large-v3-Turbo</span>
+          <span id="engine-status-text">Whisper Tiny (Instant)</span>
         </div>
       </div>
 
@@ -56,6 +60,13 @@
             <polyline points="12 6 12 12 16 14"/>
           </svg>
           <span>History</span>
+        </button>
+        <button class="btn btn-sm" id="glossary-btn" title="Electroacoustic Terms & Custom Vocabulary">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          <span>Glossary</span>
         </button>
         <button class="btn btn-icon-only" id="settings-btn" title="AI Model & Audio Settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -91,6 +102,14 @@
 
         <!-- Mode 1: Microphone Dictation Card -->
         <div class="audio-card" id="mic-section">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 2px;">
+            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-dim);">Engine Mode:</span>
+            <div class="mode-toggle-group">
+              <button class="mode-toggle-btn active" id="mode-stream-btn" type="button" title="Live sentence streaming via Voice Activity Detection">Live Streaming (VAD)</button>
+              <button class="mode-toggle-btn" id="mode-batch-btn" type="button" title="Record complete audio clip then transcribe">Batch Record</button>
+            </div>
+          </div>
+
           <div class="record-btn-wrapper" id="record-wrapper">
             <div class="record-pulse-ring"></div>
             <button class="record-btn" id="toggle-record-btn" title="Click to start dictation">
@@ -166,8 +185,8 @@
         <!-- Fast Language & Task Options -->
         <div class="config-card">
           <div class="config-card-header">
-            <span>Transcription Options</span>
-            <span class="brand-tag">Whisper Turbo</span>
+            <span>Speech Options</span>
+            <span class="brand-tag" style="background: rgba(16, 185, 129, 0.12); color: var(--accent);">Acoustic AI Active</span>
           </div>
 
           <div class="form-row">
@@ -197,6 +216,14 @@
                 <option value="translate">Translate to English</option>
               </select>
             </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 10px;">
+            <label class="form-label" for="model-quick-select">Dictation Model</label>
+            <select class="form-select" id="model-quick-select">
+              <option value="onnx-community/whisper-tiny" selected>⚡ Whisper Tiny (Instant, ~0.3s) — Recommended</option>
+              <option value="onnx-community/whisper-large-v3-turbo">🎯 Whisper Large-v3-Turbo (Studio Quality, 1.6 GB)</option>
+            </select>
           </div>
         </div>
 
@@ -298,6 +325,31 @@
           </button>
         </div>
 
+        <!-- Dedicated Note Audio Playback Bar for Saved Audio -->
+        <div class="note-audio-bar" id="note-audio-bar" style="display: none;">
+          <div class="note-audio-left">
+            <span class="note-audio-badge">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <span>Saved Audio</span>
+            </span>
+            <span class="note-audio-status" id="note-audio-status">Persistent on Disk</span>
+          </div>
+          <div class="note-audio-player-wrapper">
+            <audio id="note-audio-player" controls preload="metadata"></audio>
+            <button class="btn btn-sm btn-primary" id="retranscribe-note-audio-btn" type="button" title="Transcribe or Re-transcribe this audio recording">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>Transcribe</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Document Writing Canvas -->
         <div class="editor-canvas-container">
           <div
@@ -340,21 +392,21 @@
         <div class="form-group">
           <label class="form-label" for="model-preset-select">Whisper AI Model</label>
           <select class="form-select" id="model-preset-select">
-            <option value="onnx-community/whisper-large-v3-turbo" selected>
-              Whisper Large-v3-Turbo (Highest Accuracy, Recommended)
+            <option value="onnx-community/whisper-tiny" selected>
+              ⚡ Whisper Tiny — Fast & Instant (~0.3s, Recommended)
             </option>
-            <option value="onnx-community/whisper-small">
-              Whisper Small (Medium size & balanced)
+            <option value="onnx-community/whisper-large-v3-turbo">
+              🎯 Whisper Large-v3-Turbo — Studio Quality (1.6 GB)
             </option>
             <option value="onnx-community/whisper-base">
-              Whisper Base (Lightweight & fast)
+              Whisper Base — Balanced (73 MB)
             </option>
-            <option value="onnx-community/whisper-tiny">
-              Whisper Tiny (Ultra-light for instant testing)
+            <option value="onnx-community/whisper-small">
+              Whisper Small — Medium (240 MB)
             </option>
           </select>
           <small style="color: var(--text-mute); font-size: 11.5px; margin-top: 4px;">
-            Whisper Large-v3-Turbo runs with FP16/Q4 mixed precision, delivering production-grade accuracy directly in your browser.
+            Whisper Tiny processes voice in ~0.3s on CPU/SIMD. Whisper Turbo delivers studio-grade accuracy via WebGPU.
           </small>
         </div>
 
@@ -374,6 +426,35 @@
             <option value="fp16">16-Bit Floating Point (FP16)</option>
             <option value="q8">8-Bit Quantized (Q8)</option>
           </select>
+        </div>
+
+        <!-- Phase 4: Air-Gapped Offline Models on Disk -->
+        <div class="form-group" style="margin-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label">Air-Gapped Offline Disk Models</label>
+            <span class="brand-tag">Phase 4</span>
+          </div>
+          <div id="local-models-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+            <div class="offline-model-item">
+              <span class="offline-model-name">Whisper Large-v3-Turbo</span>
+              <span class="offline-model-status" id="offline-large-status">Checking...</span>
+            </div>
+            <div class="offline-model-item">
+              <span class="offline-model-name">Whisper Tiny</span>
+              <span class="offline-model-status" id="offline-tiny-status">Checking...</span>
+            </div>
+          </div>
+          <button class="btn btn-sm" id="download-offline-btn" style="margin-top: 8px;">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Download Selected Model to Disk</span>
+          </button>
+          <small style="color: var(--text-mute); font-size: 11px; margin-top: 3px;">
+            CLI air-gapped utility: <code>python modules/say/download_model.py</code>
+          </small>
         </div>
 
         <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
@@ -443,6 +524,62 @@
           <button class="btn btn-primary" id="export-server-btn">
             <span>Save to Local Disk (One EAD Scratch)</span>
           </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Slide-out Electroacoustic Glossary & Custom Terms Drawer -->
+    <div class="drawer-backdrop" id="glossary-backdrop"></div>
+    <aside class="drawer" id="glossary-drawer" aria-labelledby="glossary-heading">
+      <div class="drawer-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h2 id="glossary-heading">Acoustic Glossary</h2>
+          <span class="brand-tag">Always Active</span>
+        </div>
+        <button class="btn btn-icon-only" id="close-glossary-btn" title="Close Glossary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <div class="glossary-info-card">
+          <p style="font-size: 12.5px; color: var(--text-dim); line-height: 1.5;">
+            Say automatically recognizes all standard electroacoustic engineering terms by default (e.g. <code>THD</code>, <code>MEMS</code>, <code>dBSPL</code>, <code>Balanced Armature</code>). You can also add custom project acronyms or lab terms below.
+          </p>
+        </div>
+
+        <!-- Add Custom Terms Section -->
+        <div class="form-group" style="margin-top: 4px;">
+          <label class="form-label" for="custom-term-input">Add Custom Engineering Term</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" class="form-input" id="custom-term-input" placeholder="e.g. Knowles, Harman, ANC-V2..." />
+            <button class="btn btn-primary" id="add-custom-term-btn" type="button" style="flex-shrink: 0; padding: 7px 14px;">Add</button>
+          </div>
+          <small style="color: var(--text-mute); font-size: 11px;">Type a proprietary acronym or term and press Enter or Add.</small>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label">Your Custom Terms</label>
+            <span id="custom-terms-count" style="font-size: 11px; color: var(--text-mute);">0 terms</span>
+          </div>
+          <div class="custom-terms-container" id="custom-terms-container">
+            <!-- Dynamically populated user pills -->
+          </div>
+        </div>
+
+        <!-- Built-in Standard Terms -->
+        <div class="form-group" style="margin-top: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label">Built-in Electroacoustic Terms (30+)</label>
+            <span style="font-size: 11px; color: var(--accent); font-weight: 600;">✓ Active by Default</span>
+          </div>
+          <div class="builtin-terms-grid" id="builtin-terms-grid">
+            <!-- Dynamically populated tags -->
+          </div>
         </div>
       </div>
     </aside>

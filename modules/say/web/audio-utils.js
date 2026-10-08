@@ -1,7 +1,7 @@
 /**
  * Audio processing utilities for Say.
  * Handles microphone capture, visualizer rendering, file decoding,
- * and high-fidelity resampling to 16,000 Hz mono PCM Float32Array for Whisper.
+ * real-time Voice Activity Detection (VAD), and 16,000 Hz resampling for Whisper.
  */
 
 export const TARGET_SAMPLE_RATE = 16000;
@@ -61,7 +61,7 @@ export async function resampleAudioBufferTo16k(audioBuffer) {
 /**
  * Linear interpolation resampling fallback
  */
-function resampleLinear(inputArray, inRate, outRate) {
+export function resampleLinear(inputArray, inRate, outRate) {
   if (inRate === outRate) return inputArray;
   const ratio = inRate / outRate;
   const outLength = Math.round(inputArray.length / ratio);
@@ -206,4 +206,180 @@ export class AudioVisualizer {
       x += barWidth;
     }
   };
+}
+
+/**
+ * Phase 1: Real-Time In-Browser Voice Activity Detector (VAD)
+ * Analyzes live microphone audio buffers in real-time, detects sentence pauses (300-600ms),
+ * and automatically yields clean speech chunks for streaming transcription.
+ */
+export class VoiceActivityDetector {
+  constructor({
+    audioContext,
+    sourceNode,
+    sampleRate = 16000,
+    energyThreshold = 0.0035,
+    silenceDurationMs = 450,
+    minSpeechDurationMs = 180,
+    maxSpeechDurationMs = 10000,
+    onSpeechStart = () => {},
+    onSpeechEnd = (pcmChunk) => {},
+    onVADStatus = (isSpeaking, currentRms) => {},
+  }) {
+    this.audioContext = audioContext;
+    this.sourceNode = sourceNode;
+    this.sampleRate = sampleRate || audioContext?.sampleRate || 16000;
+    this.energyThreshold = energyThreshold;
+    this.silenceDurationMs = silenceDurationMs;
+    this.minSpeechDurationMs = minSpeechDurationMs;
+    this.maxSpeechDurationMs = maxSpeechDurationMs;
+
+    this.onSpeechStart = onSpeechStart;
+    this.onSpeechEnd = onSpeechEnd;
+    this.onVADStatus = onVADStatus;
+
+    this.isSpeaking = false;
+    this.isRunning = false;
+
+    // Buffer management
+    this.speechBuffer = [];
+    this.preRollRingBuffer = [];
+    this.preRollDurationMs = 250; // Keep 250ms pre-roll to avoid chopping initial plosives
+    this.silenceMsElapsed = 0;
+    this.speechDurationMs = 0;
+    this.noiseFloor = 0.002;
+
+    this.processorNode = null;
+  }
+
+  start() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    this.isSpeaking = false;
+    this.speechBuffer = [];
+    this.silenceMsElapsed = 0;
+    this.speechDurationMs = 0;
+
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      this.audioContext.resume().catch(() => {});
+    }
+
+    const bufferSize = 2048;
+    this.processorNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+    this.processorNode.onaudioprocess = (event) => {
+      if (!this.isRunning) return;
+      const inputData = event.inputBuffer.getChannelData(0);
+      this.processAudioFrame(inputData);
+    };
+
+    this.sourceNode.connect(this.processorNode);
+    this.processorNode.connect(this.audioContext.destination);
+  }
+
+  stop() {
+    if (!this.isRunning) return;
+    this.isRunning = false;
+
+    // Flush any pending speech if buffer has minimal audio
+    const minSamples = (150 / 1000) * TARGET_SAMPLE_RATE;
+    if (this.speechBuffer.length >= minSamples) {
+      this.flushCurrentSpeech();
+    } else {
+      this.speechBuffer = [];
+    }
+
+    if (this.processorNode) {
+      try {
+        this.sourceNode.disconnect(this.processorNode);
+        this.processorNode.disconnect();
+      } catch (_) {}
+      this.processorNode = null;
+    }
+  }
+
+  processAudioFrame(frameSamples) {
+    // 1. Calculate RMS energy
+    let sum = 0;
+    for (let i = 0; i < frameSamples.length; i++) {
+      sum += frameSamples[i] * frameSamples[i];
+    }
+    const rms = Math.sqrt(sum / frameSamples.length);
+
+    // Adaptive noise floor tracking
+    this.noiseFloor = Math.min(this.noiseFloor * 0.96 + rms * 0.04, 0.015);
+    const effectiveThreshold = Math.max(this.energyThreshold, this.noiseFloor * 1.45);
+    const frameDurationMs = (frameSamples.length / this.sampleRate) * 1000;
+
+    // Downsample frame if necessary to 16kHz
+    const pcmFrame = this.sampleRate === TARGET_SAMPLE_RATE
+      ? new Float32Array(frameSamples)
+      : resampleLinear(frameSamples, this.sampleRate, TARGET_SAMPLE_RATE);
+
+    const isVoiceNow = rms > effectiveThreshold;
+
+    if (isVoiceNow) {
+      this.silenceMsElapsed = 0;
+
+      if (!this.isSpeaking) {
+        // Speech onset
+        this.isSpeaking = true;
+        this.speechDurationMs = 0;
+        this.onSpeechStart();
+
+        // Prepend pre-roll buffer so starting consonant is crystal clear
+        this.speechBuffer = [];
+        for (const preChunk of this.preRollRingBuffer) {
+          for (let i = 0; i < preChunk.length; i++) {
+            this.speechBuffer.push(preChunk[i]);
+          }
+        }
+      }
+
+      this.speechDurationMs += frameDurationMs;
+      for (let i = 0; i < pcmFrame.length; i++) {
+        this.speechBuffer.push(pcmFrame[i]);
+      }
+
+      // Max duration safety flush
+      if (this.speechDurationMs >= this.maxSpeechDurationMs) {
+        this.flushCurrentSpeech();
+      }
+    } else {
+      // Silence / Background noise frame
+      if (this.isSpeaking) {
+        // Keep trailing samples during brief pause
+        for (let i = 0; i < pcmFrame.length; i++) {
+          this.speechBuffer.push(pcmFrame[i]);
+        }
+        this.silenceMsElapsed += frameDurationMs;
+
+        if (this.silenceMsElapsed >= this.silenceDurationMs) {
+          // Pause detected! Flush complete sentence
+          this.flushCurrentSpeech();
+        }
+      } else {
+        // Maintain pre-roll ring buffer
+        this.preRollRingBuffer.push(pcmFrame);
+        const maxPreRollFrames = Math.ceil(this.preRollDurationMs / Math.max(1, frameDurationMs));
+        while (this.preRollRingBuffer.length > maxPreRollFrames) {
+          this.preRollRingBuffer.shift();
+        }
+      }
+    }
+
+    this.onVADStatus(this.isSpeaking, rms);
+  }
+
+  flushCurrentSpeech() {
+    const minSamples = (this.minSpeechDurationMs / 1000) * TARGET_SAMPLE_RATE;
+    if (this.speechBuffer.length >= minSamples) {
+      const chunk = new Float32Array(this.speechBuffer);
+      this.onSpeechEnd(chunk);
+    }
+    this.speechBuffer = [];
+    this.isSpeaking = false;
+    this.silenceMsElapsed = 0;
+    this.speechDurationMs = 0;
+  }
 }

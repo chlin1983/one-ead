@@ -1,0 +1,5 @@
+/pdfarranger/
+/.pdfarranger-setup/
+runtime.log
+__pycache__/
+*.pyc

@@ -2,10 +2,11 @@
   "my_dashboard",
   "hxml-viewer",
   "its-report-compiler",
-  "f1-ipp-filter-simulator",
   "component_database",
+  "f1-ipp-filter-simulator",
   "mems-mic-explorer",
   "balance-armature",
   "say",
-  "small-tools"
+  "excalidraw",
+  "pdfarranger"
 ]

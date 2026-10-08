@@ -8,13 +8,18 @@ with WebGPU acceleration and mixed-precision (FP16/Q4) quantization.
 from __future__ import annotations
 
 import json
+import mimetypes
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+
+mimetypes.add_type("application/octet-stream", ".onnx")
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("text/javascript", ".mjs")
 
 from server.module import PortalModule
 
@@ -30,12 +35,22 @@ ICON = (
 
 router = APIRouter()
 
+SAY_DIR = Path(__file__).resolve().parent
+DATA_DIR = SAY_DIR / "data"
+NOTES_DIR = DATA_DIR / "notes"
+RECORDINGS_DIR = DATA_DIR / "recordings"
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "scratch" / "dictations"
 
 
-def _ensure_storage_dir() -> Path:
+def _ensure_dirs() -> None:
+    NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    return STORAGE_DIR
+
+
+def _safe_id(note_id: str) -> str:
+    cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', note_id.strip())
+    return cleaned[:80] or f"note_{int(datetime.now().timestamp() * 1000)}"
 
 
 def _safe_filename(name: str) -> str:
@@ -61,6 +76,166 @@ def plugin_status() -> Dict[str, Any]:
     }
 
 
+@router.get("/models")
+def list_local_models() -> List[Dict[str, Any]]:
+    """Lists status of offline ONNX models saved on local disk."""
+    try:
+        from modules.say.download_model import get_local_models_status
+        return get_local_models_status()
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+@router.post("/models/download")
+def trigger_model_download(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    """Triggers background download of model weights to local disk."""
+    model_key = payload.get("model", "whisper-large-v3-turbo")
+    import threading
+    from modules.say.download_model import download_model_files
+
+    t = threading.Thread(target=download_model_files, args=(model_key,), daemon=True)
+    t.start()
+    return {"status": "started", "model": model_key}
+
+
+@router.get("/notes")
+def list_notes() -> List[Dict[str, Any]]:
+    """Returns all dictation notes stored on disk, ordered by latest update."""
+    _ensure_dirs()
+    notes: List[Dict[str, Any]] = []
+    for f in sorted(NOTES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+            note_id = data.get("id") or f.stem
+            audio_path = RECORDINGS_DIR / f"{note_id}.webm"
+            data["hasAudio"] = audio_path.is_file() and audio_path.stat().st_size > 0
+            if data["hasAudio"]:
+                data["audioUrl"] = f"/api/say/recordings/{note_id}"
+                data["audioSizeBytes"] = audio_path.stat().st_size
+            notes.append(data)
+        except Exception:
+            continue
+    return notes
+
+
+@router.get("/notes/{note_id}")
+def get_note(note_id: str) -> Dict[str, Any]:
+    """Retrieves a single note from disk."""
+    _ensure_dirs()
+    sid = _safe_id(note_id)
+    target = NOTES_DIR / f"{sid}.json"
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Note not found")
+    try:
+        with open(target, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        audio_path = RECORDINGS_DIR / f"{sid}.webm"
+        data["hasAudio"] = audio_path.is_file() and audio_path.stat().st_size > 0
+        if data["hasAudio"]:
+            data["audioUrl"] = f"/api/say/recordings/{sid}"
+            data["audioSizeBytes"] = audio_path.stat().st_size
+        return data
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read note: {exc}")
+
+
+@router.post("/notes/{note_id}")
+def save_note(note_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Persists a note to disk atomically."""
+    _ensure_dirs()
+    sid = _safe_id(note_id)
+    payload["id"] = sid
+    if "updatedAt" not in payload:
+        payload["updatedAt"] = int(datetime.now().timestamp() * 1000)
+
+    audio_path = RECORDINGS_DIR / f"{sid}.webm"
+    has_audio = audio_path.is_file() and audio_path.stat().st_size > 0
+    payload["hasAudio"] = has_audio
+    if has_audio:
+        payload["audioUrl"] = f"/api/say/recordings/{sid}"
+        payload["audioSizeBytes"] = audio_path.stat().st_size
+
+    target = NOTES_DIR / f"{sid}.json"
+    temp_target = NOTES_DIR / f"{sid}.tmp"
+    try:
+        with open(temp_target, "w", encoding="utf-8") as fp:
+            json.dump(payload, fp, indent=2, ensure_ascii=False)
+        temp_target.replace(target)
+        return {"status": "ok", "id": sid, "updatedAt": payload["updatedAt"], "hasAudio": has_audio}
+    except Exception as exc:
+        if temp_target.is_file():
+            temp_target.unlink()
+        raise HTTPException(status_code=500, detail=f"Failed to save note: {exc}")
+
+
+@router.delete("/notes/{note_id}")
+def delete_note(note_id: str) -> Dict[str, Any]:
+    """Deletes a note and its recorded audio file from disk."""
+    _ensure_dirs()
+    sid = _safe_id(note_id)
+    target = NOTES_DIR / f"{sid}.json"
+    audio_target = RECORDINGS_DIR / f"{sid}.webm"
+    if target.is_file():
+        target.unlink()
+    if audio_target.is_file():
+        audio_target.unlink()
+    return {"status": "ok", "deleted": sid}
+
+
+@router.post("/recordings/{note_id}")
+async def upload_recording(note_id: str, request: Request) -> Dict[str, Any]:
+    """Saves raw recorded audio bytes to disk for permanent session persistence."""
+    _ensure_dirs()
+    sid = _safe_id(note_id)
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty audio recording body")
+
+    target = RECORDINGS_DIR / f"{sid}.webm"
+    try:
+        with open(target, "wb") as fp:
+            fp.write(body)
+
+        # Update note JSON metadata if present
+        note_target = NOTES_DIR / f"{sid}.json"
+        if note_target.is_file():
+            try:
+                with open(note_target, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                data["hasAudio"] = True
+                data["audioUrl"] = f"/api/say/recordings/{sid}"
+                data["audioSizeBytes"] = len(body)
+                with open(note_target, "w", encoding="utf-8") as fp:
+                    json.dump(data, fp, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+
+        return {
+            "status": "ok",
+            "id": sid,
+            "size_bytes": len(body),
+            "audio_url": f"/api/say/recordings/{sid}",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save recording: {exc}")
+
+
+@router.get("/recordings/{note_id}")
+def stream_recording(note_id: str):
+    """Streams a saved recording with HTTP Range support for audio scrubbing & timestamps."""
+    _ensure_dirs()
+    sid = _safe_id(note_id)
+    target = RECORDINGS_DIR / f"{sid}.webm"
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Audio recording not found")
+    return FileResponse(
+        path=str(target),
+        media_type="audio/webm",
+        filename=f"{sid}.webm",
+    )
+
+
 @router.post("/export")
 def export_transcript(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Saves a transcript to a local file on disk."""
@@ -72,11 +247,11 @@ def export_transcript(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     if not content:
         raise HTTPException(status_code=400, detail="Transcript content cannot be empty.")
 
-    storage = _ensure_storage_dir()
+    _ensure_dirs()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_title = _safe_filename(title.lower().replace(" ", "_"))
     filename = f"{safe_title}_{timestamp}.{file_format}"
-    target_path = storage / filename
+    target_path = STORAGE_DIR / filename
 
     try:
         if file_format == "json":
@@ -105,9 +280,9 @@ def export_transcript(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 @router.get("/exports")
 def list_exported_transcripts() -> List[Dict[str, Any]]:
     """Lists all saved transcripts in the local storage directory."""
-    storage = _ensure_storage_dir()
+    _ensure_dirs()
     files: List[Dict[str, Any]] = []
-    for item in sorted(storage.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    for item in sorted(STORAGE_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if item.is_file() and item.suffix in [".md", ".txt", ".json"]:
             files.append({
                 "filename": item.name,
@@ -120,9 +295,9 @@ def list_exported_transcripts() -> List[Dict[str, Any]]:
 @router.delete("/exports/{filename}")
 def delete_exported_transcript(filename: str) -> Dict[str, Any]:
     """Deletes an exported transcript from disk."""
-    storage = _ensure_storage_dir()
+    _ensure_dirs()
     safe_name = _safe_filename(filename)
-    target_path = storage / safe_name
+    target_path = STORAGE_DIR / safe_name
     if not target_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     target_path.unlink()
