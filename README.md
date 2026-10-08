@@ -92,14 +92,40 @@ core or any other plugin.
 
 ## Plugins
 
-| Plugin | Type | Status |
-|--------|------|--------|
-| Balanced Armature Simulator | Static (HTML + Web Audio) | Live |
-| HXML Viewer | Python (`xml`) + Plotly | Live |
-| ITS Report Compiler | Python (`pdfplumber`) + HTML table | Live |
-| F1 Filter Simulator | Python (`numpy`/`scipy`) + Plotly | Live |
-| my_dashboard | Static (React + TypeScript + Tailwind + D3) | Live |
+All plugins run 100% locally and offline.
 
-The compute-heavy plugins keep their original Python logic on the backend
-unchanged; only the UI moved to the browser. Plotting uses a locally vendored
-Plotly (`shared/plotly.min.js`) so the portal works fully offline.
+| Plugin | ID | Type | Description | Status |
+|--------|----|------|-------------|--------|
+| **Executive Dashboard** | `my_dashboard` | React + TypeScript + D3 | High-level metrics, acoustic overview, and tool launcher | Live |
+| **HXML Viewer** | `hxml-viewer` | Python (`xml`) + Plotly | Hearing aid XML frequency response analyzer | Live |
+| **ITS Report Compiler** | `its-report-compiler` | Python (`pdfplumber`) | Automated parsing and table compilation of ITS test reports | Live |
+| **Component Database** | `component_database` | Python (`sqlite`/FastAPI) + Web | Searchable repository of electroacoustic components and datasheets | Live |
+| **F1 Filter Simulator** | `f1-ipp-filter-simulator` | Python (`numpy`/`scipy`) + Plotly | Interactive digital and acoustic filter simulation | Live |
+| **MEMS Mic Explorer** | `mems-mic-explorer` | Python + Plotly | MEMS microphone specifications, directivity, and frequency response | Live |
+| **Balanced Armature Simulator** | `balance-armature` | Static (HTML + Web Audio) | Real-time receiver modeling and acoustic simulation | Live |
+| **Say (Speech-to-Text)** | `say` | ONNX Runtime (WebGPU / WASM) | Real-time, offline voice dictation and transcription powered by Whisper | Live |
+| **Excalidraw Whiteboard** | `excalidraw` | Standalone Web Bundle | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard | Live |
+| **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
+
+---
+
+### Featured Standalone Utilities
+
+#### 1. PDF Arranger (`modules/pdfarranger/`)
+Powered by [PDF Arranger](https://github.com/pdfarranger/pdfarranger), streamed seamlessly via GTK3 Broadway HTML5 daemon on `127.0.0.1:8185`:
+- **Visual Drag & Drop Reordering**: High-contrast Cairo-rendered insertion guides and live drag badges.
+- **Dedicated Toolbar Controls**: Instant **Undo** (`↶`), **Redo** (`↷`), **Move Left** (`◀`), and **Move Right** (`▶`) buttons directly in the header bar.
+- **Native Windows 11 Dialogs**: Uses system `IFileOpenDialog` and `IFileSaveDialog` with Quick Access and search.
+- **Streamlined Interface**: Clean layout without duplicate title headers, redundant import buttons, or extraneous window controls.
+- **Smooth White Screen Restarts**: Broadway display styled to maintain a clean white background during reloads.
+- **Tracked Customizations**: Custom patches and UI definitions are maintained in `modules/pdfarranger/overrides/`, keeping heavy portable binaries out of Git.
+
+#### 2. Excalidraw Whiteboard (`modules/excalidraw/`)
+Powered by [Excalidraw](https://github.com/excalidraw/excalidraw):
+- **100% Offline Canvas**: Packaged with all fonts, assets, and local persistence.
+- **Clean Workspace**: Streamlined toolbar without redundant branding headers for maximum drawing canvas space.
+
+#### 3. Say Dictation (`modules/say/`)
+- **Offline Speech-to-Text**: Runs Whisper models locally in the browser using ONNX Runtime WebGPU and WASM SIMD.
+- **Domain Biasing & VAD**: Built-in voice activity detection and audio chunk streaming.
+
