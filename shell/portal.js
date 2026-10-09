@@ -450,7 +450,7 @@ function openModule(id, updateHash = true) {
   // First visit this session: create and cache a dedicated iframe for it.
   const frame = document.createElement("iframe");
   frame.title = m.title;
-  frame.allow = "microphone; speaker-selection; clipboard-read; clipboard-write; display-capture";
+  frame.allow = "microphone; speaker-selection; clipboard-read; clipboard-write; display-capture; fullscreen";
   frame.src = m.entry + (m.entry.includes("?") ? "&" : "?") + "_v=" + Date.now();
   el.loader.classList.remove("hidden");
   const hideLoader = () => { if (state.activeId === id) el.loader.classList.add("hidden"); };

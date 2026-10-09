@@ -201,7 +201,7 @@ async function loadPipeline(modelId = DEFAULT_MODEL, requestedDevice = null, req
         message: errMsg,
         modelId,
         device,
-        canFallback: device === 'webgpu',
+        canFallback: device === 'webgpu' && !modelId.includes('large'),
       });
       throw err;
     }

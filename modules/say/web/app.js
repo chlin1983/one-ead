@@ -486,6 +486,8 @@ function handleStreamChunkComplete(chunkId, output, stats) {
 function handleWorkerError(errData) {
   state.isWorkerBusy = false;
   console.error('[Say Worker Error]', errData);
+  // A failed ONNX session can leave the shared WASM heap unusable for every later model; start fresh.
+  if (errData.stage === 'transcribe' || errData.stage === 'load') initWorker();
   el.progressStatusTitle.textContent = `Error: ${errData.message || 'Processing failed'}`;
   el.progressBarFill.style.width = '0%';
   el.progressPercentage.textContent = 'Failed';
@@ -1564,17 +1566,16 @@ function wireEvents() {
     el.engineStatusText.textContent = isTiny ? 'Whisper Tiny (Instant)' : 'Whisper Turbo';
     showToast(`Model: ${isTiny ? 'Whisper Tiny (~0.3s Instant)' : 'Whisper Turbo (Studio)'}`, 'info');
 
-    // Trigger preload in worker immediately on switch
-    if (state.worker) {
-      state.worker.postMessage({
-        type: 'load',
-        payload: {
-          modelId: state.selectedModel,
-          device: isTiny ? 'wasm' : state.selectedDevice,
-          dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
-        },
-      });
-    }
+    // ORT never returns WASM heap memory, so load each model in a fresh worker.
+    initWorker();
+    state.worker.postMessage({
+      type: 'load',
+      payload: {
+        modelId: state.selectedModel,
+        device: isTiny ? 'wasm' : state.selectedDevice,
+        dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
+      },
+    });
   };
 
   if (el.modelQuickSelect) {

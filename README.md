@@ -106,6 +106,7 @@ All plugins run 100% locally and offline.
 | **Say (Speech-to-Text)** | `say` | ONNX Runtime (WebGPU / WASM) | Real-time, offline voice dictation and transcription powered by Whisper | Live |
 | **Excalidraw Whiteboard** | `excalidraw` | Standalone Web Bundle | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard | Live |
 | **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
+| **Chili3D CAD** | `chili3d` | WebAssembly + OpenCascade | Browser-native parametric 3D CAD modeling with dual local persistence | Live |
 
 ---
 
@@ -125,7 +126,14 @@ Powered by [Excalidraw](https://github.com/excalidraw/excalidraw):
 - **100% Offline Canvas**: Packaged with all fonts, assets, and local persistence.
 - **Clean Workspace**: Streamlined toolbar without redundant branding headers for maximum drawing canvas space.
 
-#### 3. Say Dictation (`modules/say/`)
+#### 3. Chili3D CAD (`modules/chili3d/`)
+Powered by [Chili3D](https://github.com/xiangechen/chili3d):
+- **Parametric 3D Solid Modeling**: Full CAD capabilities with sketches, extrusions, revolutions, fillets, and booleans in WebAssembly.
+- **Dual Persistence Mirror**: Saves instantaneously to browser IndexedDB and mirrors projects to server disk (`data/store/`) so models persist across cache clears and restarts.
+- **Document Switcher & Auto-save**: Multi-document tab bar with automatic background saving.
+
+#### 4. Say Dictation (`modules/say/`)
 - **Offline Speech-to-Text**: Runs Whisper models locally in the browser using ONNX Runtime WebGPU and WASM SIMD.
 - **Domain Biasing & VAD**: Built-in voice activity detection and audio chunk streaming.
+
 

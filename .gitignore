@@ -45,3 +45,13 @@ modules/say/data/
 scratch/dictations/
 
 
+
+# Chili3D generated build + all local data (works, config, build workspace)
+modules/chili3d/web/app/
+modules/chili3d/web/app.new/
+modules/chili3d/web/app.old/
+modules/chili3d/data/
+
+# Excalidraw trash
+modules/excalidraw/data/trash/
+

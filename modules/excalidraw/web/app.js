@@ -340,11 +340,6 @@
       renderDrawings();
     });
 
-    $("btn-open-tab")?.addEventListener("click", () => {
-      const targetUrl = `canvas/?file=${encodeURIComponent(state.activeFileId || "default")}`;
-      window.open(targetUrl, "_blank");
-    });
-
     $("boards-list")?.addEventListener("click", (e) => {
       const editBtn = e.target.closest(".edit-name-btn");
       if (editBtn) {
