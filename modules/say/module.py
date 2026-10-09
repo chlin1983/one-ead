@@ -25,11 +25,12 @@ from server.module import PortalModule
 
 ICON = (
     '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>'
-    '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>'
-    '<line x1="12" y1="19" x2="12" y2="22"/>'
-    '<line x1="8" y1="22" x2="16" y2="22"/>'
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+    # Line-art head facing right: open skull arc, forehead, nose, lips, chin and a curved neck; three sound waves.
+    '<path d="M2.6 14C1.3 12.4.9 10.8 1 9.2 1.2 5.4 4.2 2.9 8 2.9c3.8 0 6.8 1.9 7 4.9L15.1 9.4 16.4 13.1 15.4 13.9 15.9 15 14.6 15.7 15.3 16.7 14.5 18.3C13.2 19.3 12 19.4 11 19.4 10.2 19.5 10.1 20.2 10.1 21"/>'
+    '<path d="M17.4 10a5 5 0 0 1 0 6.3"/>'
+    '<path d="M18.8 8.5a6 6 0 0 1 0 9.1"/>'
+    '<path d="M20.2 7.2a8 8 0 0 1 0 11.8"/>'
     '</svg>'
 )
 

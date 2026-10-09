@@ -26,13 +26,16 @@
     return `${h._undos.length}/${h._redos.length}/${idOf(h._undos[h._undos.length - 1])}`;
   };
 
-  async function save(doc, isActive) {
+  async function save(doc, isActive, fit) {
     // Capture everything synchronously: when this runs because the start page is opening,
     // the editor is still showing and the start page must see the finished write.
     const data = doc.serialize();
     let image;
     if (isActive) {
-      try { image = app.activeView.toImage(); } catch (_) { /* keep previous thumbnail */ }
+      try {
+        if (fit) app.activeView.cameraController.fitContent(); // opened files: thumbnail of the whole model
+        image = app.activeView.toImage();
+      } catch (_) { /* keep previous thumbnail */ }
     }
     if (image === undefined) {
       const prev = await app.storage.get(DB, "recents", doc.id);
@@ -59,20 +62,34 @@
       const sig = signature(doc);
       let st = state.get(doc);
       if (!st) {
-        state.set(doc, { saved: sig, last: sig, changedAt: 0, busy: false });
+        st = { saved: sig, last: sig, changedAt: 0, busy: false, fresh: false, freshAt: 0 };
+        state.set(doc, st);
+        // A document that arrives with content but is not in storage was opened/imported from a
+        // file: it should become a saved project at once, not wait for a first edit.
+        const stState = st;
+        app.storage.get(DB, "documents", doc.id).then((stored) => {
+          const root = doc.modelManager && doc.modelManager.rootNode;
+          if (!stored && root && root.firstChild) {
+            stState.fresh = true;
+            stState.freshAt = Date.now();
+          }
+        }).catch(() => {});
         continue;
       }
       if (sig !== st.last) {
         st.last = sig;
         st.changedAt = Date.now();
       }
-      if (st.last === st.saved || st.busy) continue;
-      if (!force && Date.now() - st.changedAt < QUIET_MS) continue;
+      const dirty = st.last !== st.saved;
+      const quiet = force || Date.now() - st.changedAt >= QUIET_MS;
+      // Give a freshly opened file a moment to become the active view before its thumbnail is taken.
+      const freshDue = st.fresh && (force || Date.now() - st.freshAt >= (doc === active ? 700 : 3000));
+      if (st.busy || !((dirty && quiet) || freshDue)) continue;
 
       st.busy = true;
       const savedSig = st.last;
-      save(doc, doc === active)
-        .then(() => { st.saved = savedSig; })
+      save(doc, doc === active, st.fresh)
+        .then(() => { st.saved = savedSig; st.fresh = false; })
         .catch((err) => {
           console.warn("[oneead] autosave failed, will retry", err);
           st.changedAt = Date.now();

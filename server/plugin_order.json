@@ -1,13 +1,13 @@
 [
   "my_dashboard",
-  "excalidraw",
   "hxml-viewer",
   "its-report-compiler",
   "component_database",
   "f1-ipp-filter-simulator",
-  "mems-mic-explorer",
-  "balance-armature",
-  "pdfarranger",
+  "mems-microphone-explorer",
+  "balance-armature-receiver-explorer",
   "chili3d",
+  "excalidraw",
+  "pdfarranger",
   "say"
 ]

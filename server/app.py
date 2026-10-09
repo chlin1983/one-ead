@@ -79,6 +79,19 @@ def create_app() -> FastAPI:
                     StaticFiles(directory=str(web_path), html=True),
                     name="module-f1-filter-simulator-alias",
                 )
+            elif module.id == "balance-armature-receiver-explorer":
+                app.mount(
+                    "/modules/balance-armature",
+                    StaticFiles(directory=str(web_path), html=True),
+                    name="module-balance-armature-alias",
+                )
+            elif module.id == "mems-microphone-explorer":
+                app.mount(
+                    "/modules/mems-mic-explorer",
+                    StaticFiles(directory=str(web_path), html=True),
+                    name="module-mems-mic-explorer-alias",
+                )
+
 
     # Shared assets (vendored libraries, common styles) available to all modules.
     app.mount("/shared", StaticFiles(directory=str(SHARED_DIR)), name="shared")

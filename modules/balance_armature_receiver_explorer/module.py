@@ -1,4 +1,4 @@
-"""Balanced Armature receiver simulator — first portal module.
+"""Balance Armature Receiver Explorer — portal module.
 
 This is a fully client-side tool (HTML + JS + Web Audio), so it has no backend
 router; the portal simply serves its ``web/`` folder. It is exposed to the shell
@@ -22,8 +22,8 @@ ICON = (
 )
 
 MODULE = PortalModule(
-    id="balance-armature",
-    title="Balanced Armature Simulator",
+    id="balance-armature-receiver-explorer",
+    title="Balance Armature Receiver Explorer",
     subtitle="Electromechanical & acoustic physics engine",
     icon=ICON,
     accent="#4f8cff",

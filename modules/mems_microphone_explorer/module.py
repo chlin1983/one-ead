@@ -1,4 +1,4 @@
-"""MEMS Microphone Acoustic Explorer — interactive engineering textbook + 3D lab.
+"""MEMS Microphone Explorer — interactive engineering textbook + 3D lab.
 
 Fully client-side. The React/TypeScript source lives in ``app-src/`` and is built
 (``npm run build`` there) into ``web/``; the portal only serves ``web/``.
@@ -19,10 +19,11 @@ ICON = (
 )
 
 MODULE = PortalModule(
-    id="mems-mic-explorer",
-    title="MEMS Mic Acoustic Explorer",
+    id="mems-microphone-explorer",
+    title="MEMS Microphone Explorer",
     subtitle="Interactive MEMS microphone textbook & 3D lab",
     icon=ICON,
     accent="#0ea5a4",
     order=70,
 )
+

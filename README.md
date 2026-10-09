@@ -35,7 +35,7 @@ one-ead/
 │   ├── registry.py        # auto-discovers modules in modules/
 │   └── module.py          # PortalModule contract (the plugin interface)
 ├── modules/               # one folder per plugin — drop-in, auto-registered
-│   └── balance_armature/
+│   └── balance_armature_receiver_explorer/
 │       ├── module.py      # MODULE manifest (id, title, icon, ...)
 │       └── web/           # the plugin's HTML/JS/CSS (served at /modules/<id>/)
 ├── shared/                # vendored libraries (Plotly) + common module.css
@@ -101,8 +101,8 @@ All plugins run 100% locally and offline.
 | **ITS Report Compiler** | `its-report-compiler` | Python (`pdfplumber`) | Automated parsing and table compilation of ITS test reports | Live |
 | **Component Database** | `component_database` | Python (`sqlite`/FastAPI) + Web | Searchable repository of electroacoustic components and datasheets | Live |
 | **F1 Filter Simulator** | `f1-ipp-filter-simulator` | Python (`numpy`/`scipy`) + Plotly | Interactive digital and acoustic filter simulation | Live |
-| **MEMS Mic Explorer** | `mems-mic-explorer` | Python + Plotly | MEMS microphone specifications, directivity, and frequency response | Live |
-| **Balanced Armature Simulator** | `balance-armature` | Static (HTML + Web Audio) | Real-time receiver modeling and acoustic simulation | Live |
+| **MEMS Microphone Explorer** | `mems-microphone-explorer` | Python + Plotly | MEMS microphone specifications, directivity, and frequency response | Live |
+| **Balance Armature Receiver Explorer** | `balance-armature-receiver-explorer` | Static (HTML + Web Audio) | Real-time receiver modeling and acoustic simulation | Live |
 | **Say (Speech-to-Text)** | `say` | ONNX Runtime (WebGPU / WASM) | Real-time, offline voice dictation and transcription powered by Whisper | Live |
 | **Excalidraw Whiteboard** | `excalidraw` | Standalone Web Bundle | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard | Live |
 | **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
