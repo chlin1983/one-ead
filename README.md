@@ -106,6 +106,7 @@ All plugins run 100% locally and offline.
 | Plugin | ID | Type | Description | Status |
 |--------|----|------|-------------|--------|
 | **Executive Dashboard** | `my_dashboard` | React + TypeScript + D3 | High-level metrics, acoustic overview, and tool launcher | Live |
+| **LLM Course & Fundamentals** | `llm-course` | Interactive Web + FastAPI | Step-by-step master roadmap & interactive guide based on Maxime Labonne's llm-course | Live |
 | **HXML Viewer** | `hxml-viewer` | Python (`xml`) + Plotly | Hearing aid XML frequency response analyzer | Live |
 | **ITS Report Compiler** | `its-report-compiler` | Python (`pdfplumber`) | Automated parsing and table compilation of ITS test reports | Live |
 | **Component Database** | `component_database` | Python (`sqlite`/FastAPI) + Web | Searchable repository of electroacoustic components and datasheets | Live |
@@ -145,5 +146,12 @@ Powered by [Chili3D](https://github.com/xiangechen/chili3d):
 #### 4. Say Dictation (`modules/say/`)
 - **Offline Speech-to-Text**: Runs Whisper models locally in the browser using ONNX Runtime WebGPU and WASM SIMD.
 - **Domain Biasing & VAD**: Built-in voice activity detection and audio chunk streaming.
+
+#### 5. LLM Fundamentals & Course Guide (`modules/llm_course_guide/`)
+Powered by [mlabonne/llm-course](https://github.com/mlabonne/llm-course) by Maxime Labonne:
+- **Comprehensive 4-Track Curriculum**: Fundamentals (Math, Python, Neural Nets, NLP), Scientist (Architecture, Pre-training, SFT/LoRA, Alignment, Quantization, Merging), Engineer (vLLM serving, Vector DBs, RAG, Agents), and 1-Click Colab tools.
+- **5 Interactive Simulators**: Subword Tokenizer, Temperature & Top-P Sampling, Quantization VRAM Calculator, Embedding Cosine Similarity, and Attention Heatmap.
+- **Local Disk Persistence**: Progress, quiz answers, and personal study notes are auto-saved to disk at `modules/llm_course_guide/data/progress.json`.
+- **Default Light Theme**: Styled to seamlessly match the One EAD portal interface with instant theme switching.
 
 
