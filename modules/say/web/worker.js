@@ -17,8 +17,8 @@ env.localModelPath = '/modules/say/models/';
 // Default points at jsDelivr (slow/blocked on corporate networks); use the vendored runtime.
 if (env.backends.onnx?.wasm) env.backends.onnx.wasm.wasmPaths = '/modules/say/vendor/';
 
-// Default configuration: Whisper Tiny for instant sub-second dictation
-const DEFAULT_MODEL = 'onnx-community/whisper-tiny';
+// Default configuration: Moonshine Tiny for ultra-low memory, CPU-first, instant dictation
+const DEFAULT_MODEL = 'onnx-community/moonshine-tiny-ONNX';
 
 let transcriber = null;
 let currentModelId = null;
@@ -26,6 +26,20 @@ let currentDevice = null;
 let currentDtype = null;
 let isInitializing = false;
 let pipelineLoadingPromise = null;
+
+/**
+ * Collapses pathological repetition loops (e.g. "three, three, three..." or "[MUSIC] [MUSIC]")
+ * caused by audio noise or silence hallucinations.
+ */
+function cleanRepetitiveText(rawText) {
+  if (!rawText) return rawText;
+  let text = rawText;
+  // Collapse single words repeating 3+ times: "three, three, three, three" -> "three"
+  text = text.replace(/(\b[a-zA-Z0-9_\-']+\b[\s,]*)\1{2,}/gi, '$1');
+  // Collapse token tags repeating 2+ times: "[MUSIC] [MUSIC]" -> "[MUSIC]"
+  text = text.replace(/(\[[^\]]+\][\s,]*)\1{1,}/gi, '$1');
+  return text.trim();
+}
 
 /**
  * Phase 2: Domain Vocabulary Normalizer for Electroacoustic Engineering
@@ -70,18 +84,29 @@ function applyDomainEnhancements(rawText, customTerms = []) {
 
 /**
  * Normalizes device and dtype configuration depending on model.
- * Whisper Tiny runs on WebAssembly SIMD (q8 / quantized) in ~0.3s.
- * Whisper Turbo runs on WebGPU (FP16 encoder + Q4 decoder) for heavy studio jobs.
+ * - Moonshine (Tiny / Base): Ultra-lightweight CPU-first models on WebAssembly SIMD (q8 / quantized).
+ * - Whisper Tiny: WebAssembly SIMD (q8 / quantized) in ~0.3s.
+ * - Whisper Turbo: WebGPU (FP16 encoder + Q4 decoder) for studio jobs with GPU VRAM.
  */
 function resolveDeviceAndDtype(modelId, requestedDevice, requestedDtype) {
-  if (modelId.includes('whisper-tiny')) {
+  const mid = (modelId || '').toLowerCase();
+
+  // Moonshine: CPU-First, variable length, ~27MB footprint
+  if (mid.includes('moonshine')) {
     return {
       device: 'wasm',
       dtype: 'q8',
     };
   }
 
-  if (modelId.includes('whisper-large-v3-turbo')) {
+  if (mid.includes('whisper-tiny') || mid.includes('whisper-base')) {
+    return {
+      device: requestedDevice === 'webgpu' ? 'webgpu' : 'wasm',
+      dtype: 'q8',
+    };
+  }
+
+  if (mid.includes('whisper-large-v3-turbo')) {
     return {
       device: requestedDevice === 'wasm' ? 'wasm' : 'webgpu',
       dtype: {
@@ -91,7 +116,7 @@ function resolveDeviceAndDtype(modelId, requestedDevice, requestedDtype) {
     };
   }
 
-  const device = requestedDevice || 'webgpu';
+  const device = requestedDevice || 'wasm';
   const dtype = requestedDtype && requestedDtype !== 'auto'
     ? requestedDtype
     : (device === 'webgpu' ? 'fp16' : 'q8');
@@ -201,7 +226,8 @@ async function loadPipeline(modelId = DEFAULT_MODEL, requestedDevice = null, req
         message: errMsg,
         modelId,
         device,
-        canFallback: device === 'webgpu' && !modelId.includes('large'),
+        canFallback: true,
+        fallbackModel: 'onnx-community/moonshine-tiny-ONNX',
       });
       throw err;
     }
@@ -216,45 +242,49 @@ async function loadPipeline(modelId = DEFAULT_MODEL, requestedDevice = null, req
 async function runTranscription(audio, options, isStream = false) {
   const audioDurationNum = audio.length / 16000;
   const audioDurationSec = audioDurationNum.toFixed(2);
+  const isMoonshine = (currentModelId || '').toLowerCase().includes('moonshine');
 
-  const runOptions = {
-    return_timestamps: options?.return_timestamps !== false,
-  };
+  const runOptions = {};
+  if (!isMoonshine) {
+    runOptions.return_timestamps = options?.return_timestamps !== false;
 
-  // Only apply chunking/striding for long audio (> 30s).
-  // For short audio clips (e.g. 7s dictation), single-pass is 5-10x faster!
-  if (audioDurationNum > 30) {
-    runOptions.chunk_length_s = options?.chunk_length_s ?? 30;
-    runOptions.stride_length_s = options?.stride_length_s ?? 5;
+    // Only apply chunking/striding for long audio (> 30s).
+    // For short audio clips (e.g. 7s dictation), single-pass is 5-10x faster!
+    if (audioDurationNum > 30) {
+      runOptions.chunk_length_s = options?.chunk_length_s ?? 30;
+      runOptions.stride_length_s = options?.stride_length_s ?? 5;
+    }
+
+    if (options?.language && options.language !== 'auto') {
+      runOptions.language = options.language;
+    }
+    if (options?.task) {
+      runOptions.task = options.task;
+    }
+
+    // Domain vocabulary prompt biasing
+    if (options?.initial_prompt) {
+      runOptions.initial_prompt = options.initial_prompt;
+    }
   }
 
-  if (options?.language && options.language !== 'auto') {
-    runOptions.language = options.language;
-  }
-  if (options?.task) {
-    runOptions.task = options.task;
-  }
-
-  // Domain vocabulary prompt biasing
-  if (options?.initial_prompt) {
-    runOptions.initial_prompt = options.initial_prompt;
-  }
-
-  console.log(`[Say Worker] Running transcription for ${audioDurationSec}s audio on ${currentDevice}...`);
+  console.log(`[Say Worker] Running transcription (${isMoonshine ? 'Moonshine CPU-first' : 'Whisper'}) for ${audioDurationSec}s audio on ${currentDevice}...`);
   const transcribeStartTime = performance.now();
   const output = await transcriber(audio, runOptions);
   const transcribeDurationSec = ((performance.now() - transcribeStartTime) / 1000).toFixed(2);
   const speedMultiplier = (audioDurationNum / Math.max(0.01, parseFloat(transcribeDurationSec))).toFixed(1);
   console.log(`[Say Worker] Transcription completed in ${transcribeDurationSec}s (${speedMultiplier}x real-time)`);
 
-  // Apply Phase 2 domain normalizer to post-process text
+  // Apply repetition suppression & Phase 2 domain normalizer to post-process text
   const customTerms = options?.customTerms || [];
   if (output.text) {
+    output.text = cleanRepetitiveText(output.text);
     output.text = applyDomainEnhancements(output.text, customTerms);
   }
   if (Array.isArray(output.chunks)) {
     for (const chunk of output.chunks) {
       if (chunk.text) {
+        chunk.text = cleanRepetitiveText(chunk.text);
         chunk.text = applyDomainEnhancements(chunk.text, customTerms);
       }
     }
@@ -289,8 +319,8 @@ self.addEventListener('message', (event) => {
 function describeError(err) {
   const raw = err?.message ?? String(err);
   if (/^\d+$/.test(String(raw).trim())) {
-    return `ONNX Runtime failed (code ${raw}) on ${currentDevice || 'unknown device'} with ${currentModelId || 'model'}. ` +
-      'Usually GPU/memory exhaustion or an unsupported GPU op; try Whisper Tiny or reload the plugin.';
+    return `ONNX Runtime memory allocation failed (code ${raw}) on ${currentDevice || 'unknown device'} with ${currentModelId || 'model'}. ` +
+      'Browser memory limit exceeded (WebGPU buffer / 32-bit WASM limit). Switched to lightweight Moonshine Tiny (CPU-first, ~27MB) or Host System CPU.';
   }
   return raw;
 }

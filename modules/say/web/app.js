@@ -14,6 +14,7 @@ import {
   formatTimestampRange,
   AudioVisualizer,
   VoiceActivityDetector,
+  pcmToWavBlob,
 } from './audio-utils.js';
 
 // Domain Presets for Phase 2
@@ -128,6 +129,8 @@ const el = {
   clearCacheBtn: document.getElementById('clear-cache-btn'),
 
   // Phase 4 Offline Models Elements
+  offlineMoonshineTinyStatus: document.getElementById('offline-moonshine-tiny-status'),
+  offlineMoonshineBaseStatus: document.getElementById('offline-moonshine-base-status'),
   offlineLargeStatus: document.getElementById('offline-large-status'),
   offlineTinyStatus: document.getElementById('offline-tiny-status'),
   downloadOfflineBtn: document.getElementById('download-offline-btn'),
@@ -178,7 +181,7 @@ const state = {
   webgpuAvailable: false,
   gpuAdapterName: '',
   hasFp16: false,
-  selectedModel: 'onnx-community/whisper-tiny',
+  selectedModel: 'onnx-community/moonshine-tiny-ONNX', // Default: Lightweight CPU-First
   selectedDevice: 'wasm',
   selectedDtype: 'auto',
   worker: null,
@@ -193,7 +196,7 @@ async function detectHardwareAcceleration() {
     state.webgpuAvailable = false;
     state.selectedDevice = 'wasm';
     el.deviceSelect.value = 'wasm';
-    updateGpuBadge(false, 'WebAssembly (CPU)');
+    updateGpuBadge(false, 'CPU WASM (Low Footprint)');
     return;
   }
 
@@ -204,23 +207,33 @@ async function detectHardwareAcceleration() {
       state.hasFp16 = adapter.features.has('shader-f16');
       state.gpuAdapterName = adapter.info?.device || adapter.info?.description || 'GPU Accelerator';
 
-      updateGpuBadge(
-        true,
-        `WebGPU Active (${state.hasFp16 ? 'FP16' : 'FP32'})`,
-        `Adapter: ${state.gpuAdapterName}\nFP16 Shader Support: ${state.hasFp16 ? 'Yes' : 'No'}`
-      );
+      if (state.selectedModel.includes('turbo')) {
+        state.selectedDevice = 'webgpu';
+        el.deviceSelect.value = 'webgpu';
+        updateGpuBadge(
+          true,
+          `WebGPU Active (${state.hasFp16 ? 'FP16' : 'FP32'})`,
+          `Adapter: ${state.gpuAdapterName}\nFP16 Shader Support: ${state.hasFp16 ? 'Yes' : 'No'}`
+        );
+      } else {
+        updateGpuBadge(
+          false,
+          'CPU WASM (Low Footprint)',
+          `Adapter: ${state.gpuAdapterName} (Available for WebGPU models)`
+        );
+      }
     } else {
       state.webgpuAvailable = false;
       state.selectedDevice = 'wasm';
       el.deviceSelect.value = 'wasm';
-      updateGpuBadge(false, 'WebAssembly (CPU Fallback)');
+      updateGpuBadge(false, 'CPU WASM (Low Footprint)');
     }
   } catch (err) {
     console.warn('[Say] WebGPU detection error:', err);
     state.webgpuAvailable = false;
     state.selectedDevice = 'wasm';
     el.deviceSelect.value = 'wasm';
-    updateGpuBadge(false, 'WebAssembly (CPU Fallback)');
+    updateGpuBadge(false, 'CPU WASM (Low Footprint)');
   }
 }
 
@@ -492,11 +505,18 @@ function handleWorkerError(errData) {
   el.progressBarFill.style.width = '0%';
   el.progressPercentage.textContent = 'Failed';
 
-  if (errData.canFallback) {
-    showToast('WebGPU failed. Falling back to WebAssembly (CPU)...', 'error');
-    state.selectedDevice = 'wasm';
-    el.deviceSelect.value = 'wasm';
-    updateGpuBadge(false, 'WebAssembly (Fallback)');
+  const isMemoryExhaustion = (errData.message || '').includes('Browser memory') ||
+    (errData.message || '').includes('allocation failed') ||
+    (errData.message || '').includes('697803968');
+
+  if (isMemoryExhaustion && state.selectedModel !== 'onnx-community/moonshine-tiny-ONNX') {
+    showToast('Browser memory limit hit. Auto-switching to Moonshine Tiny (Lightweight CPU)...', 'warning');
+    setTimeout(() => {
+      updateModelSelection('onnx-community/moonshine-tiny-ONNX');
+    }, 1200);
+  } else if (errData.canFallback && state.selectedModel !== 'onnx-community/moonshine-tiny-ONNX') {
+    showToast('Execution failed. Falling back to Moonshine Tiny (CPU-first)...', 'error');
+    updateModelSelection('onnx-community/moonshine-tiny-ONNX');
   } else {
     showToast(`Error: ${errData.message || 'Operation failed'}`, 'error');
   }
@@ -774,11 +794,75 @@ function pauseRecording() {
 }
 
 /**
- * Phase 1: Dispatches an individual VAD sentence chunk to Web Worker
+ * Dispatches audio to host Python faster-whisper CPU engine using 16GB system RAM.
+ * Bypasses all browser tab sandboxes and WebGPU buffer allocation limits.
+ */
+async function sendServerTranscription(audioPcmFloat32, isStream = false) {
+  state.isWorkerBusy = true;
+  el.progressStatusTitle.textContent = isStream
+    ? 'Transcribing live sentence (Host CPU 16GB RAM)...'
+    : 'Transcribing audio on host system RAM...';
+  el.progressBarFill.style.width = '70%';
+  el.progressPercentage.textContent = 'Processing...';
+
+  try {
+    const wavBlob = pcmToWavBlob(audioPcmFloat32);
+    const vocabConfig = getVocabularyConfiguration();
+    const query = new URLSearchParams({
+      model: state.selectedModel,
+      language: el.languageSelect.value,
+      task: el.taskSelect.value,
+      prompt: vocabConfig.initial_prompt || '',
+    });
+
+    const res = await fetch(`/api/say/transcribe?${query.toString()}`, {
+      method: 'POST',
+      body: wavBlob,
+      headers: {
+        'Content-Type': 'audio/wav',
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(err.detail || `Server transcription failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    state.isWorkerBusy = false;
+
+    if (isStream) {
+      handleStreamChunkComplete({
+        output: { text: data.text, chunks: data.chunks },
+        stats: data.stats,
+      });
+    } else {
+      handleTranscriptionComplete({
+        output: { text: data.text, chunks: data.chunks },
+        stats: data.stats,
+      });
+    }
+  } catch (err) {
+    state.isWorkerBusy = false;
+    console.error('[Say Server Error]', err);
+    el.progressStatusTitle.textContent = `Error: ${err.message}`;
+    el.progressBarFill.style.width = '0%';
+    el.progressPercentage.textContent = 'Failed';
+    showToast(`Host CPU transcription error: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Phase 1: Dispatches an individual VAD sentence chunk to Web Worker or Host CPU
  */
 function dispatchStreamChunk(audioPcmFloat32) {
-  if (!state.worker) initWorker();
   state.streamChunkCounter++;
+  if (state.selectedModel.startsWith('server/')) {
+    sendServerTranscription(audioPcmFloat32, true);
+    return;
+  }
+
+  if (!state.worker) initWorker();
 
   const vocabConfig = getVocabularyConfiguration();
   const options = {
@@ -805,9 +889,14 @@ function dispatchStreamChunk(audioPcmFloat32) {
 }
 
 /**
- * Dispatches full audio PCM Float32Array to Web Worker for Whisper processing
+ * Dispatches full audio PCM Float32Array to Web Worker or Host CPU
  */
 function dispatchTranscription(audioPcmFloat32) {
+  if (state.selectedModel.startsWith('server/')) {
+    sendServerTranscription(audioPcmFloat32, false);
+    return;
+  }
+
   if (!state.worker) {
     initWorker();
   }
@@ -1195,6 +1284,18 @@ async function fetchLocalModelsStatus() {
     if (!res.ok) return;
     const models = await res.json();
     for (const m of models) {
+      if (m.key === 'moonshine-tiny' && el.offlineMoonshineTinyStatus) {
+        el.offlineMoonshineTinyStatus.textContent = m.is_ready
+          ? `Ready on Disk (${m.total_size_formatted})`
+          : 'Not on Disk (Auto-caches on use)';
+        el.offlineMoonshineTinyStatus.classList.toggle('ready', m.is_ready);
+      }
+      if (m.key === 'moonshine-base' && el.offlineMoonshineBaseStatus) {
+        el.offlineMoonshineBaseStatus.textContent = m.is_ready
+          ? `Ready on Disk (${m.total_size_formatted})`
+          : 'Not on Disk (Auto-caches on use)';
+        el.offlineMoonshineBaseStatus.classList.toggle('ready', m.is_ready);
+      }
       if (m.key === 'whisper-large-v3-turbo' && el.offlineLargeStatus) {
         el.offlineLargeStatus.textContent = m.is_ready
           ? `Ready on Disk (${m.total_size_formatted})`
@@ -1214,7 +1315,15 @@ async function fetchLocalModelsStatus() {
 }
 
 async function triggerOfflineModelDownload() {
-  const modelPreset = state.selectedModel.includes('turbo') ? 'whisper-large-v3-turbo' : 'whisper-tiny';
+  let modelPreset = 'moonshine-tiny';
+  if (state.selectedModel.includes('moonshine-base')) {
+    modelPreset = 'moonshine-base';
+  } else if (state.selectedModel.includes('turbo')) {
+    modelPreset = 'whisper-large-v3-turbo';
+  } else if (state.selectedModel.includes('whisper-tiny')) {
+    modelPreset = 'whisper-tiny';
+  }
+
   showToast(`Starting disk download for ${modelPreset}...`, 'info');
 
   try {
@@ -1562,9 +1671,43 @@ function wireEvents() {
     state.selectedModel = newModel;
     if (el.modelPresetSelect) el.modelPresetSelect.value = newModel;
     if (el.modelQuickSelect) el.modelQuickSelect.value = newModel;
+
+    const isServer = newModel.startsWith('server/');
+    const isMoonshine = newModel.includes('moonshine');
     const isTiny = newModel.includes('whisper-tiny');
-    el.engineStatusText.textContent = isTiny ? 'Whisper Tiny (Instant)' : 'Whisper Turbo';
-    showToast(`Model: ${isTiny ? 'Whisper Tiny (~0.3s Instant)' : 'Whisper Turbo (Studio)'}`, 'info');
+    const isTurbo = newModel.includes('turbo');
+
+    if (isServer) {
+      el.engineStatusText.textContent = 'Host CPU (16GB RAM)';
+      updateGpuBadge(false, 'Host RAM (16GB)', 'Python faster-whisper CPU engine with full 16GB system RAM');
+      showToast('Engine: Host System CPU (16GB RAM via faster-whisper)', 'info');
+      if (state.worker) state.worker.terminate();
+      return;
+    }
+
+    if (isMoonshine) {
+      state.selectedDevice = 'wasm';
+      if (el.deviceSelect) el.deviceSelect.value = 'wasm';
+      const label = newModel.includes('base') ? 'Moonshine Base (CPU)' : 'Moonshine Tiny (CPU)';
+      el.engineStatusText.textContent = label;
+      updateGpuBadge(false, 'CPU WASM (Low Footprint)');
+      showToast(`Model: ${label} — Lightweight CPU-First Architecture`, 'info');
+    } else if (isTiny) {
+      state.selectedDevice = 'wasm';
+      if (el.deviceSelect) el.deviceSelect.value = 'wasm';
+      el.engineStatusText.textContent = 'Whisper Tiny (Instant)';
+      updateGpuBadge(false, 'CPU WASM (Instant)');
+      showToast('Model: Whisper Tiny (~0.3s Instant)', 'info');
+    } else if (isTurbo) {
+      state.selectedDevice = state.webgpuAvailable ? 'webgpu' : 'wasm';
+      if (el.deviceSelect) el.deviceSelect.value = state.selectedDevice;
+      el.engineStatusText.textContent = 'Whisper Turbo';
+      updateGpuBadge(state.webgpuAvailable, state.webgpuAvailable ? 'WebGPU Active (FP16)' : 'WebAssembly (High RAM)');
+      showToast('Model: Whisper Large-v3-Turbo (Studio WebGPU)', 'info');
+    } else {
+      el.engineStatusText.textContent = newModel.split('/').pop();
+      showToast(`Model: ${newModel.split('/').pop()}`, 'info');
+    }
 
     // ORT never returns WASM heap memory, so load each model in a fresh worker.
     initWorker();
@@ -1572,7 +1715,7 @@ function wireEvents() {
       type: 'load',
       payload: {
         modelId: state.selectedModel,
-        device: isTiny ? 'wasm' : state.selectedDevice,
+        device: state.selectedDevice,
         dtype: state.selectedDtype === 'auto' ? null : state.selectedDtype,
       },
     });
@@ -1594,6 +1737,11 @@ function wireEvents() {
   });
 
   el.preloadModelBtn.addEventListener('click', () => {
+    if (state.selectedModel.startsWith('server/')) {
+      showToast('Host CPU engine (faster-whisper) is always ready on demand.', 'info');
+      closeAllDrawers();
+      return;
+    }
     if (!state.worker) initWorker();
     state.worker.postMessage({
       type: 'load',
@@ -1621,10 +1769,10 @@ function wireEvents() {
     }
   });
 
-  // Portal Shell Theme Sync
+  // Always lock theme to clean white/light theme
   const applyTheme = () => {
-    const theme = localStorage.getItem('ead-portal:theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-theme', 'light');
+    localStorage.setItem('ead-portal:theme', 'light');
   };
   applyTheme();
   window.addEventListener('storage', (e) => {
@@ -1689,8 +1837,8 @@ async function initApp() {
   fetchLocalModelsStatus();
   await syncNotesWithDisk();
 
-  // Background warm-up: preload Whisper Large-v3-Turbo weights into WebGPU
-  if (state.worker) {
+  // Background warm-up: preload default lightweight CPU model
+  if (state.worker && !state.selectedModel.startsWith('server/')) {
     state.worker.postMessage({
       type: 'load',
       payload: {

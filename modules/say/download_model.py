@@ -20,9 +20,9 @@ from typing import Callable, Dict, List, Optional
 MODELS_DIR = Path(__file__).resolve().parent / "web" / "models"
 
 MODEL_PRESETS: Dict[str, Dict[str, Any]] = {
-    "whisper-large-v3-turbo": {
-        "repo_id": "onnx-community/whisper-large-v3-turbo",
-        "dir_name": "whisper-large-v3-turbo",
+    "moonshine-tiny": {
+        "repo_id": "onnx-community/moonshine-tiny-ONNX",
+        "dir_name": "moonshine-tiny",
         "files": [
             "config.json",
             "generation_config.json",
@@ -30,12 +30,22 @@ MODEL_PRESETS: Dict[str, Dict[str, Any]] = {
             "tokenizer.json",
             "tokenizer_config.json",
             "special_tokens_map.json",
-            "added_tokens.json",
-            "vocab.json",
-            "normalizer.json",
-            "quantize_config.json",
-            "onnx/encoder_model_fp16.onnx",
-            "onnx/decoder_model_merged_q4.onnx",
+            "onnx/encoder_model_quantized.onnx",
+            "onnx/decoder_model_merged_quantized.onnx",
+        ],
+    },
+    "moonshine-base": {
+        "repo_id": "onnx-community/moonshine-base-ONNX",
+        "dir_name": "moonshine-base",
+        "files": [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "onnx/encoder_model_quantized.onnx",
+            "onnx/decoder_model_merged_quantized.onnx",
         ],
     },
     "whisper-tiny": {
@@ -54,6 +64,24 @@ MODEL_PRESETS: Dict[str, Dict[str, Any]] = {
             "quantize_config.json",
             "onnx/encoder_model_quantized.onnx",
             "onnx/decoder_model_merged_quantized.onnx",
+        ],
+    },
+    "whisper-large-v3-turbo": {
+        "repo_id": "onnx-community/whisper-large-v3-turbo",
+        "dir_name": "whisper-large-v3-turbo",
+        "files": [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "added_tokens.json",
+            "vocab.json",
+            "normalizer.json",
+            "quantize_config.json",
+            "onnx/encoder_model_fp16.onnx",
+            "onnx/decoder_model_merged_q4.onnx",
         ],
     },
 }

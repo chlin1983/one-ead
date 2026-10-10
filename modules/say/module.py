@@ -59,22 +59,111 @@ def _safe_filename(name: str) -> str:
     return cleaned[:80] or "transcript"
 
 
+_faster_whisper_models: Dict[str, Any] = {}
+
+def get_faster_whisper_model(model_name: str = "base"):
+    clean_name = model_name.replace("faster-whisper-", "").replace("server/", "").strip() or "base"
+    if clean_name not in _faster_whisper_models:
+        import faster_whisper
+        _faster_whisper_models[clean_name] = faster_whisper.WhisperModel(
+            clean_name,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=4,
+        )
+    return _faster_whisper_models[clean_name], clean_name
+
+
 @router.get("/status")
 def plugin_status() -> Dict[str, Any]:
     """Returns the backend status and recommended configuration for Say."""
     return {
         "status": "ready",
         "plugin": "say",
-        "version": "3.0.0",
-        "engine": "@huggingface/transformers-v3",
-        "recommended_model": "onnx-community/whisper-large-v3-turbo",
-        "recommended_device": "webgpu",
-        "dtype": {
-            "encoder_model": "fp16",
-            "decoder_model_merged": "q4",
-        },
-        "description": "High-accuracy local Whisper dictation powered by WebGPU and FP16/Q4 mixed precision.",
+        "version": "3.1.0",
+        "default_model": "onnx-community/moonshine-tiny-ONNX",
+        "system_ram_gb": 16,
+        "recommended_architecture": "Lightweight CPU-First (Moonshine Tiny / faster-whisper)",
+        "description": "Local AI speech dictation supporting lightweight CPU-first models and 16GB Host System RAM transcription.",
     }
+
+
+@router.post("/transcribe")
+async def transcribe_audio(
+    request: Request,
+    note_id: Optional[str] = None,
+    model: str = "base",
+    language: Optional[str] = None,
+    task: str = "transcribe",
+    prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Transcribes audio using host CPU memory (16GB RAM) via faster-whisper.
+    Completely avoids browser WebGPU and WASM memory exhaustion limits.
+    """
+    _ensure_dirs()
+    import io
+    import time
+
+    audio_bytes = await request.body()
+    audio_source = None
+
+    if audio_bytes and len(audio_bytes) > 0:
+        audio_source = io.BytesIO(audio_bytes)
+    elif note_id:
+        sid = _safe_id(note_id)
+        target = RECORDINGS_DIR / f"{sid}.webm"
+        if target.is_file():
+            audio_source = str(target)
+
+    if not audio_source:
+        raise HTTPException(status_code=400, detail="No audio provided for transcription.")
+
+    try:
+        t0 = time.time()
+        whisper_model, clean_name = get_faster_whisper_model(model)
+
+        transcribe_kwargs: Dict[str, Any] = {
+            "beam_size": 1,
+            "task": task or "transcribe",
+        }
+        if language and language != "auto":
+            transcribe_kwargs["language"] = language
+        if prompt:
+            transcribe_kwargs["initial_prompt"] = prompt
+
+        segments, info = whisper_model.transcribe(audio_source, **transcribe_kwargs)
+
+        chunks = []
+        text_parts = []
+        for s in segments:
+            clean_text = s.text.strip()
+            if clean_text:
+                chunks.append({
+                    "timestamp": [round(s.start, 2), round(s.end, 2)],
+                    "text": clean_text,
+                })
+                text_parts.append(clean_text)
+
+        t_infer = time.time() - t0
+        full_text = " ".join(text_parts)
+        audio_dur = round(info.duration, 2) if hasattr(info, "duration") and info.duration else 0.0
+        speed = round(audio_dur / max(0.01, t_infer), 1)
+
+        return {
+            "text": full_text,
+            "chunks": chunks,
+            "stats": {
+                "engine": "faster-whisper (Host 16GB RAM)",
+                "device": "cpu",
+                "model": clean_name,
+                "language": info.language if hasattr(info, "language") else "auto",
+                "inferenceTimeSec": f"{t_infer:.2f}",
+                "audioDurationSec": f"{audio_dur:.2f}",
+                "speedMultiplier": f"{speed}x",
+            },
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
 
 
 @router.get("/models")
@@ -90,7 +179,7 @@ def list_local_models() -> List[Dict[str, Any]]:
 @router.post("/models/download")
 def trigger_model_download(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
     """Triggers background download of model weights to local disk."""
-    model_key = payload.get("model", "whisper-large-v3-turbo")
+    model_key = payload.get("model", "moonshine-tiny")
     import threading
     from modules.say.download_model import download_model_files
 

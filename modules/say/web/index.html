@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -219,10 +219,14 @@
           </div>
 
           <div class="form-group" style="margin-top: 10px;">
-            <label class="form-label" for="model-quick-select">Dictation Model</label>
+            <label class="form-label" for="model-quick-select">Dictation Model & Engine</label>
             <select class="form-select" id="model-quick-select">
-              <option value="onnx-community/whisper-tiny" selected>⚡ Whisper Tiny (Instant, ~0.3s) — Recommended</option>
-              <option value="onnx-community/whisper-large-v3-turbo">🎯 Whisper Large-v3-Turbo (Studio Quality, 1.6 GB)</option>
+              <option value="onnx-community/moonshine-tiny-ONNX" selected>🌙 Moonshine Tiny (CPU-First, ~27 MB) — Recommended</option>
+              <option value="onnx-community/whisper-tiny">⚡ Whisper Tiny (Fast CPU, ~39 MB)</option>
+              <option value="server/faster-whisper-base">🚀 Host System CPU (16GB RAM via faster-whisper)</option>
+              <option value="onnx-community/moonshine-base-ONNX">🌙 Moonshine Base (CPU-First, ~60 MB)</option>
+              <option value="onnx-community/whisper-base">⚖️ Whisper Base (Balanced CPU, ~73 MB)</option>
+              <option value="onnx-community/whisper-large-v3-turbo">🎯 Whisper Large-v3-Turbo (WebGPU, ~880 MB — Needs 4GB+ VRAM)</option>
             </select>
           </div>
         </div>
@@ -390,41 +394,47 @@
 
       <div class="drawer-body">
         <div class="form-group">
-          <label class="form-label" for="model-preset-select">Whisper AI Model</label>
+          <label class="form-label" for="model-preset-select">Speech AI Model & Architecture</label>
           <select class="form-select" id="model-preset-select">
-            <option value="onnx-community/whisper-tiny" selected>
-              ⚡ Whisper Tiny — Fast & Instant (~0.3s, Recommended)
+            <option value="onnx-community/moonshine-tiny-ONNX" selected>
+              🌙 Moonshine Tiny — CPU-First, Ultra-Lightweight (~27 MB, Recommended)
             </option>
-            <option value="onnx-community/whisper-large-v3-turbo">
-              🎯 Whisper Large-v3-Turbo — Studio Quality (1.6 GB)
+            <option value="onnx-community/whisper-tiny">
+              ⚡ Whisper Tiny — Fast Sub-Second CPU (~39 MB)
+            </option>
+            <option value="server/faster-whisper-base">
+              🚀 Host System CPU Engine — Uses 16GB System RAM (faster-whisper)
+            </option>
+            <option value="onnx-community/moonshine-base-ONNX">
+              🌙 Moonshine Base — CPU-First, High Accuracy (~60 MB)
             </option>
             <option value="onnx-community/whisper-base">
-              Whisper Base — Balanced (73 MB)
+              ⚖️ Whisper Base — Balanced CPU (~73 MB)
             </option>
-            <option value="onnx-community/whisper-small">
-              Whisper Small — Medium (240 MB)
+            <option value="onnx-community/whisper-large-v3-turbo">
+              🎯 Whisper Large-v3-Turbo — Studio Quality WebGPU (Requires 4GB+ VRAM)
             </option>
           </select>
           <small style="color: var(--text-mute); font-size: 11.5px; margin-top: 4px;">
-            Whisper Tiny processes voice in ~0.3s on CPU/SIMD. Whisper Turbo delivers studio-grade accuracy via WebGPU.
+            Moonshine runs variable-length audio on CPU/WASM without browser memory crashes. Host System CPU runs on 16GB system RAM via faster-whisper.
           </small>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="device-select">Compute Device</label>
           <select class="form-select" id="device-select">
-            <option value="webgpu" selected>WebGPU (Hardware Accelerated GPU)</option>
-            <option value="wasm">WebAssembly (CPU Fallback)</option>
+            <option value="wasm" selected>WebAssembly (CPU SIMD — Low Footprint)</option>
+            <option value="webgpu">WebGPU (Hardware Accelerated GPU)</option>
           </select>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="dtype-select">Precision / Quantization</label>
           <select class="form-select" id="dtype-select">
-            <option value="auto" selected>Auto (FP16 Encoder / Q4 Decoder Merged)</option>
+            <option value="auto" selected>Auto (Quantized Q8 for CPU / Q4 for WebGPU)</option>
+            <option value="q8">8-Bit Quantized (Q8 — CPU SIMD)</option>
             <option value="q4">4-Bit Quantized (Q4)</option>
             <option value="fp16">16-Bit Floating Point (FP16)</option>
-            <option value="q8">8-Bit Quantized (Q8)</option>
           </select>
         </div>
 
@@ -436,12 +446,20 @@
           </div>
           <div id="local-models-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
             <div class="offline-model-item">
-              <span class="offline-model-name">Whisper Large-v3-Turbo</span>
-              <span class="offline-model-status" id="offline-large-status">Checking...</span>
+              <span class="offline-model-name">Moonshine Tiny (CPU-First, ~27 MB)</span>
+              <span class="offline-model-status" id="offline-moonshine-tiny-status">Checking...</span>
             </div>
             <div class="offline-model-item">
-              <span class="offline-model-name">Whisper Tiny</span>
+              <span class="offline-model-name">Moonshine Base (CPU-First, ~60 MB)</span>
+              <span class="offline-model-status" id="offline-moonshine-base-status">Checking...</span>
+            </div>
+            <div class="offline-model-item">
+              <span class="offline-model-name">Whisper Tiny (~39 MB)</span>
               <span class="offline-model-status" id="offline-tiny-status">Checking...</span>
+            </div>
+            <div class="offline-model-item">
+              <span class="offline-model-name">Whisper Large-v3-Turbo (~880 MB)</span>
+              <span class="offline-model-status" id="offline-large-status">Checking...</span>
             </div>
           </div>
           <button class="btn btn-sm" id="download-offline-btn" style="margin-top: 8px;">
