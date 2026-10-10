@@ -405,8 +405,9 @@ function showLanding() {
   el.dot.style.background = accent;
   el.dot.style.boxShadow = `0 0 0 4px var(--accent-soft)`;
 
-  // Scroll landing page smoothly to top
+  // Scroll landing page and sidebar smoothly to top
   el.landing.scrollTo({ top: 0, behavior: "smooth" });
+  if (el.list) el.list.scrollTop = 0;
 }
 
 function openModule(id, updateHash = true) {
