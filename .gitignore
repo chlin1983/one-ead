@@ -45,6 +45,9 @@ modules/chili3d/web/app.new/
 modules/chili3d/web/app.old/
 modules/chili3d/data/
 
+# DeepTutor private venv, user data (API keys, chats), logs
+modules/deep_tutor/data/
+
 # Excalidraw trash
 modules/excalidraw/data/trash/
 
