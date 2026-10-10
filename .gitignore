@@ -39,15 +39,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Large ONNX models & dictation scratch & user recordings
-modules/say/web/models/
-modules/say/data/
-*.onnx
-*.onnx_data
-scratch/dictations/
-
-
-
 # Chili3D generated build + all local data (works, config, build workspace)
 modules/chili3d/web/app/
 modules/chili3d/web/app.new/

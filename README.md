@@ -113,7 +113,6 @@ All plugins run 100% locally and offline.
 | **F1 Filter Simulator** | `f1-ipp-filter-simulator` | Python (`numpy`/`scipy`) + Plotly | Interactive digital and acoustic filter simulation | Live |
 | **MEMS Microphone Explorer** | `mems-microphone-explorer` | Python + Plotly | MEMS microphone specifications, directivity, and frequency response | Live |
 | **Balance Armature Receiver Explorer** | `balance-armature-receiver-explorer` | Static (HTML + Web Audio) | Real-time receiver modeling and acoustic simulation | Live |
-| **Say (Speech-to-Text)** | `say` | ONNX Runtime (WebGPU / WASM) | Real-time, offline voice dictation and transcription powered by Whisper | Live |
 | **Excalidraw Whiteboard** | `excalidraw` | Standalone Web Bundle | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard | Live |
 | **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
 | **Chili3D CAD** | `chili3d` | WebAssembly + OpenCascade | Browser-native parametric 3D CAD modeling with dual local persistence | Live |
@@ -143,11 +142,7 @@ Powered by [Chili3D](https://github.com/xiangechen/chili3d):
 - **Document Switcher & Auto-save**: Multi-document tab bar with automatic background saving.
 - **Full Screen CAD Workflow**: Locks Escape key via Keyboard Lock API so pressing Esc deselects objects without exiting fullscreen.
 
-#### 4. Say Dictation (`modules/say/`)
-- **Offline Speech-to-Text**: Runs Whisper models locally in the browser using ONNX Runtime WebGPU and WASM SIMD.
-- **Domain Biasing & VAD**: Built-in voice activity detection and audio chunk streaming.
-
-#### 5. LLM Fundamentals & Course Guide (`modules/llm_course_guide/`)
+#### 4. LLM Fundamentals & Course Guide (`modules/llm_course_guide/`)
 Powered by [mlabonne/llm-course](https://github.com/mlabonne/llm-course) by Maxime Labonne:
 - **Comprehensive 4-Track Curriculum**: Fundamentals (Math, Python, Neural Nets, NLP), Scientist (Architecture, Pre-training, SFT/LoRA, Alignment, Quantization, Merging), Engineer (vLLM serving, Vector DBs, RAG, Agents), and 1-Click Colab tools.
 - **5 Interactive Simulators**: Subword Tokenizer, Temperature & Top-P Sampling, Quantization VRAM Calculator, Embedding Cosine Similarity, and Attention Heatmap.
