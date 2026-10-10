@@ -16,6 +16,7 @@ Chili3D brings full-featured, browser-native 3D solid modeling directly into the
   - Browser IndexedDB for instant interactive caching.
   - Server-side disk mirror (`data/store/`) ensuring designs survive browser cache clears, port changes, and computer reboots.
 - **Doc Switcher & Auto-save**: Built-in multi-document switcher and automatic background disk synchronization.
+- **Full Screen Workflow**: In full screen mode, the Escape key is locked via the Keyboard Lock API so pressing Esc deselects objects and cancels CAD actions without exiting full screen. To exit full screen, click "Exit Full Screen" in the floating toolbar or hold Esc for 2 seconds.
 
 ### Export formats
 

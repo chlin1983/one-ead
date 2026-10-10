@@ -186,22 +186,77 @@
     toast(e.target.checked ? "Autosave on" : "Autosave off");
   });
 
+  // Lock Escape key in fullscreen so pressing Esc doesn't drop out of fullscreen,
+  // allowing Chili3D to use Esc to deselect objects. To exit fullscreen, users can
+  // click "Exit Full Screen" in the floating toolbar, or hold Esc for 2 seconds.
+  async function lockEscape() {
+    if (navigator.keyboard && typeof navigator.keyboard.lock === "function") {
+      try {
+        await navigator.keyboard.lock(["Escape"]);
+      } catch (err) {
+        console.warn("[chili3d] Could not lock Escape key directly:", err);
+      }
+    }
+    // Also notify top-level portal window to lock Escape if running inside an iframe
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "ead:fullscreen-lock-esc", lock: true }, "*");
+    }
+    // Also request inside the app-frame if available
+    try {
+      const innerNav = frame.contentWindow?.navigator;
+      if (innerNav?.keyboard?.lock) {
+        innerNav.keyboard.lock(["Escape"]).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  function unlockEscape() {
+    if (navigator.keyboard && typeof navigator.keyboard.unlock === "function") {
+      try {
+        navigator.keyboard.unlock();
+      } catch (_) {}
+    }
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "ead:fullscreen-lock-esc", lock: false }, "*");
+    }
+    try {
+      const innerNav = frame.contentWindow?.navigator;
+      if (innerNav?.keyboard?.unlock) {
+        innerNav.keyboard.unlock();
+      }
+    } catch (_) {}
+  }
+
   // Full screen = browser fullscreen of this plugin page (hides browser + portal chrome);
   // the toolbar then floats and is revealed from the handle at the top edge.
   $("btn-fullscreen").addEventListener("click", async () => {
     try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
+      if (document.fullscreenElement) {
+        unlockEscape();
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+        await lockEscape();
+      }
     } catch (e) {
       toast(`Full screen is not available: ${e.message}`);
     }
   });
-  document.addEventListener("fullscreenchange", () => {
+  document.addEventListener("fullscreenchange", async () => {
     const on = !!document.fullscreenElement;
     document.body.classList.toggle("fs", on);
     document.body.classList.remove("peek");
     setMenu(false);
     $("fs-label").textContent = on ? "Exit Full Screen" : "Work in Full Screen";
+    $("btn-fullscreen").title = on
+      ? "Exit full screen mode (or hold Esc)"
+      : "Hide the browser and portal chrome (Hold Esc or click to exit)";
+
+    if (on) {
+      await lockEscape();
+    } else {
+      unlockEscape();
+    }
   });
   const peek = (on) => {
     document.body.classList.toggle("peek", on);
@@ -226,9 +281,39 @@
     setMenu($("menu").hidden);
   });
   document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) setMenu(false); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenu(false); });
+
+  function forwardEscapeToApp() {
+    try {
+      const appDoc = frame.contentDocument;
+      const appWin = frame.contentWindow;
+      if (appDoc && appWin) {
+        const evt = new KeyboardEvent("keydown", {
+          key: "Escape",
+          code: "Escape",
+          keyCode: 27,
+          which: 27,
+          bubbles: true,
+          cancelable: true,
+        });
+        appDoc.dispatchEvent(evt);
+        appWin.dispatchEvent(evt);
+      }
+    } catch (_) {}
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setMenu(false);
+      if (document.activeElement !== frame) {
+        forwardEscapeToApp();
+      }
+    }
+  });
   window.addEventListener("message", (e) => {
-    if (e.origin === location.origin && e.data && e.data.type === "ead:escape") setMenu(false);
+    if (e.origin === location.origin && e.data && e.data.type === "ead:escape") {
+      setMenu(false);
+      forwardEscapeToApp();
+    }
   });
 
   function syncTheme() {

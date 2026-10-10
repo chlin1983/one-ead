@@ -131,6 +131,7 @@ Powered by [Chili3D](https://github.com/xiangechen/chili3d):
 - **Parametric 3D Solid Modeling**: Full CAD capabilities with sketches, extrusions, revolutions, fillets, and booleans in WebAssembly.
 - **Dual Persistence Mirror**: Saves instantaneously to browser IndexedDB and mirrors projects to server disk (`data/store/`) so models persist across cache clears and restarts.
 - **Document Switcher & Auto-save**: Multi-document tab bar with automatic background saving.
+- **Full Screen CAD Workflow**: Locks Escape key via Keyboard Lock API so pressing Esc deselects objects without exiting fullscreen.
 
 #### 4. Say Dictation (`modules/say/`)
 - **Offline Speech-to-Text**: Runs Whisper models locally in the browser using ONNX Runtime WebGPU and WASM SIMD.

@@ -450,7 +450,7 @@ function openModule(id, updateHash = true) {
   // First visit this session: create and cache a dedicated iframe for it.
   const frame = document.createElement("iframe");
   frame.title = m.title;
-  frame.allow = "microphone; speaker-selection; clipboard-read; clipboard-write; display-capture; fullscreen";
+  frame.allow = "microphone; speaker-selection; clipboard-read; clipboard-write; display-capture; fullscreen; keyboard-map";
   frame.src = m.entry + (m.entry.includes("?") ? "&" : "?") + "_v=" + Date.now();
   el.loader.classList.remove("hidden");
   const hideLoader = () => { if (state.activeId === id) el.loader.classList.add("hidden"); };
@@ -482,6 +482,41 @@ function wireChrome() {
     if (e.key !== "Escape" || !state.activeId) return;
     const frame = state.frames[state.activeId];
     frame?.contentWindow?.postMessage({ type: "ead:escape" }, window.location.origin);
+  });
+
+  // Handle fullscreen keyboard lock (e.g. Chili3D CAD uses Escape to deselect objects without exiting fullscreen)
+  window.addEventListener("message", async (e) => {
+    if (e.data && e.data.type === "ead:fullscreen-lock-esc") {
+      if (e.data.lock) {
+        if (navigator.keyboard && typeof navigator.keyboard.lock === "function") {
+          try {
+            await navigator.keyboard.lock(["Escape"]);
+          } catch (_) {}
+        }
+      } else {
+        if (navigator.keyboard && typeof navigator.keyboard.unlock === "function") {
+          try {
+            navigator.keyboard.unlock();
+          } catch (_) {}
+        }
+      }
+    }
+  });
+
+  document.addEventListener("fullscreenchange", async () => {
+    if (document.fullscreenElement) {
+      if (navigator.keyboard && typeof navigator.keyboard.lock === "function") {
+        try {
+          await navigator.keyboard.lock(["Escape"]);
+        } catch (_) {}
+      }
+    } else {
+      if (navigator.keyboard && typeof navigator.keyboard.unlock === "function") {
+        try {
+          navigator.keyboard.unlock();
+        } catch (_) {}
+      }
+    }
   });
   el.search.addEventListener("input", () => {
     const q = el.search.value.trim().toLowerCase();
