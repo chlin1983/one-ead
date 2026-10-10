@@ -27,7 +27,17 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+try:
+    from server.check_deps import ensure_dependencies
+
+    if not ensure_dependencies():
+        print("[One EAD] Missing required dependencies. Exiting.")
+        sys.exit(1)
+except ImportError:
+    pass
+
 import uvicorn
+
 
 
 def _find_chrome_path() -> Optional[str]:

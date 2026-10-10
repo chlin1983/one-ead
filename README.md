@@ -9,13 +9,21 @@ runtime.
 
 ## Quick start
 
+Simply double-click **`start.bat`** (or run `start.bat` from a terminal).
+
+`start.bat` handles everything automatically:
+1. **Python Check**: Verifies Python 3.10+ is accessible in system PATH (displays helpful instructions if not found).
+2. **Smart Dependency Check**: On a fresh PC / initial clone, it automatically installs all required dependencies (`requirements.txt`, including `pymupdf`, `fastapi`, `uvicorn`, `pdfplumber`, `numpy`, `scipy`, etc.).
+3. **Instant Subsequent Launches**: Caches the verification signature in `.deps_ok` so subsequent launches skip pip checks entirely and start immediately.
+
+Alternatively, you can install and launch manually:
+
 ```powershell
 pip install -r requirements.txt
 python run.py
 ```
 
-This starts the server and opens <http://127.0.0.1:8100> in your browser.
-(Or double-click `start.bat`.)
+This starts the server and opens <http://127.0.0.1:8100> in Google Chrome (or system default browser).
 
 Options:
 
@@ -24,6 +32,7 @@ python run.py --port 9000     # different port
 python run.py --no-browser    # don't auto-open a browser
 python run.py --reload        # auto-reload while developing
 ```
+
 
 ## Architecture
 

@@ -58,11 +58,15 @@ def discover_modules() -> List[PortalModule]:
     for info in pkgutil.iter_modules(modules_pkg.__path__):
         if not info.ispkg:
             continue
-        package = importlib.import_module(f"{modules_pkg.__name__}.{info.name}")
-        module = getattr(package, "MODULE", None)
-        if isinstance(module, PortalModule):
-            module.package_dir = Path(package.__file__).resolve().parent
-            found.append(module)
+        try:
+            package = importlib.import_module(f"{modules_pkg.__name__}.{info.name}")
+            module = getattr(package, "MODULE", None)
+            if isinstance(module, PortalModule):
+                module.package_dir = Path(package.__file__).resolve().parent
+                found.append(module)
+        except Exception as exc:
+            print(f"[registry] Error loading module '{info.name}': {exc}")
+
 
     saved_order = get_saved_order()
     if saved_order:

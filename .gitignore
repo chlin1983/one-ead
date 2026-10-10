@@ -32,6 +32,8 @@ out/
 *.tmp
 .DS_Store
 Thumbs.db
+.deps_ok
+.deps_verified
 
 # IDE & Editor
 .vscode/
