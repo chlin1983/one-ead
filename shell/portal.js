@@ -559,8 +559,8 @@ function wireChrome() {
 }
 
 function applyStoredTheme() {
-  const t = localStorage.getItem("ead-portal:theme") || "light";
-  document.documentElement.setAttribute("data-theme", t);
+  document.documentElement.setAttribute("data-theme", "light");
+  localStorage.setItem("ead-portal:theme", "light");
 }
 
 function escapeHtml(s) {

@@ -1,17 +1,22 @@
-# Say — High-Accuracy Local Voice Dictation & Transcription Plugin
+# Say — Local Voice Dictation & Audio Transcription Plugin
 
-> **100% Client-Side & Private** • **WebGPU Hardware Accelerated** • **Whisper Large-v3-Turbo** • **Mixed Precision (FP16/Q4)**
+> **100% Private** • **Lightweight CPU-First (Moonshine & Whisper Tiny)** • **Host System CPU Engine (16GB RAM via faster-whisper)** • **Optional WebGPU (Whisper Turbo)**
 
 ---
 
 ## 1. Overview & Architecture
 
-**Say** is a local speech-to-text dictation and transcription plugin built for the **One EAD** engineering suite. Inspired by Addy Osmani's original [Say](https://github.com/addyosmani/say) experiment, this version is re-engineered with modern web capabilities and neural model optimizations:
+**Say** is a private, local speech-to-text dictation and transcription plugin built for the **One EAD** engineering suite. It provides a dual-tier compute architecture designed to avoid browser tab sandboxing and memory limit crashes:
 
-1. **Transformers.js v3 + WebGPU**: Replaces legacy WASM CPU execution with native WebGPU shaders, accelerating inference speeds up to 10×–15× real-time.
-2. **Whisper Large-v3-Turbo**: Upgrades from tiny baseline models to OpenAI's optimized 809M parameter architecture (`onnx-community/whisper-large-v3-turbo`), dramatically cutting word error rates on accents, jargon, and noisy audio.
-3. **Mixed-Precision Quantization (FP16 / Q4)**: Compresses decoder weights to 4-bit while preserving 16-bit encoder fidelity. Keeps browser memory consumption well below allocations and total payload size to ~880 MB.
-4. **Complete Privacy**: Audio capture, decoding, and AI inference execute 100% inside the browser sandbox. No audio or text ever leaves the user's computer.
+1. **Lightweight CPU-First Client Architecture (Moonshine & Whisper Tiny)**:
+   - **Moonshine Tiny** (`onnx-community/moonshine-tiny-ONNX`): Ultra-low memory footprint (~27 MB download, ~50 MB RAM). Reads audio at variable length, preventing Whisper 30s repetition loops and completely bypassing browser WebGPU buffer limits.
+   - **Whisper Tiny** (`onnx-community/whisper-tiny`): Sub-second dictation (~0.3s) running on WebAssembly SIMD.
+2. **Host System CPU Engine (16GB System RAM via faster-whisper)**:
+   - Utilizes the host machine's full 16GB RAM through the local FastAPI Python backend.
+   - Powered by `faster-whisper` (CTranslate2 INT8) with zero browser sandbox constraints or WebGPU buffer crashes.
+3. **WebGPU Acceleration (Whisper Large-v3-Turbo)**:
+   - Available for systems with sufficient VRAM and WebGPU allocation limits.
+   - Includes automatic memory exhaustion recovery that cleanly switches to Moonshine Tiny if the browser restricts buffer allocations.
 
 ---
 

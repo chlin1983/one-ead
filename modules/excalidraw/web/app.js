@@ -309,7 +309,7 @@
   // --- Portal Shell Theme Sync ---
 
   function syncTheme() {
-    const theme = localStorage.getItem("ead-portal:theme") || "dark";
+    const theme = localStorage.getItem("ead-portal:theme") || "light";
     document.documentElement.setAttribute("data-theme", theme);
   }
 
