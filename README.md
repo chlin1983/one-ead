@@ -116,6 +116,7 @@ All plugins run 100% locally and offline.
 | **Excalidraw Whiteboard** | `excalidraw` | Standalone Web Bundle | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard | Live |
 | **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
 | **Chili3D CAD** | `chili3d` | WebAssembly + OpenCascade | Browser-native parametric 3D CAD modeling with dual local persistence | Live |
+| **DeepTutor** | `deep-tutor` | Upstream PyPI package (`deeptutor`) in a private venv | AI tutoring workspace that always tracks the newest upstream release | Live |
 
 ---
 
