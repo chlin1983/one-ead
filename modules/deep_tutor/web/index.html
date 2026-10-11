@@ -30,12 +30,19 @@
             <button class="menu-item" id="btn-check" type="button">Check for updates</button>
             <button class="menu-item" id="btn-restart" type="button">Restart service</button>
             <button class="menu-item" id="btn-stop" type="button">Stop service</button>
+            <button class="menu-item" id="btn-ai-menu" type="button" title="Install Ollama and a private AI model on this PC">Local AI setup…</button>
             <a class="menu-item" href="https://github.com/HKUDS/DeepTutor" target="_blank" rel="noopener noreferrer"
                title="DeepTutor is open source under Apache-2.0. Opens the upstream source.">Upstream source (Apache-2.0)</a>
           </div>
         </div>
       </div>
     </header>
+
+    <div class="ai-banner" id="ai-banner" hidden>
+      <span>No AI model is set up yet, so DeepTutor cannot answer. You can run a private model on this PC.</span>
+      <button class="btn primary" id="btn-ai-open" type="button">Set up local AI</button>
+      <button class="btn ghost" id="btn-ai-dismiss" type="button" title="You can find it later in the menu: Local AI setup">Not now</button>
+    </div>
 
     <main class="dt-stage">
       <iframe id="app-frame" title="DeepTutor" hidden allow="clipboard-read; clipboard-write; fullscreen; microphone"></iframe>
@@ -53,6 +60,23 @@
         </div>
       </section>
     </main>
+  </div>
+  <div class="modal" id="ai-modal" hidden>
+    <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="ai-title">
+      <h2 id="ai-title">Set up local AI</h2>
+      <p class="muted">Runs the AI models on this PC with Ollama, so your chats never leave it. Nothing is installed or downloaded until you click <strong>Run setup now</strong>.</p>
+      <div id="ai-body"></div>
+      <div class="cmd-box">
+        <span class="muted">Or run it yourself in a terminal from the One EAD folder (it asks before each step):</span>
+        <div class="cmd-row"><code id="ai-cmd"></code><button class="btn" id="btn-ai-copy" type="button">Copy</button></div>
+      </div>
+      <p class="muted" id="ai-status" hidden></p>
+      <pre class="log" id="ai-log" hidden></pre>
+      <div class="inst-actions">
+        <button class="btn primary" id="btn-ai-run" type="button">Run setup now</button>
+        <button class="btn" id="btn-ai-close" type="button">Close</button>
+      </div>
+    </div>
   </div>
   <div id="toast" class="toast" hidden></div>
   <script src="wrapper.js"></script>

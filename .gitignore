@@ -51,3 +51,6 @@ modules/deep_tutor/data/
 # Excalidraw trash
 modules/excalidraw/data/trash/
 
+# Runtime root data directory
+data/
+

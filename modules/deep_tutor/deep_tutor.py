@@ -22,6 +22,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -457,6 +458,7 @@ def start_service() -> dict:
             [str(venv_python()), "-X", "utf8", str(SERVE_SCRIPT), str(HOME_DIR)],
             cwd=str(DATA_DIR),
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -486,9 +488,11 @@ def stop_service() -> dict:
                 _kill_tree(proc.pid)
         elif pid is not None and _pid_alive(pid):
             _kill_tree(pid)
+        # Other processes (e.g. setup_local_ai.py) import this module and must not drop the server's run file.
+        if proc is not None or pid is not None:
+            RUN_FILE.unlink(missing_ok=True)
         _proc = None
         _adopted_pid = None
-        RUN_FILE.unlink(missing_ok=True)
     return status()
 
 
@@ -498,6 +502,235 @@ def restart_service() -> dict:
 
 
 atexit.register(stop_service)
+
+
+# ---------------------------------------------------------------- local AI (Ollama) setup
+# Detection and the background job live here; the install/configure steps live in setup_local_ai.py,
+# which is both the terminal command and what the plugin's "Run setup now" button runs.
+
+SETUP_SCRIPT = _HERE / "setup_local_ai.py"
+OLLAMA_URL = "http://127.0.0.1:11434"
+EMBED_MODEL = "nomic-embed-text"
+# Approximate download sizes (GB) of the models offered by the presets.
+MODEL_GB = {"gemma4:e4b": 9.6, "gemma4:12b": 8.0, "qwen3:8b": 5.2, "qwen3:4b": 2.5, EMBED_MODEL: 0.3}
+OLLAMA_INSTALL_GB = 1.5
+PRESETS = {
+    "standard": {"label": "Standard", "detail": "16 GB RAM; a GPU with 6 GB+ memory is recommended",
+                 "chat": ["gemma4:e4b", "gemma4:12b", "qwen3:8b"], "min_ram_gb": 12},
+    "light": {"label": "Light", "detail": "8 GB RAM is enough; no GPU needed",
+              "chat": ["qwen3:4b"], "min_ram_gb": 6},
+}
+# Without these Ollama's 4096-token context truncates DeepTutor prompts (see README).
+OLLAMA_ENV = {"OLLAMA_CONTEXT_LENGTH": "8192", "OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}
+
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_hw_cache: dict = {"at": 0.0, "value": None}
+_AI_LOCK = threading.Lock()
+_ai_job: dict = {"state": "idle", "message": "", "error": None, "started_at": None, "finished_at": None}
+_ai_log: deque = deque(maxlen=300)
+
+
+def local_opener():
+    return _LOCAL_OPENER
+
+
+def find_ollama() -> Optional[str]:
+    found = shutil.which("ollama")
+    if found:
+        return found
+    local = os.environ.get("LOCALAPPDATA")
+    candidate = Path(local) / "Programs" / "Ollama" / "ollama.exe" if local else None
+    return str(candidate) if candidate and candidate.exists() else None
+
+
+def ollama_models() -> Optional[list]:
+    """Model names known to the running Ollama, or None when it is not running."""
+    try:
+        with _LOCAL_OPENER.open(f"{OLLAMA_URL}/api/tags", timeout=1.5) as resp:
+            return [m["name"] for m in json.loads(resp.read().decode("utf-8"))["models"]]
+    except Exception:
+        return None
+
+
+def has_model(names: list, model: str) -> bool:
+    return model in names or f"{model}:latest" in names
+
+
+def user_env(name: str) -> Optional[str]:
+    """Persistent per-user environment variable (what a restarted Ollama will see)."""
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+                return str(winreg.QueryValueEx(key, name)[0])
+        except OSError:
+            return None
+    return os.environ.get(name)
+
+
+def ollama_env_missing() -> dict:
+    """Recommended Ollama settings that are not in place yet (a larger context than ours is fine)."""
+    missing = {}
+    for key, value in OLLAMA_ENV.items():
+        current = user_env(key)
+        if key == "OLLAMA_CONTEXT_LENGTH":
+            ok = bool(current and current.isdigit() and int(current) >= int(value))
+        else:
+            ok = bool(current)
+        if not ok:
+            missing[key] = value
+    return missing
+
+
+def _ram_gb() -> Optional[float]:
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MemStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            st = _MemStatus()
+            st.dwLength = ctypes.sizeof(_MemStatus)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return st.ullTotalPhys / 2**30
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    except Exception:
+        return None
+
+
+def hardware() -> dict:
+    now = time.time()
+    if _hw_cache["value"] and now - _hw_cache["at"] < 60:
+        return _hw_cache["value"]
+    probe = Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models")
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        free = round(shutil.disk_usage(probe).free / 2**30, 1)
+    except OSError:
+        free = None
+    gpu = None
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            line = subprocess.run([smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                  capture_output=True, text=True, timeout=10,
+                                  creationflags=_NO_WINDOW).stdout.strip().splitlines()[0]
+            name, mem = [part.strip() for part in line.rsplit(",", 1)]
+            gpu = {"name": name, "vram_gb": round(int(mem) / 1024, 1)}
+        except Exception:
+            gpu = None
+    ram = _ram_gb()
+    value = {"ram_gb": round(ram, 1) if ram else None, "free_disk_gb": free, "disk_path": str(probe), "gpu": gpu}
+    _hw_cache.update(at=now, value=value)
+    return value
+
+
+def llm_configured() -> bool:
+    """True when DeepTutor has an active chat model selected."""
+    cat = _read_json(HOME_DIR / "data" / "user" / "settings" / "model_catalog.json", {})
+    try:
+        llm = cat["services"]["llm"]
+        return bool(llm["active_model_id"]) and any(p.get("models") for p in llm["profiles"])
+    except (KeyError, TypeError):
+        return False
+
+
+def setup_command() -> str:
+    try:
+        rel = SETUP_SCRIPT.relative_to(_HERE.parent.parent)
+    except ValueError:
+        rel = SETUP_SCRIPT
+    return f"python {rel}"
+
+
+def local_ai_info() -> dict:
+    models = ollama_models()
+    present = models or []
+    hw = hardware()
+    presets = {}
+    for key, p in PRESETS.items():
+        names = p["chat"] + [EMBED_MODEL]
+        presets[key] = {
+            "label": p["label"], "detail": p["detail"], "chat": p["chat"], "min_ram_gb": p["min_ram_gb"],
+            "full_gb": round(sum(MODEL_GB[m] for m in names), 1),
+            "download_gb": round(sum(MODEL_GB[m] for m in names if not has_model(present, m)), 1),
+        }
+    ram = hw["ram_gb"] or 0
+    return {
+        "hardware": hw,
+        "presets": presets,
+        "recommended_preset": "standard" if ram >= PRESETS["standard"]["min_ram_gb"] else "light",
+        "ollama_install_gb": OLLAMA_INSTALL_GB,
+        "deps": {
+            "node": bool(shutil.which("node")),
+            "python": bool(shutil.which("uv") or _find_system_python()),
+            "ollama": find_ollama() is not None,
+            "ollama_running": models is not None,
+        },
+        "winget": bool(shutil.which("winget")),
+        "ollama_env_missing": ollama_env_missing(),
+        "configured": llm_configured(),
+        "command": setup_command(),
+        "busy": _job["state"] == "running",
+        "job": {**_ai_job, "log": list(_ai_log)[-80:]},
+    }
+
+
+def _ai_main(cmd: list) -> None:
+    try:
+        stop_service()  # the script edits DeepTutor's settings files
+        env = dict(os.environ)
+        env.update(PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+        proc = subprocess.Popen(cmd, cwd=str(_HERE.parent.parent), env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+                                errors="replace", creationflags=_NO_WINDOW)
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            clean = _ANSI_RE.sub("", line).rstrip()
+            if clean:
+                _ai_log.append(clean[:300])
+                _ai_job["message"] = clean[:120]
+        code = proc.wait()
+        if code == 0:
+            _ai_job.update(state="done", message="Local AI is ready", error=None)
+        else:
+            _ai_job.update(state="error", message="Setup did not finish",
+                           error=f"Setup stopped (exit {code}); see the log above")
+    except Exception as exc:
+        _ai_job.update(state="error", message="Setup failed", error=f"{type(exc).__name__}: {exc}")
+        _ai_log.append(f"!! {exc}")
+    finally:
+        _ai_job["finished_at"] = _now_iso()
+        if is_installed():
+            try:
+                start_service()
+            except Exception as exc:
+                _ai_log.append(f"!! could not start DeepTutor: {exc}")
+
+
+def start_local_ai_setup(opts: dict) -> dict:
+    """Run setup_local_ai.py in the background. Each install is opt-in via ``opts``."""
+    preset = opts.get("preset")
+    if preset not in PRESETS:
+        raise ValueError("Unknown preset")
+    with _AI_LOCK:
+        if _ai_job["state"] == "running" or _job["state"] == "running":
+            return local_ai_info()
+        cmd = [sys.executable, "-X", "utf8", str(SETUP_SCRIPT), "--yes", "--preset", preset]
+        for key, flag in (("install_ollama", "--install-ollama"), ("install_node", "--install-node"),
+                          ("install_uv", "--install-uv"), ("ollama_env", "--ollama-env")):
+            if opts.get(key) is True:
+                cmd.append(flag)
+        _ai_log.clear()
+        _ai_job.update(state="running", message="Starting", error=None, started_at=_now_iso(), finished_at=None)
+        threading.Thread(target=_ai_main, args=(cmd,), name="deep-tutor-local-ai", daemon=True).start()
+    return local_ai_info()
 
 
 # ---------------------------------------------------------------- status
@@ -535,6 +768,7 @@ def status() -> dict:
         "service": {"running": alive, "ready": ready, "log": list(_svc_log)[-40:], **ports},
         "uv_available": bool(shutil.which("uv")),
         "node_available": bool(shutil.which("node")),
+        "llm_configured": llm_configured(),
         "home": str(HOME_DIR),
         "url": f"http://{LOOPBACK}:{ports['frontend_port']}/",
         "ready": ready,

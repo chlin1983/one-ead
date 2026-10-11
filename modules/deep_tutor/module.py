@@ -66,6 +66,19 @@ def restart() -> dict:
         raise HTTPException(409, str(exc))
 
 
+@router.get("/local-ai")
+def local_ai() -> dict:
+    return deep_tutor.local_ai_info()
+
+
+@router.post("/local-ai/setup")
+def local_ai_setup(payload: dict = Body(...)) -> dict:
+    try:
+        return deep_tutor.start_local_ai_setup(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 MODULE = PortalModule(
     id="deep-tutor",
     title="DeepTutor",
