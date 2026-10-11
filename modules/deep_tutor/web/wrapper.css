@@ -66,3 +66,25 @@
   padding: 9px 16px; border-radius: var(--radius-sm); font-size: 13px;
   background: var(--text); color: var(--bg); box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4);
 }
+
+.ai-banner {
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 12.5px;
+  background: var(--accent-soft); border-bottom: 1px solid var(--border); color: var(--text);
+}
+.ai-banner span { flex: 1; }
+.ai-banner .btn { height: 28px; padding: 4px 11px; font-size: 12px; }
+
+.modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(10, 14, 22, 0.55); }
+.modal-card { width: min(760px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+.modal-card h2 { font-size: 18px; }
+.ai-sec { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12.5px; }
+.ai-sec h3 { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-mute); }
+.ai-opt { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.ai-opt input { margin-top: 3px; }
+.ai-opt small { display: block; color: var(--text-mute); }
+.ai-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.ai-ok { color: var(--ok); }
+.ai-warn { color: var(--warn); }
+.cmd-box { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.cmd-row { display: flex; gap: 8px; align-items: center; }
+.cmd-row code { flex: 1; padding: 7px 10px; font: 12px Consolas, monospace; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); word-break: break-all; }
