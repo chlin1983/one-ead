@@ -512,11 +512,11 @@ SETUP_SCRIPT = _HERE / "setup_local_ai.py"
 OLLAMA_URL = "http://127.0.0.1:11434"
 EMBED_MODEL = "nomic-embed-text"
 # Approximate download sizes (GB) of the models offered by the presets.
-MODEL_GB = {"gemma4:e4b": 9.6, "gemma4:12b": 8.0, "qwen3:8b": 5.2, "qwen3:4b": 2.5, EMBED_MODEL: 0.3}
+MODEL_GB = {"gemma4:e4b": 9.6, "qwen3:8b": 5.2, "qwen3:4b": 2.5, EMBED_MODEL: 0.3}
 OLLAMA_INSTALL_GB = 1.5
 PRESETS = {
     "standard": {"label": "Standard", "detail": "16 GB RAM; a GPU with 6 GB+ memory is recommended",
-                 "chat": ["gemma4:e4b", "gemma4:12b", "qwen3:8b"], "min_ram_gb": 12},
+                 "chat": ["gemma4:e4b", "qwen3:8b"], "min_ram_gb": 12},
     "light": {"label": "Light", "detail": "8 GB RAM is enough; no GPU needed",
               "chat": ["qwen3:4b"], "min_ram_gb": 6},
 }

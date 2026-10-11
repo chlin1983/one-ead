@@ -59,7 +59,7 @@ python modules\deep_tutor\setup_local_ai.py --check    # only reports your PC an
 
 | Model set | Models | Download | Suggested PC |
 |---|---|---|---|
-| **Standard** | `gemma4:e4b` (active) + `gemma4:12b` + `qwen3:8b` + `nomic-embed-text` | about 23 GB | 16 GB RAM, GPU with 6 GB+ memory, about 30 GB free disk |
+| **Standard** | `gemma4:e4b` (active) + `qwen3:8b` + `nomic-embed-text` | about 15 GB | 16 GB RAM, GPU with 6 GB+ memory, about 20 GB free disk |
 | **Light** | `qwen3:4b` + `nomic-embed-text` | about 3 GB | 8 GB RAM, no GPU needed, about 6 GB free disk |
 
 What it can do, each step optional: install Node.js, `uv` and Ollama (via `winget`; Windows may ask for
@@ -98,6 +98,15 @@ Back up `home/` to keep your DeepTutor data. Do not commit or share it: it conta
 - **Setup failed:** the page shows the install log. Common causes: no network, no `uv`/Python 3.11-3.14, no Node.js.
 - **Stuck on "Starting":** see `data/service.log`; use menu → **Restart service**.
 - **Start over:** stop One EAD, delete `data/venv`, reopen the plugin (keeps `data/home`).
+- **Plugin shows "Not Found" for new features after an update:** `start.bat` does not replace a running server; if
+  port 8100 is already in use it only opens the browser at the old one. Close the old One EAD window (or
+  `taskkill /PID <pid> /T /F` for the `python run.py` process) and start it again.
+- **Chat fails with `llama-server process has terminated ... Gemma4Assistant requires ctx_other` or `error loading
+  model: vector`:** the model is too large for this PC. `gemma4:12b` (about 8 GB, plus a bundled draft model and
+  vision part) failed to load on 6 GB VRAM with little free RAM, so it is not in the model sets. Use `gemma4:e4b`
+  or `qwen3:8b`, or `ollama rm` the model and remove it under Settings → Language models.
+- **Chat fails with "model exhausted its output budget on internal reasoning":** Ollama's default 4096-token
+  context is too small; see the Ollama settings in the handover notes.
 
 ---
 
@@ -117,7 +126,7 @@ Back up `home/` to keep your DeepTutor data. Do not commit or share it: it conta
 
 | Service | Provider name in UI | Model | Endpoint |
 |---|---|---|---|
-| Chat | Ollama – Gemma | `gemma4:e4b` (active), `gemma4:12b`, `qwen3:8b` | `http://127.0.0.1:11434/v1` |
+| Chat | Ollama – Chat | `gemma4:e4b` (active), `qwen3:8b` | `http://127.0.0.1:11434/v1` |
 | Embedding | Ollama – Embeddings | `nomic-embed-text` (768 dims) | `http://127.0.0.1:11434/api/embed` |
 | Search | Search (disabled) | none | n/a |
 
@@ -135,6 +144,9 @@ Back up `home/` to keep your DeepTutor data. Do not commit or share it: it conta
 - A **Task model** (for naming chats and other background jobs) is not set. `qwen3:4b` would suit; it must be set in
   the UI because `config apply` does not cover it.
 - Removing a provider in the UI is blocked while any model still uses it; remove its models first.
+- `gemma4:12b` was tried and removed: it does not fit 6 GB VRAM and the load fails (see Troubleshooting). Ollama is
+  0.35.0 here while 0.40.x is current; 0.40 upgrades downloaded models in the background and keeps backup copies,
+  and models pulled on 0.40+ must be re-pulled if you downgrade. Whether newer versions fix the 12B load is untested.
 
 ## How the plugin works (so you can change it safely)
 
@@ -145,8 +157,8 @@ Back up `home/` to keep your DeepTutor data. Do not commit or share it: it conta
 | Run | `start_service()` spawns `python _serve.py data/home`, which calls upstream's `deeptutor.runtime.launcher.start()` after rewriting `0.0.0.0` to `127.0.0.1` |
 | Stop | `stop_service()`: Ctrl+Break for a clean shutdown, `taskkill /T /F` after 20 s; also registered with `atexit` |
 | Orphans | `data/run.json` holds the launcher PID. If One EAD died without stopping it, the next start adopts it only if its web port answers |
-| Ports | Defaults 3782 / 8001; moved to the next free ones and written to upstream's `system, `local-ai`, `local-ai/setup`.json` |
-| API | `/api/deep-tutor/` `status`, `check`, `install`, `config`, `start`, `stop`, `restart` (see `module.py`) |
+| Ports | Defaults 3782 / 8001; moved to the next free ones and written to upstream's `system.json` |
+| API | `/api/deep-tutor/` `status`, `check`, `install`, `config`, `start`, `stop`, `restart`, `local-ai`, `local-ai/setup` (see `module.py`) |
 | UI | `web/wrapper.js` polls `/status` every 2 s, shows installer/starting states, otherwise iframes `http://127.0.0.1:<port>/?oe=<version>` (the query forces a reload after an upgrade) |
 
 Gotchas found while building it:
