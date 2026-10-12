@@ -9,8 +9,10 @@ stock behaviour (see the ``bind`` field reported by the plugin status).
 """
 
 import sys
+from pathlib import Path
 
 LOOPBACK = "127.0.0.1"
+PRELOAD = Path(__file__).resolve().parent / "inject" / "preload.js"
 
 
 def _patch(launcher) -> bool:
@@ -22,6 +24,10 @@ def _patch(launcher) -> bool:
         command = [LOOPBACK if part == "0.0.0.0" else part for part in command]
         env = dict(env)
         env["HOSTNAME"] = LOOPBACK
+        if name == "frontend" and PRELOAD.is_file():
+            # Adds the knowledge-base rename UI to the web app (see inject/).
+            node_opts = env.get("NODE_OPTIONS", "")
+            env["NODE_OPTIONS"] = f'{node_opts} --require "{PRELOAD.as_posix()}"'.strip()
         return original(command, cwd=cwd, env=env, name=name)
 
     launcher._spawn = _spawn

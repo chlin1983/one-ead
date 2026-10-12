@@ -117,6 +117,7 @@ All plugins run 100% locally and offline.
 | **PDF Arranger** | `pdfarranger` | Python + GTK3 Broadway Daemon | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs | Live |
 | **Chili3D CAD** | `chili3d` | WebAssembly + OpenCascade | Browser-native parametric 3D CAD modeling with dual local persistence | Live |
 | **DeepTutor** | `deep-tutor` | Upstream PyPI package (`deeptutor`) in a private venv | AI tutoring workspace that always tracks the newest upstream release | Live |
+| **GPT Researcher** | `gpt-researcher` | `gpt-researcher` in private venv + local Ollama | Offline-first engineering research assistant driven by local Ollama models | Live |
 
 ---
 
@@ -149,5 +150,13 @@ Powered by [mlabonne/llm-course](https://github.com/mlabonne/llm-course) by Maxi
 - **5 Interactive Simulators**: Subword Tokenizer, Temperature & Top-P Sampling, Quantization VRAM Calculator, Embedding Cosine Similarity, and Attention Heatmap.
 - **Local Disk Persistence**: Progress, quiz answers, and personal study notes are auto-saved to disk at `modules/llm_course_guide/data/progress.json`.
 - **Default Light Theme**: Styled to seamlessly match the One EAD portal interface with instant theme switching.
+
+#### 5. GPT Researcher (`modules/gpt_researcher/`)
+Powered by [gpt-researcher](https://github.com/assafelovic/gpt-researcher) driven by local [Ollama](https://ollama.com):
+- **100% Offline & Private AI Research**: Runs on local Ollama models (e.g. Gemma, Qwen) with loopback enforcement and whitelisted environment variables.
+- **Sectioned In-Depth Technical Reports**: Generates comprehensive, multi-section engineering reports (up to 2,500+ words) even within compact 8k-token model context windows.
+- **Polite & Rate-Limited Research Sources**: Supports local document archives (PDF, DOCX, XLSX, TXT) alongside rate-limited academic endpoints (arXiv, Semantic Scholar, OpenAlex, PubMed Central).
+- **Report & Document Management**: File reports into custom folders, rename reports, inspect interactive citation jumps, and export publication-ready A4 PDFs.
+
 
 

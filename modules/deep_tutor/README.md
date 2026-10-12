@@ -73,6 +73,16 @@ the plugin menu → **Local AI setup…**, which shows your PC's RAM, disk and G
 pick a model set and tick what to install, and has a **Run setup now** button plus the terminal command to copy.
 The banner only shows while no chat model is configured.
 
+### Renaming knowledge bases
+
+Upstream has no rename. A knowledge base's folder name is its identity (chats, indexes, settings reference it), so
+it is never changed. Instead, the **Knowledge Center** cards get a pencil button that stores a *display name* in
+`data/home/data/knowledge_bases/kb_config.json` (`display_name`, written through upstream's own
+`PUT /api/knowledge-bases/{kb}/config`). The display name is shown wherever the original name appears as a whole
+text (cards, chat knowledge-base picker). Reset restores the original. The UI is added by `inject/preload.js`
+(a Node preload that `_serve.py` loads into the web app and that appends `inject/kb_rename.js` to HTML pages), so
+it survives DeepTutor updates. Restart the service after changing these files.
+
 ## Where things live (all under `modules/deep_tutor/data/`)
 
 | Path | Contents |

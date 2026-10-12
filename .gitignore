@@ -48,6 +48,9 @@ modules/chili3d/data/
 # DeepTutor private venv, user data (API keys, chats), logs
 modules/deep_tutor/data/
 
+# GPT Researcher private venv, documents, reports
+modules/gpt_researcher/data/
+
 # Excalidraw trash
 modules/excalidraw/data/trash/
 
