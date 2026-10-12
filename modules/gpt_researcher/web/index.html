@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GPT Researcher</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="pr-root">
+    <header class="pr-bar">
+      <div class="bar-left">
+        <strong class="bar-title">GPT Researcher</strong>
+        <span class="chip" id="chip-engine" title="Research engine (gpt-researcher) in a private environment. Click for update options.">engine: …</span>
+        <span class="chip" id="chip-ollama" title="Local AI runtime on this PC">Ollama: …</span>
+      </div>
+      <span class="chip privacy" id="chip-privacy" data-mode="local"></span>
+    </header>
+
+    <section class="setup" id="setup" hidden></section>
+
+    <div class="pr-main">
+      <aside class="pr-side">
+        <div class="side-block">
+          <div class="side-head">
+            <span class="pane-title">My documents</span>
+            <label class="btn small" for="file-input">Add files</label>
+            <input type="file" id="file-input" multiple hidden accept=".pdf,.txt,.md,.docx,.csv,.xlsx,.pptx" />
+          </div>
+          <div class="dropzone small" id="dropzone">Drop PDF, Word, text, CSV, Excel or PowerPoint files here</div>
+          <ul class="doc-list" id="doc-list"></ul>
+          <p class="hint" id="doc-hint">Copied into this plugin's private folder; never uploaded anywhere.</p>
+        </div>
+        <div class="side-block grow">
+          <div class="side-head wrap">
+            <span class="pane-title">Reports</span>
+            <div class="side-actions">
+              <button class="btn small" id="btn-folder" type="button" title="Create a folder; drag reports onto it">+ Folder</button>
+              <button class="btn small primary" id="btn-new" type="button" title="Clear the form and start a new topic">+ New research</button>
+            </div>
+          </div>
+          <ul class="report-list" id="report-list"></ul>
+        </div>
+        <div class="side-resizer" id="side-resizer" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize (double-click to reset)"></div>
+      </aside>
+
+      <main class="pr-work">
+        <form class="card ask" id="ask-form" autocomplete="off">
+          <label class="field-label" for="query">Research question</label>
+          <textarea id="query" rows="3" maxlength="2000" placeholder="e.g. Compare feedback-cancellation approaches for open-fit hearing aids and their limits at high gain"></textarea>
+
+          <div class="grid">
+            <label class="field"><span>Sources</span>
+              <select id="source"></select>
+            </label>
+            <label class="field"><span>Report type</span>
+              <select id="report-type"></select>
+            </label>
+            <label class="field"><span>Local model</span>
+              <select id="model"></select>
+            </label>
+            <label class="field"><span>Target length (words)</span>
+              <input type="number" id="words" min="300" max="3000" step="100" value="2500" />
+            </label>
+          </div>
+
+          <p class="hint" id="len-hint"></p>
+
+          <div class="web-opts" id="web-opts" hidden>
+            <span class="field-label">Web sources</span>
+            <div class="checks" id="retriever-checks"></div>
+            <p class="warn-note">Web search sends the search terms written by your local model to those sites, and page requests reveal your IP address. Your documents and the model never leave this PC.</p>
+          </div>
+
+          <details class="adv">
+            <summary>Advanced</summary>
+            <div class="grid">
+              <label class="field"><span>Tone</span><select id="tone"></select></label>
+              <label class="field"><span>Model context (tokens)</span>
+                <input type="number" id="num-ctx" min="4096" max="32768" step="1024" value="8192" />
+              </label>
+            </div>
+            <p class="hint">8192 suits a 6 GB GPU; larger values may spill to the CPU and slow down.</p>
+          </details>
+
+          <div class="ask-actions">
+            <button class="btn primary" id="btn-run" type="submit">Start research</button>
+            <button class="btn" id="btn-cancel" type="button" hidden>Cancel</button>
+            <span class="muted" id="ask-msg"></span>
+          </div>
+        </form>
+
+        <div class="run-banner" id="run-banner" hidden>
+          <span id="run-banner-text"></span>
+          <button class="btn small" id="btn-show-progress" type="button">Show progress</button>
+          <button class="btn small" id="btn-cancel-run" type="button">Cancel</button>
+        </div>
+
+        <section class="card progress" id="progress" hidden>
+          <div class="progress-head">
+            <strong id="progress-title">Researching…</strong>
+            <span class="muted" id="progress-time"></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill"></div></div>
+          <pre class="log" id="run-log"></pre>
+        </section>
+
+        <section class="card viewer" id="viewer" hidden>
+          <div class="viewer-head">
+            <div class="viewer-title">
+              <strong id="viewer-query"></strong>
+              <span class="muted" id="viewer-question" hidden></span>
+              <span class="muted" id="viewer-meta"></span>
+            </div>
+            <div class="viewer-actions">
+              <button class="btn small" id="btn-rename" type="button" title="Give this report a name that is easy to find later">Rename</button>
+              <button class="btn small" id="btn-reuse" type="button" title="Copy this question and its settings into the form">Reuse as new</button>
+              <button class="btn small" id="btn-copy" type="button">Copy Markdown</button>
+              <a class="btn small" id="btn-download" href="#">Download .md</a>
+              <button class="btn small" id="btn-pdf" type="button">Download PDF</button>
+              <button class="btn small danger" id="btn-delete" type="button">Delete</button>
+            </div>
+          </div>
+          <div class="font-ctl" role="group" aria-label="Report text size">
+            <button class="btn small" id="btn-font-down" type="button" title="Smaller text" aria-label="Smaller text">A&minus;</button>
+            <button class="btn small font-size" id="btn-font-reset" type="button" title="Reset text size"></button>
+            <button class="btn small" id="btn-font-up" type="button" title="Larger text" aria-label="Larger text">A+</button>
+          </div>
+          <article class="md" id="viewer-body"></article>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
