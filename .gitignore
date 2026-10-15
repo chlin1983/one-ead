@@ -39,11 +39,17 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Chili3D generated build + all local data (works, config, build workspace)
+# Chili3D generated build + all local data (works, store, recents, exports, build workspace)
 modules/chili3d/web/app/
 modules/chili3d/web/app.new/
 modules/chili3d/web/app.old/
 modules/chili3d/data/
+modules/chili3d/exports/
+*.step
+*.stp
+*.iges
+*.igs
+*.brep
 
 # PdfCraft generated WebAssembly bundle + user documents
 modules/pdfcraft/web/app/
