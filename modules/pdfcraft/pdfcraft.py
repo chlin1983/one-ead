@@ -37,9 +37,16 @@ LATEST_TTL_S = 30 * 60
 DEFAULT_CONFIG = {"channel": "release", "auto_update": False}
 
 _IO_LOCK = threading.RLock()
-_JOB_LOCK = threading.Lock()
+_JOB_LOCK = threading.RLock()
 _latest_lock = threading.Lock()
 _latest: dict = {"info": None, "checked_at": 0.0, "error": None}
+
+DEFAULT_RELEASE_INFO = {
+    "tag": "v0.8.0",
+    "version": "0.8.0",
+    "download_url": "https://github.com/storytold/pdfcraft/releases/download/v0.8.0/pdfcraft-web-0.8.0.zip",
+    "asset_name": "pdfcraft-web-0.8.0.zip",
+}
 _job: dict = {
     "state": "idle",  # idle | running | done | error
     "phase": "",
@@ -93,20 +100,23 @@ def set_config(updates: dict) -> dict:
 
 
 def get_installed() -> Optional[dict]:
+    # Bundle is only considered installed if index.html and a wasm binary exist on disk
+    if not APP_DIR.exists() or not (APP_DIR / "index.html").is_file():
+        return None
+    wasm_files = list(APP_DIR.glob("*.wasm"))
+    if not wasm_files:
+        return None
+
     data = _read_json(INSTALLED_FILE, None)
     if isinstance(data, dict) and data.get("version"):
         return data
-    # Fallback inspection: check if APP_DIR / index.html exists
-    index_file = APP_DIR / "index.html"
-    wasm_file = next(APP_DIR.glob("*.wasm"), None) if APP_DIR.exists() else None
-    if index_file.exists() and wasm_file:
-        return {
-            "version": "0.8.0",
-            "tag": "v0.8.0",
-            "installed_at": _now_iso(),
-            "wasm_file": wasm_file.name,
-        }
-    return None
+
+    return {
+        "version": "0.8.0",
+        "tag": "v0.8.0",
+        "installed_at": _now_iso(),
+        "wasm_file": wasm_files[0].name,
+    }
 
 
 def record_installed(info: dict) -> None:
@@ -370,11 +380,10 @@ def check_latest(force: bool = False) -> dict:
 
 def _install_worker(target_info: dict) -> None:
     try:
-        download_url = target_info.get("download_url")
-        if not download_url:
-            raise ValueError("No download URL found for web asset")
+        download_url = target_info.get("download_url") or DEFAULT_RELEASE_INFO["download_url"]
+        asset_name = target_info.get("asset_name") or DEFAULT_RELEASE_INFO["asset_name"]
 
-        _log_line(f"Starting download of {target_info.get('asset_name', 'web bundle')}...")
+        _log_line(f"Starting download of {asset_name}...")
         req = urllib.request.Request(download_url, headers={"User-Agent": "OneEAD-PdfCraft/1.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
             zip_bytes = resp.read()
@@ -383,22 +392,27 @@ def _install_worker(target_info: dict) -> None:
         APP_DIR.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-            for member in z.namelist():
-                parts = member.split("/", 1)
-                if len(parts) > 1 and parts[1]:
-                    rel_path = parts[1]
-                    out_file = APP_DIR / rel_path
-                    if member.endswith("/"):
-                        out_file.mkdir(parents=True, exist_ok=True)
-                    else:
-                        out_file.parent.mkdir(parents=True, exist_ok=True)
-                        with open(out_file, "wb") as f:
-                            f.write(z.read(member))
+            members = z.namelist()
+            # Detect common top-level directory prefix if archive wraps files
+            prefix = ""
+            if members and "/" in members[0]:
+                top_dir = members[0].split("/")[0] + "/"
+                if all(m.startswith(top_dir) for m in members if not m.endswith("/")):
+                    prefix = top_dir
+
+            for member in members:
+                rel = member[len(prefix):] if prefix and member.startswith(prefix) else member
+                if not rel or rel.endswith("/"):
+                    continue
+                out_file = APP_DIR / rel
+                out_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(out_file, "wb") as f:
+                    f.write(z.read(member))
 
         _log_line("Extraction finished successfully.")
         record_installed({
-            "version": target_info.get("version"),
-            "tag": target_info.get("tag"),
+            "version": target_info.get("version", "0.8.0"),
+            "tag": target_info.get("tag", "v0.8.0"),
             "installed_at": _now_iso(),
             "download_url": download_url,
         })
@@ -406,7 +420,7 @@ def _install_worker(target_info: dict) -> None:
         with _JOB_LOCK:
             _job["state"] = "done"
             _job["phase"] = "completed"
-            _job["message"] = f"PdfCraft v{target_info.get('version')} installed successfully."
+            _job["message"] = f"PdfCraft v{target_info.get('version', '0.8.0')} installed successfully."
             _job["finished_at"] = _now_iso()
     except Exception as exc:
         _log_line(f"Error during installation: {exc}")
@@ -417,51 +431,46 @@ def _install_worker(target_info: dict) -> None:
             _job["finished_at"] = _now_iso()
 
 
-def start_install(force: bool = False) -> dict:
+def _start_install_locked(target_info: Optional[dict] = None) -> dict:
+    if _job["state"] == "running":
+        return dict(_job)
+
+    info = target_info or _latest.get("info") or dict(DEFAULT_RELEASE_INFO)
+
+    _job["state"] = "running"
+    _job["phase"] = "downloading"
+    _job["message"] = f"Downloading PdfCraft {info.get('tag', 'v0.8.0')}..."
+    _job["error"] = None
+    _job["started_at"] = _now_iso()
+    _job["finished_at"] = None
+    _job["target"] = info
+
+    t = threading.Thread(target=_install_worker, args=(info,), daemon=True)
+    t.start()
+    return dict(_job)
+
+
+def start_install(force: bool = False, target_info: Optional[dict] = None) -> dict:
     with _JOB_LOCK:
         if _job["state"] == "running":
             return dict(_job)
-
-        latest = check_latest(force=force)
-        info = latest.get("info")
-        if not info or not info.get("download_url"):
-            # Fallback to known v0.8.0 release url if GitHub API rate-limited
-            info = {
-                "tag": "v0.8.0",
-                "version": "0.8.0",
-                "download_url": "https://github.com/storytold/pdfcraft/releases/download/v0.8.0/pdfcraft-web-0.8.0.zip",
-                "asset_name": "pdfcraft-web-0.8.0.zip",
-            }
-
-        _job["state"] = "running"
-        _job["phase"] = "downloading"
-        _job["message"] = f"Downloading PdfCraft {info.get('tag')}..."
-        _job["error"] = None
-        _job["started_at"] = _now_iso()
-        _job["finished_at"] = None
-        _job["target"] = info
-
-        t = threading.Thread(target=_install_worker, args=(info,), daemon=True)
-        t.start()
-        return dict(_job)
+        return _start_install_locked(target_info)
 
 
 def status() -> dict:
     ensure_sample_doc()
     inst = get_installed()
-    if not inst and (not APP_DIR.exists() or not (APP_DIR / "index.html").exists()):
-        with _JOB_LOCK:
-            if _job["state"] != "running":
-                start_install()
-    latest_res = check_latest(force=False)
-    latest_info = latest_res.get("info")
-    latest_ver = latest_info.get("version") if latest_info else None
-    installed_ver = inst.get("version") if inst else None
-
-    has_update = bool(installed_ver and latest_ver and installed_ver != latest_ver)
-
     with _JOB_LOCK:
+        if not inst and _job["state"] != "running":
+            _start_install_locked()
         job_copy = dict(_job)
+
+    with _latest_lock:
+        latest_info = _latest.get("info")
+        latest_ver = latest_info.get("version") if latest_info else None
+
+    installed_ver = inst.get("version") if inst else None
+    has_update = bool(installed_ver and latest_ver and installed_ver != latest_ver)
 
     return {
         "installed": inst is not None,

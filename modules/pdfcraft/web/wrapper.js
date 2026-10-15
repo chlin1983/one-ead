@@ -80,8 +80,9 @@
   async function checkStatus() {
     try {
       const res = await fetch("/api/pdfcraft/status");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      state.installed = data.installed;
+      state.installed = !!data.installed;
       state.installedVersion = data.installed_version || "0.8.0";
 
       if (el.versionChip) {
@@ -89,14 +90,15 @@
       }
 
       if (data.job && data.job.state === "running") {
-        showInstaller(data.job.message || "Installing...", data.job_log || []);
+        showInstaller(data.job.message || "Downloading PdfCraft WebAssembly bundle...", data.job_log || []);
         startPolling();
         return;
       }
 
       if (!state.installed) {
-        showInstaller("PdfCraft engine not found. Click below to install.", []);
+        showInstaller("PdfCraft engine not ready. Setting up WebAssembly bundle...", data.job_log || []);
         if (el.retryBtn) el.retryBtn.hidden = false;
+        startPolling();
         return;
       }
 
@@ -104,8 +106,8 @@
       await loadDocuments();
     } catch (err) {
       console.warn("[pdfcraft] Error checking status:", err);
-      // Fallback: still try loading documents
-      await loadDocuments();
+      showInstaller("Connecting to PdfCraft service...", []);
+      startPolling();
     }
   }
 
@@ -157,7 +159,7 @@
   }
 
   function loadInFrame(fileUrl) {
-    if (!el.frame) return;
+    if (!el.frame || !state.installed) return;
     let targetUrl = "app/index.html";
     if (fileUrl) {
       targetUrl += `?file=${encodeURIComponent(fileUrl)}`;
@@ -189,15 +191,19 @@
     state.pollTimer = setInterval(async () => {
       try {
         const res = await fetch("/api/pdfcraft/status");
+        if (!res.ok) return;
         const data = await res.json();
         if (el.instLog && data.job_log) {
           el.instLog.textContent = data.job_log.join("\n");
           el.instLog.scrollTop = el.instLog.scrollHeight;
         }
-        if (data.job && data.job.state === "done") {
+        if (data.installed || (data.job && data.job.state === "done")) {
+          state.installed = true;
+          state.installedVersion = data.installed_version || "0.8.0";
+          if (el.versionChip) el.versionChip.textContent = `v${state.installedVersion}`;
           hideInstaller();
           showToast("PdfCraft ready!");
-          await checkStatus();
+          await loadDocuments();
         } else if (data.job && data.job.state === "error") {
           if (el.instMsg) el.instMsg.textContent = `Error: ${data.job.error}`;
           if (el.retryBtn) el.retryBtn.hidden = false;
@@ -211,6 +217,20 @@
   }
 
   function wireEvents() {
+    // Retry install button
+    el.retryBtn?.addEventListener("click", async () => {
+      if (el.retryBtn) el.retryBtn.hidden = true;
+      showInstaller("Retrying download and setup...", []);
+      try {
+        await fetch("/api/pdfcraft/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: true }),
+        });
+      } catch (_) {}
+      startPolling();
+    });
+
     // Document dropdown change
     el.docSelect?.addEventListener("change", (e) => {
       selectDoc(e.target.value);

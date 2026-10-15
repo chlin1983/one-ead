@@ -168,8 +168,6 @@ def _ensure_initialized() -> dict:
         DRAWINGS_DIR.mkdir(parents=True, exist_ok=True)
         TRASH_DIR.mkdir(parents=True, exist_ok=True)
 
-        manifest = _get_manifest_locked()
-
         # Migrate legacy single scene file if default drawing doesn't exist yet
         default_file = DRAWINGS_DIR / "default.json"
         if not default_file.exists():
@@ -191,6 +189,7 @@ def _ensure_initialized() -> dict:
                 with open(default_file, "w", encoding="utf-8") as f:
                     json.dump(empty_scene, f)
 
+        manifest = _get_manifest_locked()
         return manifest
 
 
@@ -444,7 +443,7 @@ def get_scene(file_id: Optional[str] = None) -> dict:
 def save_scene(payload: dict, file_id: Optional[str] = None) -> dict:
     """Save the whiteboard scene atomically to disk for the given or active file."""
     with _IO_LOCK:
-        manifest = _get_manifest_locked()
+        manifest = _ensure_initialized()
         target_id = file_id or manifest.get("active_id", "default")
         DRAWINGS_DIR.mkdir(parents=True, exist_ok=True)
         target_file = DRAWINGS_DIR / f"{target_id}.json"
