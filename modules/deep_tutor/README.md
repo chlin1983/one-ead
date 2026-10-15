@@ -83,6 +83,32 @@ text (cards, chat knowledge-base picker). Reset restores the original. The UI is
 (a Node preload that `_serve.py` loads into the web app and that appends `inject/kb_rename.js` to HTML pages), so
 it survives DeepTutor updates. Restart the service after changing these files.
 
+### Chat source panel
+
+Upstream records the passages a knowledge-base answer was retrieved from but only shows their titles inside the
+collapsed "Done" trace. `inject/chat_sources.js` (loaded the same way) adds a **Sources** panel under each answer:
+document, knowledge base, page and the retrieved passage, with links that show that page of the PDF in DeepTutor's
+preview pane (as a rendered page image, because the sandboxed pane cannot load Chrome's PDF viewer). It lists what the
+retriever returned, not what the model says it used. Passages carry no page number, so the page is found by locating
+the passage in the document's extracted text (`--- Page N ---` markers); when that fails the page chip is omitted.
+
+### Tables in PDFs and search quality
+
+Upstream's built-in PDF extraction flattens a table into one cell per line, so a small model cannot tell which value
+belongs to which column. `inject/py/` fixes that for ruled tables: `_serve.py` puts it on the backend's `PYTHONPATH`,
+`sitecustomize.py` wraps the built-in `TextOnlyParser` (patched when upstream's module is imported, no upstream file is
+edited) and `one_ead_tables.py` (run in upstream's isolated worker, 15 min limit) replaces each table's cell lines with
+one plain sentence per row, e.g. `Table 1, Bystander compatibility ..., Frequency range in GHz 1,4 to 2,7: Microphone
+mode, ... = 10.` Any failure keeps the plain text. The parser signature gets `+tablesN`, so existing knowledge bases
+are re-parsed on their next **Re-index** (Knowledge Center). Only PDFs with ruled tables are covered, and chat
+attachments are not post-processed.
+
+The same `sitecustomize.py` makes the Ollama embedding adapter send `nomic-embed-text`'s required task prefixes
+(`search_document: ` / `search_query: `; upstream sends none). That changes the embedding signature, so every knowledge
+base needs one Re-index after this was added (done on 2026-10-13 for both). Retrieval depth `top_k` is 8 in
+`data/home/data/user/settings/llamaindex.json`. Bump `VERSION` in `one_ead_tables.py` after changing the table
+format. See `IMPLEMENTATION_PLAN.md` for measurements and the options not built yet.
+
 ## Where things live (all under `modules/deep_tutor/data/`)
 
 | Path | Contents |

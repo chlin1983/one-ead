@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PdfCraft — Rust PDF Workbench</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="wrapper.css" />
+</head>
+<body>
+  <div class="craft-root" id="craft-root">
+    <!-- Pull handle to show toolbar when collapsed -->
+    <button class="bar-handle" id="bar-handle" type="button" title="Show PdfCraft toolbar" aria-label="Show toolbar"></button>
+
+    <!-- Top workbench toolbar -->
+    <header class="craft-bar" id="craft-bar">
+      <div class="bar-left">
+        <div class="brand">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="brand-icon">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <path d="M9 13h6"/>
+            <path d="M9 17h4"/>
+            <polygon points="15 11 18 8 20 10 17 13" fill="#12a58a" fill-opacity="0.35"/>
+          </svg>
+          <strong class="brand-title">PdfCraft</strong>
+        </div>
+
+        <span class="chip version-chip" id="chip-version" title="Installed Rust WebAssembly bundle">v0.8.0</span>
+        
+        <div class="doc-selector-wrap">
+          <label for="doc-select" class="visually-hidden">Document</label>
+          <select id="doc-select" class="doc-select" title="Switch active PDF document">
+            <option value="">Loading library…</option>
+          </select>
+          <button class="btn icon ghost btn-delete-quick" id="btn-delete-active-doc" type="button" title="Delete current PDF from library">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              <line x1="10" y1="11" x2="10" y2="17"/>
+              <line x1="14" y1="11" x2="14" y2="17"/>
+            </svg>
+          </button>
+        </div>
+
+        <input type="file" id="file-input" accept=".pdf" style="display: none;" />
+        <button class="btn primary" id="btn-upload" type="button" title="Upload a local PDF to your workbench library">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>Upload PDF</span>
+        </button>
+
+        <button class="btn" id="btn-open-folder" type="button" title="View PDF library & storage folder">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Library &amp; Folder</span>
+        </button>
+      </div>
+
+      <div class="bar-center">
+        <span class="hint-shortcuts" title="Useful keyboard shortcuts in PdfCraft">
+          <kbd>Ctrl+K</kbd> Command Palette &middot; <kbd>Ctrl+G</kbd> Find &middot; <kbd>Ctrl+Z</kbd> Undo
+        </span>
+      </div>
+
+      <div class="bar-right">
+        <button class="btn ghost" id="btn-new-tab" type="button" title="Open active PDF in new browser tab">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+          <span>Pop Out</span>
+        </button>
+
+        <button class="btn ghost" id="btn-fullscreen" type="button" title="Toggle full screen mode">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>
+          </svg>
+          <span id="fs-label">Full Screen</span>
+        </button>
+
+        <!-- Settings dropdown -->
+        <div class="menu-wrap">
+          <button class="btn icon" id="btn-settings" type="button" title="Settings & Updates" aria-label="Settings and updates" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="6" x2="20" y2="6"/>
+              <line x1="4" y1="12" x2="20" y2="12"/>
+              <line x1="4" y1="18" x2="20" y2="18"/>
+              <circle cx="9" cy="6" r="2" fill="var(--surface)"/>
+              <circle cx="15" cy="12" r="2" fill="var(--surface)"/>
+              <circle cx="8" cy="18" r="2" fill="var(--surface)"/>
+            </svg>
+          </button>
+          <div class="menu" id="menu" role="menu" hidden>
+            <div class="menu-header">PdfCraft Workbench</div>
+            <button class="menu-item" id="btn-reveal-folder" type="button">Open PDF folder in Explorer</button>
+            <button class="menu-item" id="btn-check-updates" type="button">Check for updates</button>
+            <button class="menu-item" id="btn-reinstall" type="button">Reinstall / Update engine</button>
+            <button class="menu-item" id="btn-delete-doc" type="button" style="color: var(--danger, #d64545);">Delete selected doc</button>
+            <div class="menu-divider"></div>
+            <a class="menu-item" href="https://github.com/storytold/pdfcraft" target="_blank" rel="noopener noreferrer">
+              Source on GitHub (MIT/Apache-2.0) &nearr;
+            </a>
+          </div>
+        </div>
+
+        <button class="btn icon collapse-btn" id="btn-collapse" type="button" title="Collapse toolbar (hover top edge to restore)">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main workbench container -->
+    <main class="craft-stage">
+      <iframe
+        id="app-frame"
+        class="app-frame"
+        title="PdfCraft Workbench"
+        allow="fullscreen; clipboard-read; clipboard-write; keyboard-map"
+      ></iframe>
+
+      <!-- Installation / update modal card if needed -->
+      <section class="installer" id="installer" hidden>
+        <div class="card installer-card">
+          <div class="inst-icon">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#12a58a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </div>
+          <h2 id="inst-title">Setting up PdfCraft</h2>
+          <p class="muted" id="inst-msg">Downloading WebAssembly bundle from storytold/pdfcraft…</p>
+          <div class="bar-track" id="inst-track"><div class="bar-fill"></div></div>
+          <pre class="log" id="inst-log"></pre>
+          <div class="inst-actions">
+            <button class="btn primary" id="btn-retry" type="button" hidden>Retry</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Document Library & Folder Manager Modal -->
+  <div class="modal-backdrop" id="library-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <h3>PDF Document Library &amp; Disk Storage</h3>
+          <p class="modal-subtitle">Local files stored in <code id="lib-path-code">modules\pdfcraft\data\docs</code></p>
+        </div>
+        <button class="btn icon ghost modal-close-btn" id="btn-close-modal" type="button" title="Close">&times;</button>
+      </div>
+
+      <div class="modal-toolbar">
+        <button class="btn primary" id="btn-modal-upload" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>Upload PDF</span>
+        </button>
+
+        <button class="btn" id="btn-modal-open-explorer" type="button" title="Open this folder in Windows File Explorer">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Launch Windows Explorer</span>
+        </button>
+
+        <button class="btn ghost" id="btn-modal-copy-path" type="button" title="Copy full directory path to clipboard">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Copy Path</span>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="lib-list" id="lib-file-list">
+          <!-- Dynamically populated files -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="wrapper.js"></script>
+</body>
+</html>

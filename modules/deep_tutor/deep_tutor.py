@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from collections import deque
@@ -69,7 +70,6 @@ _job: dict = {
     "target": None,
 }
 _job_log: deque = deque(maxlen=200)
-_svc_log: deque = deque(maxlen=120)
 _proc: Optional[subprocess.Popen] = None
 _adopted_pid: Optional[int] = None
 
@@ -402,19 +402,65 @@ def _ensure_ports() -> dict:
     return chosen
 
 
-def _pump(proc: subprocess.Popen) -> None:
-    assert proc.stdout is not None
+def _open_service_log():
+    """Log file handed to the service as its stdout/stderr.
+
+    A pipe read by this process would break whenever One EAD restarts while DeepTutor keeps running:
+    nobody drains it, it fills up, and the backend freezes on its next log line.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2 * 1024 * 1024:
         LOG_FILE.write_bytes(LOG_FILE.read_bytes()[-512 * 1024:])
-    with open(LOG_FILE, "a", encoding="utf-8", errors="replace") as fh:
-        fh.write(f"\n--- {_now_iso()} start ---\n")
-        for line in proc.stdout:
-            clean = _ANSI_RE.sub("", line).rstrip()
-            if clean:
-                _svc_log.append(clean[:300])
-                fh.write(clean + "\n")
-                fh.flush()
+    fh = open(LOG_FILE, "ab")
+    fh.write(f"\n--- {_now_iso()} start ---\n".encode("utf-8"))
+    fh.flush()
+    return fh
+
+
+def _log_tail(count: int = 40) -> list:
+    try:
+        with open(LOG_FILE, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 16 * 1024))
+            text = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    lines = [_ANSI_RE.sub("", ln).rstrip()[:300] for ln in text.splitlines()]
+    return [ln for ln in lines if ln][-count:]
+
+
+def _find_pids_by_port(port: int) -> list[int]:
+    if not port:
+        return []
+    pids = []
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=_NO_WINDOW,
+        ).stdout
+        for line in out.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP":
+                local_addr = parts[1]
+                state = parts[3].upper()
+                if (local_addr.endswith(f":{port}") or local_addr.rsplit(":", 1)[-1] == str(port)) and state == "LISTENING":
+                    try:
+                        pid = int(parts[4])
+                        if pid and pid not in pids:
+                            pids.append(pid)
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return pids
+
+
+def _find_pid_by_port(port: int) -> Optional[int]:
+    pids = _find_pids_by_port(port)
+    return pids[0] if pids else None
 
 
 def service_alive() -> bool:
@@ -425,6 +471,12 @@ def service_alive() -> bool:
         if _pid_alive(_adopted_pid):
             return True
         _adopted_pid = None
+    ports = _ports()
+    if _frontend_ready(ports.get("frontend_port", 0)) and _backend_ready(ports.get("backend_port", 0)):
+        pid = _find_pid_by_port(ports.get("backend_port", 0)) or _find_pid_by_port(ports.get("frontend_port", 0))
+        if pid:
+            _adopted_pid = pid
+        return True
     return False
 
 
@@ -436,13 +488,27 @@ def start_service() -> dict:
         if not is_installed():
             raise RuntimeError("DeepTutor is not installed yet")
 
+        # Check if already answering on configured or preferred ports before doing anything else
+        ports = _ports()
+        if _frontend_ready(ports.get("frontend_port", 0)) and _backend_ready(ports.get("backend_port", 0)):
+            _adopted_pid = _find_pid_by_port(ports.get("backend_port", 0)) or _find_pid_by_port(ports.get("frontend_port", 0))
+            if _adopted_pid:
+                _write_json(RUN_FILE, {"pid": _adopted_pid, **ports, "stdio": "file", "started_at": _now_iso()})
+            _ensure_watchdog()
+            return status()
+
         # A previous One EAD process may have died without stopping its child.
         # Adopt it only if its web app answers, so a recycled PID is never mistaken for it.
         saved = _read_json(RUN_FILE, {})
-        if (isinstance(saved, dict) and _pid_alive(saved.get("pid"))
-                and _frontend_ready(int(saved.get("frontend_port") or 0))):
-            _adopted_pid = int(saved["pid"])
-            return status()
+        if isinstance(saved, dict) and _pid_alive(saved.get("pid")):
+            if (saved.get("stdio") == "file" and _frontend_ready(int(saved.get("frontend_port") or 0))
+                    and _backend_ready(int(saved.get("backend_port") or 0))):
+                _adopted_pid = int(saved["pid"])
+                _ensure_watchdog()
+                return status()
+            # Started by an older One EAD (output piped to a process that is gone) or unresponsive: replace it.
+            _kill_tree(int(saved["pid"]))
+            time.sleep(1.0)
 
         ports = _ensure_ports()
         env = dict(os.environ)
@@ -451,23 +517,27 @@ def start_service() -> dict:
             PYTHONIOENCODING="utf-8:replace",
             DEEPTUTOR_BACKEND_READY_TIMEOUT="600",  # first start after an install is slow on Windows
         )
-        flags = _NO_WINDOW | (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0)
-        _svc_log.clear()
-        HOME_DIR.mkdir(parents=True, exist_ok=True)
-        _proc = subprocess.Popen(
-            [str(venv_python()), "-X", "utf8", str(SERVE_SCRIPT), str(HOME_DIR)],
-            cwd=str(DATA_DIR),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=flags,
+        flags = _NO_WINDOW | (
+            (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+            if os.name == "nt"
+            else 0
         )
-        _write_json(RUN_FILE, {"pid": _proc.pid, **ports, "started_at": _now_iso()})
-        threading.Thread(target=_pump, args=(_proc,), name="deep-tutor-log", daemon=True).start()
+        HOME_DIR.mkdir(parents=True, exist_ok=True)
+        log_fh = _open_service_log()
+        try:
+            _proc = subprocess.Popen(
+                [str(venv_python()), "-X", "utf8", str(SERVE_SCRIPT), str(HOME_DIR)],
+                cwd=str(DATA_DIR),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+            )
+        finally:
+            log_fh.close()
+        _write_json(RUN_FILE, {"pid": _proc.pid, **ports, "stdio": "file", "started_at": _now_iso()})
+        _ensure_watchdog()
     return status()
 
 
@@ -488,6 +558,18 @@ def stop_service() -> dict:
                 _kill_tree(proc.pid)
         elif pid is not None and _pid_alive(pid):
             _kill_tree(pid)
+
+        # Clean up any orphan processes left on DeepTutor ports
+        target_ports = set()
+        for p in (_ports(), PREFERRED_PORTS, {"p1": 8001, "p2": 8002, "p3": 3782}):
+            for p_val in p.values():
+                if isinstance(p_val, int) and p_val > 0:
+                    target_ports.add(p_val)
+        for p_val in target_ports:
+            for orphan_pid in _find_pids_by_port(p_val):
+                if orphan_pid and orphan_pid != os.getpid():
+                    _kill_tree(orphan_pid)
+
         # Other processes (e.g. setup_local_ai.py) import this module and must not drop the server's run file.
         if proc is not None or pid is not None:
             RUN_FILE.unlink(missing_ok=True)
@@ -501,6 +583,43 @@ def restart_service() -> dict:
     return start_service()
 
 
+_watchdog_started = False
+WATCHDOG_INTERVAL_S = 15
+WATCHDOG_MAX_MISSES = 6  # ~2.5 min of a previously healthy backend not answering
+
+
+def _watchdog() -> None:
+    """Restart DeepTutor if its backend stops answering after having been healthy (frozen event loop)."""
+    seen_ok_pid, misses = None, 0
+    while True:
+        time.sleep(WATCHDOG_INTERVAL_S)
+        try:
+            pid = _proc.pid if _proc is not None and _proc.poll() is None else _adopted_pid
+            if pid is None or not service_alive():
+                seen_ok_pid, misses = None, 0
+                continue
+            if _backend_ready(_ports()["backend_port"], timeout=8.0):
+                seen_ok_pid, misses = pid, 0
+                continue
+            if seen_ok_pid != pid:
+                continue  # still starting up
+            misses += 1
+            if misses >= WATCHDOG_MAX_MISSES:
+                with open(LOG_FILE, "a", encoding="utf-8", errors="replace") as fh:
+                    fh.write(f"\n--- {_now_iso()} one-ead watchdog: backend unresponsive, restarting ---\n")
+                seen_ok_pid, misses = None, 0
+                restart_service()
+        except Exception:
+            pass
+
+
+def _ensure_watchdog() -> None:
+    global _watchdog_started
+    if not _watchdog_started:
+        _watchdog_started = True
+        threading.Thread(target=_watchdog, name="deep-tutor-watchdog", daemon=True).start()
+
+
 atexit.register(stop_service)
 
 
@@ -510,9 +629,9 @@ atexit.register(stop_service)
 
 SETUP_SCRIPT = _HERE / "setup_local_ai.py"
 OLLAMA_URL = "http://127.0.0.1:11434"
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = "bge-m3"
 # Approximate download sizes (GB) of the models offered by the presets.
-MODEL_GB = {"gemma4:e4b": 9.6, "qwen3:8b": 5.2, "qwen3:4b": 2.5, EMBED_MODEL: 0.3}
+MODEL_GB = {"gemma4:e4b": 9.6, "qwen3:8b": 5.2, "qwen3:4b": 2.5, "bge-m3": 1.2, "nomic-embed-text": 0.3}
 OLLAMA_INSTALL_GB = 1.5
 PRESETS = {
     "standard": {"label": "Standard", "detail": "16 GB RAM; a GPU with 6 GB+ memory is recommended",
@@ -521,7 +640,13 @@ PRESETS = {
               "chat": ["qwen3:4b"], "min_ram_gb": 6},
 }
 # Without these Ollama's 4096-token context truncates DeepTutor prompts (see README).
-OLLAMA_ENV = {"OLLAMA_CONTEXT_LENGTH": "8192", "OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}
+OLLAMA_ENV = {
+    "OLLAMA_CONTEXT_LENGTH": "8192",
+    "OLLAMA_FLASH_ATTENTION": "1",
+    "OLLAMA_KV_CACHE_TYPE": "q8_0",
+    "OLLAMA_NUM_PARALLEL": "1",
+    "OLLAMA_MAX_LOADED_MODELS": "1",
+}
 
 _LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _hw_cache: dict = {"at": 0.0, "value": None}
@@ -744,6 +869,20 @@ def _frontend_ready(port: int) -> bool:
         return False
 
 
+def _backend_ready(port: int, timeout: float = 2.0) -> bool:
+    """True if the API server answers at all (any HTTP status)."""
+    if not port:
+        return False
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://{LOOPBACK}:{port}/", timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
+
+
 def status() -> dict:
     cfg = get_config()
     installed = get_installed()
@@ -765,7 +904,7 @@ def status() -> dict:
         "update_available": update_available,
         "config": cfg,
         "job": {**_job, "log": list(_job_log)[-60:]},
-        "service": {"running": alive, "ready": ready, "log": list(_svc_log)[-40:], **ports},
+        "service": {"running": alive, "ready": ready, "log": _log_tail(40), **ports},
         "uv_available": bool(shutil.which("uv")),
         "node_available": bool(shutil.which("node")),
         "llm_configured": llm_configured(),

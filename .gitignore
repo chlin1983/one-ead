@@ -45,6 +45,10 @@ modules/chili3d/web/app.new/
 modules/chili3d/web/app.old/
 modules/chili3d/data/
 
+# PdfCraft generated WebAssembly bundle + user documents
+modules/pdfcraft/web/app/
+modules/pdfcraft/data/
+
 # DeepTutor private venv, user data (API keys, chats), logs
 modules/deep_tutor/data/
 
@@ -56,4 +60,8 @@ modules/excalidraw/data/trash/
 
 # Runtime root data directory
 data/
+
+# Temporary scratch and debug scripts
+scratch/
+scratch*
 

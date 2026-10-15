@@ -1,3 +1,5 @@
+, 
+
 # One EAD
 
 A modular local web portal that consolidates your electroacoustic engineering
@@ -65,7 +67,6 @@ All plugins (modules) run 100% locally and offline.
 | Plugin                                       | ID                                     | Type                                                    | Description                                                                          | Status |
 | -------------------------------------------- | -------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------ |
 | **Executive Dashboard**                | `my_dashboard`                       | React + TypeScript + D3                                 | High-level metrics, acoustic overview, and tool launcher                             | Live   |
-| **LLM Course & Fundamentals**          | `llm-course`                         | Interactive Web + FastAPI                               | Step-by-step master roadmap & interactive guide based on Maxime Labonne's llm-course | Live   |
 | **HXML Viewer**                        | `hxml-viewer`                        | Python (`xml`) + Plotly                               | Hearing aid XML frequency response analyzer                                          | Live   |
 | **ITS Report Compiler**                | `its-report-compiler`                | Python (`pdfplumber`)                                 | Automated parsing and table compilation of ITS test reports                          | Live   |
 | **Component Database**                 | `component_database`                 | Python (`sqlite`/FastAPI) + Web                       | Searchable repository of electroacoustic components and datasheets                   | Live   |
@@ -73,34 +74,24 @@ All plugins (modules) run 100% locally and offline.
 | **MEMS Microphone Explorer**           | `mems-microphone-explorer`           | Python + Plotly                                         | MEMS microphone specifications, directivity, and frequency response                  | Live   |
 | **Balance Armature Receiver Explorer** | `balance-armature-receiver-explorer` | Static (HTML + Web Audio)                               | Real-time receiver modeling and acoustic simulation                                  | Live   |
 | **Excalidraw Whiteboard**              | `excalidraw`                         | Standalone Web Bundle                                   | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard             | Live   |
-| **PDF Arranger**                       | `pdfarranger`                        | Python + GTK3 Broadway Daemon                           | Visual PDF page reordering, merging, splitting, cropping, and native file dialogs    | Live   |
+| **PdfCraft**                           | `pdfcraft`                           | Pure Rust WebAssembly                                   | Open-source PDF workbench & editor with card page organizer, forms, combine & split | Live   |
 | **Chili3D CAD**                        | `chili3d`                            | WebAssembly + OpenCascade                               | Browser-native parametric 3D CAD modeling with dual local persistence                | Live   |
 | **DeepTutor**                          | `deep-tutor`                         | Upstream PyPI package (`deeptutor`) in a private venv | AI tutoring workspace that always tracks the newest upstream release                 | Live   |
 | **GPT Researcher**                     | `gpt-researcher`                     | `gpt-researcher` in private venv + local Ollama       | Offline-first engineering research assistant driven by local Ollama models           | Live   |
+
 
 ---
 
 ### Featured Standalone Utilities
 
-#### 1. PDF Arranger (`modules/pdfarranger/`)
-
-Powered by [PDF Arranger](https://github.com/pdfarranger/pdfarranger), streamed seamlessly via GTK3 Broadway HTML5 daemon on `127.0.0.1:8185`:
-
-- **Visual Drag & Drop Reordering**: High-contrast Cairo-rendered insertion guides and live drag badges.
-- **Dedicated Toolbar Controls**: Instant **Undo** (`↶`), **Redo** (`↷`), **Move Left** (`◀`), and **Move Right** (`▶`) buttons directly in the header bar.
-- **Native Windows 11 Dialogs**: Uses system `IFileOpenDialog` and `IFileSaveDialog` with Quick Access and search.
-- **Streamlined Interface**: Clean layout without duplicate title headers, redundant import buttons, or extraneous window controls.
-- **Smooth White Screen Restarts**: Broadway display styled to maintain a clean white background during reloads.
-- **Tracked Customizations**: Custom patches and UI definitions are maintained in `modules/pdfarranger/overrides/`, keeping heavy portable binaries out of Git.
-
-#### 2. Excalidraw Whiteboard (`modules/excalidraw/`)
+#### 1. Excalidraw Whiteboard (`modules/excalidraw/`)
 
 Powered by [Excalidraw](https://github.com/excalidraw/excalidraw):
 
 - **100% Offline Canvas**: Packaged with all fonts, assets, and local persistence.
 - **Clean Workspace**: Streamlined toolbar without redundant branding headers for maximum drawing canvas space.
 
-#### 3. Chili3D CAD (`modules/chili3d/`)
+#### 2. Chili3D CAD (`modules/chili3d/`)
 
 Powered by [Chili3D](https://github.com/xiangechen/chili3d):
 
@@ -109,16 +100,17 @@ Powered by [Chili3D](https://github.com/xiangechen/chili3d):
 - **Document Switcher & Auto-save**: Multi-document tab bar with automatic background saving.
 - **Full Screen CAD Workflow**: Locks Escape key via Keyboard Lock API so pressing Esc deselects objects without exiting fullscreen.
 
-#### 4. LLM Fundamentals & Course Guide (`modules/llm_course_guide/`)
+#### 3. PdfCraft Workbench (`modules/pdfcraft/`)
 
-Powered by [mlabonne/llm-course](https://github.com/mlabonne/llm-course) by Maxime Labonne:
+Powered by [PdfCraft](https://github.com/storytold/pdfcraft) (MIT / Apache-2.0) by storytold:
 
-- **Comprehensive 4-Track Curriculum**: Fundamentals (Math, Python, Neural Nets, NLP), Scientist (Architecture, Pre-training, SFT/LoRA, Alignment, Quantization, Merging), Engineer (vLLM serving, Vector DBs, RAG, Agents), and 1-Click Colab tools.
-- **5 Interactive Simulators**: Subword Tokenizer, Temperature & Top-P Sampling, Quantization VRAM Calculator, Embedding Cosine Similarity, and Attention Heatmap.
-- **Local Disk Persistence**: Progress, quiz answers, and personal study notes are auto-saved to disk at `modules/llm_course_guide/data/progress.json`.
-- **Default Light Theme**: Styled to seamlessly match the One EAD portal interface with instant theme switching.
+- **Pure Rust WebAssembly Engine**: Clean-room, high-performance reimplementation of Adobe Acrobat compiled directly to WebAssembly with WebGPU / WebGL2 rendering.
+- **Card-Style Page Organizer**: Interactive page grid to rotate, reorder, extract, delete, or insert blank and file pages with deep undo history (<kbd>Ctrl+Z</kbd>).
+- **Combine & Split**: Merge multiple PDFs while preserving nested outlines/bookmarks, or split documents by page intervals.
+- **Form Filling, Layers & Comments**: Interactive form field filling, optional content layer toggling, and review comments.
+- **Integrated Local Library**: Browse, switch, and upload PDFs into your workbench library with instant rendering and pop-out support.
 
-#### 5. DeepTutor (`modules/deep_tutor/`)
+#### 4. DeepTutor (`modules/deep_tutor/`)
 
 Powered by [DeepTutor](https://github.com/HKUDS/DeepTutor) (Apache-2.0) from the HKU Data Intelligence Lab, installed from its upstream PyPI package (`deeptutor`) into a private venv:
 

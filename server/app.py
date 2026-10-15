@@ -12,6 +12,7 @@ Everything is served locally; no external network access is required at runtime.
 
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 
 from fastapi import Body, FastAPI
@@ -19,6 +20,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.registry import discover_modules, save_saved_order
+
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("text/javascript", ".js")
 
 SHELL_DIR = Path(__file__).resolve().parent.parent / "shell"
 SHARED_DIR = Path(__file__).resolve().parent.parent / "shared"

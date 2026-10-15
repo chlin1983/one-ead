@@ -257,7 +257,7 @@ def configure_deeptutor(chat_models: list, embed: str) -> None:
 
     setup = {
         "llm": {"provider": "ollama", "model": chat_models[0], "base_url": f"{dt.OLLAMA_URL}/v1"},
-        "embedding": {"provider": "ollama", "model": embed, "base_url": f"{dt.OLLAMA_URL}/api/embed", "dimension": 768},
+        "embedding": {"provider": "ollama", "model": embed, "base_url": f"{dt.OLLAMA_URL}/api/embed", "dimension": 1024 if "bge-m3" in str(embed) else 768},
         "search": {"provider": "none"},
     }
     setup_file = dt.DATA_DIR / "setup-ollama.json"
