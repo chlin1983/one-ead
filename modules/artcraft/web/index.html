@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ArtCraft — Creative Studio Suite</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="artcraft-container" id="artcraft-root">
+    
+    <!-- HUB VIEW -->
+    <div class="hub-view" id="hub-view">
+      <!-- Top Suite Header -->
+      <header class="suite-header">
+        <div class="header-left">
+          <div class="suite-logo-wrap">
+            <svg viewBox="0 0 116.34 97.5" class="suite-logo">
+              <path d="M104.28,49.49L81.55,0h-31.23l-3.17,4.76L14.75,53.63,0,75.85l21.55,21.55,63.79-36.94,16.99,37.04,14.01-21.74-12.06-26.27ZM32.89,65.66l32.42-48.87,10.91,23.77-43.32,25.09Z"/>
+            </svg>
+          </div>
+          <div class="suite-info">
+            <div class="title-row">
+              <h1 class="suite-title">ArtCraft Suite</h1>
+              <span class="badge suite-badge" id="suite-status-badge">Checking status…</span>
+            </div>
+            <p class="suite-desc">
+              High-performance, desktop-grade creative studio built in pure Rust & WebAssembly. Hardware accelerated, zero cloud dependencies, complete privacy.
+            </p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button class="btn" id="btn-check-updates" type="button" title="Check GitHub for newer versions of ArtCraft tools">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span id="check-updates-text">Check Updates</span>
+          </button>
+
+          <button class="btn primary" id="btn-install-all" type="button" title="Install or update all 12 ArtCraft applications">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Install All Apps</span>
+          </button>
+
+          <button class="btn icon-only" id="btn-theme-toggle" type="button" title="Toggle theme (White / Black)">
+            <!-- Moon icon (when in light mode) or Sun icon (when in dark mode) injected by JS -->
+            <svg class="theme-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          </button>
+
+          <button class="btn icon-only" id="btn-refresh" type="button" title="Refresh suite status">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Global Installation Progress Bar (shown when downloading/unpacking) -->
+      <div class="progress-banner" id="progress-banner" style="display: none;">
+        <div class="progress-info">
+          <span class="spinner-sm"></span>
+          <span class="progress-msg" id="progress-msg">Installing application…</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Navigation / Filters / Search -->
+      <div class="hub-controls">
+        <div class="filter-pills" id="category-pills">
+          <button class="pill active" data-category="all">All (12)</button>
+          <button class="pill" data-category="Graphics & Photo">Graphics &amp; Photo</button>
+          <button class="pill" data-category="Video & Animation">Video &amp; Animation</button>
+          <button class="pill" data-category="Office & Documents">Office &amp; Documents</button>
+          <button class="pill" data-category="Interface Design">UI / Design</button>
+          <button class="pill" data-category="Engineering & CAD">CAD &amp; Engineering</button>
+        </div>
+
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="search-input" placeholder="Search 12 ArtCraft apps..." autocomplete="off" />
+        </div>
+      </div>
+
+      <!-- 12 Apps Grid -->
+      <div class="apps-grid" id="apps-grid">
+        <!-- Rendered dynamically via app.js -->
+        <div class="loading-state">
+          <span class="spinner"></span>
+          <span>Loading ArtCraft catalog…</span>
+        </div>
+      </div>
+
+      <!-- Footer Info -->
+      <footer class="suite-footer">
+        <p>
+          ArtCraft apps are independent open-source tools compiled from Rust to WebAssembly with WebGL / WebGPU acceleration.
+          Downloaded engines are cached locally in your One EAD environment for instant offline launch.
+        </p>
+      </footer>
+    </div>
+
+    <!-- WORKBENCH VIEW (Embedded App Runner) -->
+    <div class="workbench-view" id="workbench-view" style="display: none;">
+      <header class="workbench-bar" id="workbench-bar">
+        <div class="wb-left">
+          <button class="btn wb-back-btn" id="wb-btn-back" type="button" title="Back to ArtCraft Hub">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            <span>All Apps</span>
+          </button>
+
+          <div class="wb-app-info">
+            <img class="wb-app-icon" id="wb-app-icon" src="" alt="" />
+            <div>
+              <div class="wb-title-row">
+                <strong class="wb-app-title" id="wb-app-title">Application</strong>
+                <span class="badge wb-badge" id="wb-app-ver">v0.9.0</span>
+              </div>
+              <span class="wb-tagline" id="wb-app-tagline">App Tagline</span>
+            </div>
+          </div>
+
+          <!-- Quick switcher dropdown -->
+          <div class="wb-switcher-wrap">
+            <label for="wb-switcher" class="visually-hidden">Switch app</label>
+            <select id="wb-switcher" class="wb-switcher" title="Quick switch to another ArtCraft tool">
+              <!-- Options populated dynamically -->
+            </select>
+          </div>
+        </div>
+
+        <div class="wb-right">
+          <button class="btn icon ghost" id="wb-btn-open-tab" type="button" title="Open this tool in a dedicated browser tab">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            <span>Pop Out</span>
+          </button>
+
+          <button class="btn icon ghost" id="wb-btn-fullscreen" type="button" title="Toggle Fullscreen">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="iframe-container" id="iframe-container">
+        <iframe id="app-iframe" src="about:blank" title="ArtCraft Application Workspace" allow="camera; microphone; clipboard-read; clipboard-write; fullscreen"></iframe>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
