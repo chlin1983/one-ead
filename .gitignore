@@ -55,6 +55,10 @@ modules/chili3d/exports/
 modules/pdfcraft/web/app/
 modules/pdfcraft/data/
 
+# ArtCraft creative suite generated WebAssembly bundles and local works
+modules/artcraft/web/apps/
+modules/artcraft/data/
+
 # DeepTutor private venv, user data (API keys, chats), logs
 modules/deep_tutor/data/
 
