@@ -73,6 +73,40 @@ def _open_browser(url: str, delay: float = 1.2) -> None:
     threading.Timer(delay, lambda: _launch_browser(url)).start()
 
 
+import time
+
+
+def _find_pid_on_port(port: int) -> Optional[int]:
+    """Find the PID of the process listening on the given port (Windows / Unix)."""
+    try:
+        if sys.platform == "win32":
+            out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True, text=True)
+            for line in out.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and "LISTENING" in parts:
+                    return int(parts[-1])
+        else:
+            out = subprocess.check_output(["lsof", "-t", f"-i:{port}"], text=True)
+            pids = out.strip().split()
+            if pids:
+                return int(pids[0])
+    except Exception:
+        pass
+    return None
+
+
+def _kill_pid(pid: int) -> bool:
+    """Terminate a process by PID."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, check=True)
+        else:
+            os.kill(pid, 9)
+        return True
+    except Exception:
+        return False
+
+
 def _port_in_use(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
@@ -85,17 +119,21 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8100)
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (development).")
+    parser.add_argument("--restart", action="store_true", help="Restart server if an instance is already running.")
     args = parser.parse_args()
 
     url = f"http://{args.host}:{args.port}/"
 
-    # A server is already running on this port: don't fail with a bind error —
-    # just open the browser to the existing instance.
+    # If the port is already in use by an existing instance, terminate it so that
+    # any new git pull changes, updated plugins, and dependencies are loaded fresh.
     if _port_in_use(args.host, args.port):
-        print(f"One EAD is already running -> {url} (opening browser in Google Chrome)")
-        if not args.no_browser:
-            _launch_browser(url)
-        return
+        pid = _find_pid_on_port(args.port)
+        if pid:
+            print(f"[One EAD] Releasing port {args.port} (terminating previous instance PID {pid})...")
+            _kill_pid(pid)
+            time.sleep(1.0)
+        else:
+            print(f"[One EAD] Port {args.port} is busy, attempting to start...")
 
     print(f"One EAD -> {url}")
     if not args.no_browser:

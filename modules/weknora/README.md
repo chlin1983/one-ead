@@ -33,6 +33,15 @@ When using a local GPU with **6GB VRAM** and a system with **16GB RAM**, running
 
 When you run WeKnora on your real hardware machine with Ollama, run one of the following model setups:
 
+### Active Configuration (Your Setup)
+Configured by default in `.env.lite` and `config/builtin_models.yaml`:
+```bash
+ollama pull qwen3:8b
+ollama pull nomic-embed-text
+```
+* **Chat Model**: `qwen3:8b` (Local Ollama on loopback)
+* **Embedding Model**: `nomic-embed-text` (768 dimensions)
+
 ### Tier 1: Ultra-Fast & Safe (Zero Risk of OOM)
 Best for rapid testing, large document contexts, and lowest latency:
 ```bash
@@ -109,3 +118,40 @@ Run the native Windows launcher:
 modules\weknora\scripts\run_lite.bat
 ```
 Navigate to [http://127.0.0.1:8082](http://127.0.0.1:8082).
+
+---
+
+## 5. Security, Offline Isolation & Zero Data Leak Guarantee
+
+WeKnora Lite is specifically engineered to run in **100% offline, air-gapped engineering environments**. No engineering documentation, proprietary acoustic measurements, or queries ever leave your local machine.
+
+### Component-by-Component Isolation Checklist
+
+| Component | Target / Driver | Network Status |
+| :--- | :--- | :--- |
+| **LLM Inference** | `http://127.0.0.1:11434` (`qwen3:8b` / `qwen2.5`) | **100% Local** (Local Ollama loopback only) |
+| **Vector Embeddings** | `http://127.0.0.1:11434` (`nomic-embed-text` / `bge-m3`) | **100% Local** (Local Ollama loopback only) |
+| **Document Extraction** | [`scripts/doc_extractor.py`](./scripts/doc_extractor.py) (PyMuPDF, docx, openpyxl, pptx) | **100% Local** (Child process, zero Docker, zero external APIs) |
+| **Relational Database** | [`data/weknora.db`](./data/weknora.db) | **100% Local** (Embedded SQLite with FTS5) |
+| **Vector Database** | `sqlite-vec` extension inside `data/weknora.db` | **100% Local** (No Milvus, Pinecone, or cloud vector DBs) |
+| **Document Storage** | [`data/files/`](./data/files) | **100% Local** (Local disk storage, zero S3 or MinIO) |
+| **Task / Stream Queue** | In-Memory (`STREAM_MANAGER_TYPE=memory`) | **100% Local** (Zero Redis or external message brokers) |
+| **Frontend Web Assets** | [`WeKnora/web/assets`](./WeKnora/web/assets) | **100% Local** (Zero external CDNs, zero Google Fonts) |
+| **Telemetry & Tracking** | Disabled | **Zero phone-home pings, zero telemetry, zero update checks** |
+
+### Verified Operating System Sockets (`netstat`)
+
+When inspected via Windows networking tools (`netstat -ano`), the `WeKnora-lite.exe` process maintains connections **only** on loopback:
+
+```
+  TCP    127.0.0.1:8082         0.0.0.0:0              LISTENING       (Local web UI server)
+  TCP    127.0.0.1:8082         127.0.0.1:<port>       ESTABLISHED     (Local browser connection)
+  TCP    127.0.0.1:<port>       127.0.0.1:11434        ESTABLISHED     (Local Ollama communication)
+```
+No sockets connect to any external IP, domain, LAN address, or cloud server.
+
+### Only User-Triggered Actions That Could Attempt External Access
+
+The application will only attempt an outbound network connection under two specific, deliberate user actions:
+1. **Importing via "Web URL"**: If you click *Add Document* and explicitly enter an external website URL (e.g. `https://example.com`), WeKnora will attempt to scrape that page. When only uploading local files (`.pdf`, `.docx`, `.xlsx`, `.md`, etc.), this is never invoked.
+2. **Adding Cloud API Keys**: If you manually open *Settings -> Models* and input third-party cloud API keys (e.g. OpenAI, DeepSeek, or Tencent Cloud), it will attempt to contact those providers. As long as you use local models via Ollama, no cloud keys are present or needed.

@@ -93,8 +93,7 @@ function renderStatus(s) {
     if (el.iframeWrap.hidden) {
       el.iframeWrap.hidden = false;
       el.dashboardWrap.hidden = true;
-      // Use proxy endpoint to bypass X-Frame-Options: SAMEORIGIN
-      el.serviceFrame.src = `${API_BASE}/proxy/`;
+      el.serviceFrame.src = s.service_url || "http://127.0.0.1:8082";
     }
   } else {
     el.iframeWrap.hidden = true;

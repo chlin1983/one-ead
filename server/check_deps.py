@@ -31,6 +31,7 @@ REQUIRED_PACKAGES: List[Tuple[str, str, str]] = [
     ("pymupdf>=1.23.0", "fitz", "PyMuPDF (fitz)"),
     ("numpy>=1.24", "numpy", "NumPy"),
     ("scipy>=1.10", "scipy", "SciPy"),
+    ("httpx>=0.27", "httpx", "HTTPX"),
 ]
 
 
