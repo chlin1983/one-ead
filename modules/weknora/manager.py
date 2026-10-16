@@ -55,6 +55,14 @@ def _ensure_paths() -> None:
     if not ENV_FILE.exists() and ENV_TEMPLATE.exists():
         shutil.copy2(ENV_TEMPLATE, ENV_FILE)
 
+    dll_target = MODULE_DIR / "duckdb.dll"
+    dll_source = REPO_DIR / "duckdb.dll"
+    if not dll_target.exists() and dll_source.exists():
+        try:
+            shutil.copy2(dll_source, dll_target)
+        except Exception:
+            pass
+
     # Prepend portable toolchains to PATH if present
     tools_go = MODULE_DIR / "tools" / "go" / "bin"
     tools_gcc = MODULE_DIR / "tools" / "w64devkit" / "bin"

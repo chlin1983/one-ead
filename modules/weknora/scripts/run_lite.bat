@@ -18,6 +18,12 @@ if not exist "%BINARY%" (
     )
 )
 
+if not exist "%MODULE_DIR%\duckdb.dll" (
+    if exist "%REPO_DIR%\duckdb.dll" (
+        copy "%REPO_DIR%\duckdb.dll" "%MODULE_DIR%\duckdb.dll" >nul
+    )
+)
+
 :: Check .env.lite
 set ENV_FILE=%MODULE_DIR%\.env.lite
 if not exist "%ENV_FILE%" (
