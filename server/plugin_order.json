@@ -6,11 +6,11 @@
   "f1-ipp-filter-simulator",
   "mems-microphone-explorer",
   "balance-armature-receiver-explorer",
-  "weknora",
-  "artcraft",
   "deep-tutor",
   "excalidraw",
   "pdfcraft",
   "chili3d",
-  "gpt-researcher"
+  "gpt-researcher",
+  "artcraft",
+  "weknora"
 ]
