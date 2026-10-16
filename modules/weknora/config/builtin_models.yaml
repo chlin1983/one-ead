@@ -1,0 +1,30 @@
+# config/builtin_models.yaml — declarative built-in models for WeKnora Lite.
+# Pre-configured with local Ollama models (qwen3:8b and nomic-embed-text / bge-m3).
+
+builtin_models:
+  - id: builtin-ollama-qwen3-8b
+    type: KnowledgeQA
+    source: local
+    is_default: true
+    name: qwen3:8b
+    description: "Qwen3 8B (Local Ollama)"
+
+  - id: builtin-ollama-nomic-embed
+    type: Embedding
+    source: local
+    is_default: true
+    name: nomic-embed-text
+    description: "Nomic Embed Text (Local Ollama, 768 dims)"
+    parameters:
+      embedding_parameters:
+        dimension: 768
+
+  - id: builtin-ollama-bge-m3
+    type: Embedding
+    source: local
+    is_default: false
+    name: bge-m3
+    description: "BGE-M3 (Local Ollama, 1024 dims)"
+    parameters:
+      embedding_parameters:
+        dimension: 1024

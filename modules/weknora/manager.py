@@ -55,6 +55,17 @@ def _ensure_paths() -> None:
     if not ENV_FILE.exists() and ENV_TEMPLATE.exists():
         shutil.copy2(ENV_TEMPLATE, ENV_FILE)
 
+    # Prepend portable toolchains to PATH if present
+    tools_go = MODULE_DIR / "tools" / "go" / "bin"
+    tools_gcc = MODULE_DIR / "tools" / "w64devkit" / "bin"
+    path_entries = []
+    if tools_go.exists() and str(tools_go) not in os.environ.get("PATH", ""):
+        path_entries.append(str(tools_go))
+    if tools_gcc.exists() and str(tools_gcc) not in os.environ.get("PATH", ""):
+        path_entries.append(str(tools_gcc))
+    if path_entries:
+        os.environ["PATH"] = os.pathsep.join(path_entries) + os.pathsep + os.environ.get("PATH", "")
+
 
 def append_log(line: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -197,13 +208,13 @@ def get_hardware_info() -> Dict[str, Any]:
             },
             {
                 "tier": "Tier 2: Max Intelligence within 6GB VRAM",
-                "chat_model": "qwen2.5:7b-instruct-q4_K_M",
-                "chat_vram": "~4.4 GB",
-                "embed_model": "bge-small-zh-v1.5",
-                "embed_vram": "~130 MB",
-                "total_vram": "~4.85 GB",
-                "fit_rating": "Recommended",
-                "pull_cmd": "ollama pull qwen2.5:7b-instruct-q4_K_M && ollama pull bge-small-zh-v1.5"
+                "chat_model": "qwen3:8b",
+                "chat_vram": "~5.2 GB",
+                "embed_model": "nomic-embed-text",
+                "embed_vram": "~275 MB",
+                "total_vram": "~5.5 GB",
+                "fit_rating": "Recommended (Installed)",
+                "pull_cmd": "ollama run qwen3:8b"
             },
             {
                 "tier": "Tier 3: Reasoning Specialist (DeepSeek-R1)",
@@ -309,6 +320,13 @@ def start_service() -> Dict[str, Any]:
         env["RETRIEVE_DRIVER"] = "sqlite"
         env["STREAM_MANAGER_TYPE"] = "memory"
         env["STORAGE_TYPE"] = "local"
+        env["DUCKDB_SKIP_EXTENSION_LOAD"] = "1"
+        env["AUTO_MIGRATE"] = "true"
+        web_dir = REPO_DIR / "web"
+        if not web_dir.exists():
+            web_dir = MODULE_DIR / "web"
+        if web_dir.exists():
+            env["WEKNORA_WEB_DIR"] = str(web_dir)
 
         append_log(f"Starting WeKnora Lite: {binary} on {host}:{port}")
         

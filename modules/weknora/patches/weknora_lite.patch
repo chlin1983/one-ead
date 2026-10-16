@@ -1,0 +1,360 @@
+diff --git a/config/config.yaml b/config/config.yaml
+index 06811ba..1eaedcb 100644
+--- a/config/config.yaml
++++ b/config/config.yaml
+@@ -1,7 +1,7 @@
+ # Server configuration
+ server:
+-  port: 8080
+-  host: "0.0.0.0"
++  port: 8082
++  host: "127.0.0.1"
+ 
+ # Conversation service configuration
+ # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
+diff --git a/frontend/src/api/auth/index.ts b/frontend/src/api/auth/index.ts
+index 5e92a06..4774f70 100644
+--- a/frontend/src/api/auth/index.ts
++++ b/frontend/src/api/auth/index.ts
+@@ -308,11 +308,10 @@ export function autoSetup(): Promise<LoginResponse> {
+   const request = (async () => {
+     try {
+       const nativeApp = (window as any).go?.main?.App
+-      if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
+-      const token = await nativeApp.GetAutoSetupToken()
+-      const response = await post('/api/v1/auth/auto-setup', {}, {
+-        headers: { 'X-WeKnora-Desktop-Token': token },
+-      })
++      const token = nativeApp?.GetAutoSetupToken ? await nativeApp.GetAutoSetupToken() : ''
++      const headers: Record<string, string> = {}
++      if (token) headers['X-WeKnora-Desktop-Token'] = token
++      const response = await post('/api/v1/auth/auto-setup', {}, { headers })
+       return response as unknown as LoginResponse
+     } catch (error: any) {
+       return {
+diff --git a/internal/agent/tools/data_analysis.go b/internal/agent/tools/data_analysis.go
+index 46cfb44..3a6e490 100644
+--- a/internal/agent/tools/data_analysis.go
++++ b/internal/agent/tools/data_analysis.go
+@@ -218,7 +218,7 @@ func (t *DataAnalysisTool) markTableLoaded(tableName string) {
+ 
+ // Cleanup cleans up the session-specific schema
+ func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
+-	if len(t.createdTables) == 0 {
++	if t.db == nil || len(t.createdTables) == 0 {
+ 		logger.Infof(ctx, "[Tool][DataAnalysis] No tables to clean up for session: %s", t.sessionID)
+ 		return
+ 	}
+@@ -242,6 +242,12 @@ func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
+ 
+ // Execute executes the SQL query on DuckDB (only read-only queries are allowed)
+ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if t.db == nil {
++		return &types.ToolResult{
++			Success: false,
++			Error:   "Data analysis tool is not available in Lite mode",
++		}, fmt.Errorf("duckdb is not available in lite mode")
++	}
+ 	logger.Infof(ctx, "[Tool][DataAnalysis] Execute started for session: %s", t.sessionID)
+ 	var input DataAnalysisInput
+ 	if err := json.Unmarshal(args, &input); err != nil {
+@@ -692,6 +698,9 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
+ 	if knowledge == nil {
+ 		return nil, fmt.Errorf("knowledge cannot be nil")
+ 	}
++	if t.db == nil {
++		return nil, fmt.Errorf("duckdb is not available in lite mode")
++	}
+ 	tableName := t.TableName(knowledge)
+ 
+ 	// Normalize file type to lowercase for comparison
+diff --git a/internal/application/service/extract.go b/internal/application/service/extract.go
+index 2697fd6..d3a9c36 100644
+--- a/internal/application/service/extract.go
++++ b/internal/application/service/extract.go
+@@ -643,6 +643,9 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
+ // processTableData 处理表格数据：加载 -> 分析 -> 生成摘要 -> 创建chunks
+ // 思路：将数据处理的核心流程集中在一起，保持逻辑连贯性
+ func (s *DataTableSummaryService) processTableData(ctx context.Context, resources *extractionResources) ([]*types.Chunk, error) {
++	if s.sqlDB == nil {
++		return nil, fmt.Errorf("duckdb is not available in lite mode")
++	}
+ 	// 创建DuckDB会话并加载数据
+ 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
+ 	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
+diff --git a/internal/container/container.go b/internal/container/container.go
+index 87c3ff0..965a136 100644
+--- a/internal/container/container.go
++++ b/internal/container/container.go
+@@ -1791,6 +1791,13 @@ func initNeo4jClient() (neo4j.Driver, error) {
+ }
+ 
+ func NewDuckDB() (*sql.DB, error) {
++	if strings.EqualFold(os.Getenv("DUCKDB_ENABLE"), "false") ||
++		strings.EqualFold(os.Getenv("EDITION"), "lite") ||
++		strings.EqualFold(os.Getenv("DUCKDB_DISABLE"), "true") {
++		logger.Infof(context.Background(), "[DuckDB] Disabled in Lite mode")
++		return nil, nil
++	}
++
+ 	sqlDB, err := sql.Open("duckdb", ":memory:")
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
+diff --git a/internal/handler/auth.go b/internal/handler/auth.go
+index d17248d..f51abd0 100644
+--- a/internal/handler/auth.go
++++ b/internal/handler/auth.go
+@@ -7,7 +7,6 @@ import (
+ 	"encoding/base64"
+ 	"encoding/json"
+ 	stderrors "errors"
+-	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -899,13 +898,8 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
+ func (h *AuthHandler) AutoSetup(c *gin.Context) {
+ 	ctx := c.Request.Context()
+ 
+-	if Edition != "lite" {
+-		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
+-		c.Error(appErr)
+-		return
+-	}
+-
+-	if liteSetupToken == "" ||
++	// In standalone Lite mode, auto-setup allows seamless zero-prompt login.
++	if liteSetupToken != "" &&
+ 		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(liteSetupToken)) != 1 {
+ 		_ = c.Error(errors.NewUnauthorizedError("desktop authentication is required"))
+ 		return
+@@ -924,10 +918,9 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
+ 			return
+ 		}
+ 		randomPassword := base64.RawURLEncoding.EncodeToString(randomBytes)
+-		randomUsername := fmt.Sprintf("user_%s", base64.RawURLEncoding.EncodeToString(randomBytes[:6]))
+ 
+ 		_, err := h.userService.Register(ctx, &types.RegisterRequest{
+-			Username: randomUsername,
++			Username: "Admin",
+ 			Email:    defaultEmail,
+ 			Password: randomPassword,
+ 		})
+diff --git a/internal/infrastructure/docparser/builtin_converter.go b/internal/infrastructure/docparser/builtin_converter.go
+index 0cf3860..c5a1ad2 100644
+--- a/internal/infrastructure/docparser/builtin_converter.go
++++ b/internal/infrastructure/docparser/builtin_converter.go
+@@ -1,10 +1,13 @@
+ package docparser
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/csv"
+ 	"fmt"
+ 	"net/http"
++	"os"
++	"os/exec"
+ 	"path/filepath"
+ 	"strings"
+ 
+@@ -17,6 +20,11 @@ var simpleFormats = map[string]bool{
+ 	"txt": true, "text": true,
+ 	"csv":  true,
+ 	"json": true,
++	"pdf":  true,
++	"docx": true, "doc": true,
++	"xlsx": true, "xls": true,
++	"pptx": true, "ppt": true,
++	"epub": true,
+ }
+ 
+ var imageFormats = map[string]bool{
+@@ -47,7 +55,7 @@ func IsSimpleFormat(fileType string) bool {
+ type SimpleFormatReader struct{}
+ 
+ // Read reads simple format files and returns markdown.
+-func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
++func (b *SimpleFormatReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+ 	ft := strings.ToLower(strings.TrimPrefix(req.FileType, "."))
+ 	if ft == "" {
+ 		ft = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.FileName)), ".")
+@@ -70,6 +78,12 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
+ 			return nil, fmt.Errorf("json conversion failed: %w", err)
+ 		}
+ 		return &types.ReadResult{MarkdownContent: md}, nil
++	case ft == "pdf" || ft == "docx" || ft == "doc" || ft == "xlsx" || ft == "xls" || ft == "pptx" || ft == "ppt" || ft == "epub":
++		md, err := extractDocWithPython(ctx, ft, req.FileName, req.FileContent)
++		if err != nil {
++			return nil, fmt.Errorf("%s conversion failed: %w", ft, err)
++		}
++		return &types.ReadResult{MarkdownContent: md}, nil
+ 	case imageFormats[ft]:
+ 		return imageToResult(req.FileName, req.FileContent), nil
+ 	case audioFormats[ft]:
+@@ -79,6 +93,55 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
+ 	}
+ }
+ 
++func extractDocWithPython(ctx context.Context, ft, fileName string, data []byte) (string, error) {
++	scriptPath := os.Getenv("DOC_EXTRACTOR_SCRIPT")
++	if scriptPath == "" {
++		candidates := []string{
++			"scripts/doc_extractor.py",
++			"modules/weknora/scripts/doc_extractor.py",
++			"../scripts/doc_extractor.py",
++		}
++		if exe, err := os.Executable(); err == nil {
++			candidates = append(candidates,
++				filepath.Join(filepath.Dir(exe), "scripts", "doc_extractor.py"),
++				filepath.Join(filepath.Dir(exe), "..", "scripts", "doc_extractor.py"),
++			)
++		}
++		for _, c := range candidates {
++			if _, err := os.Stat(c); err == nil {
++				scriptPath, _ = filepath.Abs(c)
++				break
++			}
++		}
++	}
++	if scriptPath == "" {
++		return "", fmt.Errorf("doc_extractor.py not found")
++	}
++
++	ext := "." + ft
++	tmpFile, err := os.CreateTemp("", "weknora-doc-*"+ext)
++	if err != nil {
++		return "", fmt.Errorf("create temp doc: %w", err)
++	}
++	tmpPath := tmpFile.Name()
++	defer os.Remove(tmpPath)
++
++	if _, err := tmpFile.Write(data); err != nil {
++		tmpFile.Close()
++		return "", fmt.Errorf("write temp doc: %w", err)
++	}
++	tmpFile.Close()
++
++	cmd := exec.CommandContext(ctx, "python", scriptPath, tmpPath, ft)
++	var stdout, stderr bytes.Buffer
++	cmd.Stdout = &stdout
++	cmd.Stderr = &stderr
++	if err := cmd.Run(); err != nil {
++		return "", fmt.Errorf("extractor failed: %w (%s)", err, strings.TrimSpace(stderr.String()))
++	}
++	return stdout.String(), nil
++}
++
+ // imageToResult wraps a standalone image as a markdown image reference with
+ // the raw bytes in ImageRefs, matching Python ImageParser behaviour.
+ func imageToResult(fileName string, data []byte) *types.ReadResult {
+diff --git a/internal/infrastructure/docparser/engine_registry.go b/internal/infrastructure/docparser/engine_registry.go
+index 9987921..ee76147 100644
+--- a/internal/infrastructure/docparser/engine_registry.go
++++ b/internal/infrastructure/docparser/engine_registry.go
+@@ -72,10 +72,14 @@ func NewReader(
+ 	if registration, ok := lookupEngine(engine); ok {
+ 		return registration.NewReader(ctx, deps)
+ 	}
+-	if engine == "" && !isURL && IsSimpleFormat(fileType) {
++	if !isURL && IsSimpleFormat(fileType) {
+ 		return &SimpleFormatReader{}, nil
+ 	}
+-	return remoteReader(deps)
++	reader, err := remoteReader(deps)
++	if err != nil && !isURL {
++		return &SimpleFormatReader{}, nil
++	}
++	return reader, err
+ }
+ 
+ // remoteReader returns the docreader client, or an error when the service is
+diff --git a/internal/infrastructure/docparser/engines.go b/internal/infrastructure/docparser/engines.go
+index d3b28f8..3a3816f 100644
+--- a/internal/infrastructure/docparser/engines.go
++++ b/internal/infrastructure/docparser/engines.go
+@@ -84,16 +84,21 @@ func (e *builtinEngine) FileTypes(_ bool) []string {
+ }
+ 
+ func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
+-	if docreaderConnected {
+-		return true, ""
+-	}
+-	return false, "DocReader service not connected"
++	return true, ""
+ }
+ 
+-// NewReader returns the docreader client. Selecting "builtin" explicitly means
+-// the docreader is wanted even for formats the simple reader could handle.
++// NewReader returns the docreader client if connected, or falls back to SimpleFormatReader.
+ func (e *builtinEngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {
+-	return remoteReader(deps)
++	if deps.Remote != nil {
++		if conn, ok := deps.Remote.(interfaces.DocumentReader); ok {
++			if conn.IsConnected() {
++				return deps.Remote, nil
++			}
++		} else {
++			return deps.Remote, nil
++		}
++	}
++	return &SimpleFormatReader{}, nil
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -113,6 +118,7 @@ func (e *simpleEngine) Description() string {
+ func (e *simpleEngine) FileTypes(_ bool) []string {
+ 	return []string{
+ 		"md", "markdown", "txt", "csv", "json",
++		"pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "epub",
+ 		"jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp",
+ 		"mp3", "wav", "m4a", "flac", "ogg",
+ 	}
+diff --git a/internal/middleware/logger.go b/internal/middleware/logger.go
+index ae87075..87465f5 100644
+--- a/internal/middleware/logger.go
++++ b/internal/middleware/logger.go
+@@ -183,7 +183,7 @@ func Logger() gin.HandlerFunc {
+ 		raw := c.Request.URL.RawQuery
+ 
+ 		isWikiStats := strings.HasPrefix(path, "/api/v1/knowledgebase/") && strings.HasSuffix(path, "/wiki/stats")
+-		if strings.HasPrefix(path, "/assets/") || isWikiStats {
++		if !strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/assets/") || isWikiStats {
+ 			c.Next()
+ 			return
+ 		}
+diff --git a/internal/router/static.go b/internal/router/static.go
+index 2acb63f..3b5c5cf 100644
+--- a/internal/router/static.go
++++ b/internal/router/static.go
+@@ -28,8 +28,6 @@ func serveFrontendStatic(r *gin.Engine) {
+ 
+ 	logger.Infof(context.Background(), "[Router] Serving frontend static files from %s", absDir)
+ 
+-	fs := http.Dir(absDir)
+-	fileServer := http.FileServer(fs)
+ 
+ 	r.Use(func(c *gin.Context) {
+ 		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+@@ -49,17 +47,17 @@ func serveFrontendStatic(r *gin.Engine) {
+ 			c.Abort()
+ 			return
+ 		}
+-		c.Header("X-Frame-Options", "SAMEORIGIN")
+-		c.Header("Content-Security-Policy", "frame-ancestors 'self'")
++		// In Lite mode, permit embedding in the One EAD portal iframe
++		c.Header("Content-Security-Policy", "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*")
+ 		fullPath := filepath.Join(absDir, path)
+ 		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+ 			setFrontendCacheHeaders(c.Writer, path)
+-			fileServer.ServeHTTP(c.Writer, c.Request)
++			http.ServeFile(c.Writer, c.Request, fullPath)
+ 			c.Abort()
+ 			return
+ 		}
+ 		setFrontendCacheHeaders(c.Writer, "/index.html")
+-		c.File(indexPath)
++		http.ServeFile(c.Writer, c.Request, indexPath)
+ 		c.Abort()
+ 	})
+ }

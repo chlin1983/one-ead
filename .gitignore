@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.dll
 
 # Distribution / packaging
 build/
@@ -80,6 +81,7 @@ modules/weknora/data/
 modules/weknora/*.exe
 modules/weknora/WeKnora-lite*
 modules/weknora/.env.lite
+modules/weknora/tools/
 
 # Temporary scratch and debug scripts
 scratch/

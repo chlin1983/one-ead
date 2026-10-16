@@ -6,6 +6,11 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ModuleDir = Resolve-Path "$ScriptDir\.."
 $RepoDir = Join-Path $ModuleDir "WeKnora"
 
+$ToolsGo = Join-Path $ModuleDir "tools\go\bin"
+$ToolsGcc = Join-Path $ModuleDir "tools\w64devkit\bin"
+if (Test-Path $ToolsGo) { $env:PATH = "$ToolsGo;$env:PATH" }
+if (Test-Path $ToolsGcc) { $env:PATH = "$ToolsGcc;$env:PATH" }
+
 Write-Host "=== WeKnora Lite Build Pipeline ===" -ForegroundColor Cyan
 Write-Host "Module Dir : $ModuleDir"
 Write-Host "Repo Dir   : $RepoDir`n"
@@ -51,13 +56,15 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
 # 3. Go compile
 Write-Host "`n[3/3] Compiling WeKnora Lite binary..." -ForegroundColor Yellow
 $env:EDITION = "lite"
+$env:GOTOOLCHAIN = "local"
 $env:CGO_ENABLED = "1"
 $env:CGO_CFLAGS = "-Wno-deprecated-declarations"
+$env:CGO_LDFLAGS = ""
 
 $TargetBinary = Join-Path $ModuleDir "WeKnora-lite.exe"
 Push-Location $RepoDir
 try {
-    go build -tags "sqlite_fts5" -ldflags="-w -s -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o $TargetBinary ./cmd/server
+    go build -tags "sqlite_fts5,duckdb_use_lib" -ldflags="-w -s -X 'github.com/Tencent/WeKnora/internal/handler.Edition=lite' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o $TargetBinary ./cmd/server
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n=== Build Succeeded! ===" -ForegroundColor Green
         Write-Host "Binary: $TargetBinary`n"

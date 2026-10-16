@@ -38,6 +38,16 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
     )
 )
 
+set EDITION=lite
+set DB_DRIVER=sqlite
+set RETRIEVE_DRIVER=sqlite
+set STREAM_MANAGER_TYPE=memory
+set STORAGE_TYPE=local
+set DUCKDB_SKIP_EXTENSION_LOAD=1
+set AUTO_MIGRATE=true
+set WEKNORA_WEB_DIR=%REPO_DIR%\web
+set DOC_EXTRACTOR_SCRIPT=%MODULE_DIR%\scripts\doc_extractor.py
+
 echo Starting WeKnora Lite on %SERVER_HOST%:%SERVER_PORT%...
 cd /d "%MODULE_DIR%"
 "%BINARY%"
