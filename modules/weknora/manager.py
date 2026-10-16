@@ -327,6 +327,7 @@ def start_service() -> Dict[str, Any]:
             web_dir = MODULE_DIR / "web"
         if web_dir.exists():
             env["WEKNORA_WEB_DIR"] = str(web_dir)
+        env["DOC_EXTRACTOR_SCRIPT"] = str(MODULE_DIR / "scripts" / "doc_extractor.py")
 
         append_log(f"Starting WeKnora Lite: {binary} on {host}:{port}")
         
