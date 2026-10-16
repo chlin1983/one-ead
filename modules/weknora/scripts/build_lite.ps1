@@ -64,7 +64,7 @@ $env:CGO_LDFLAGS = ""
 $TargetBinary = Join-Path $ModuleDir "WeKnora-lite.exe"
 Push-Location $RepoDir
 try {
-    go build -tags "sqlite_fts5,duckdb_use_lib" -ldflags="-w -s -X 'github.com/Tencent/WeKnora/internal/handler.Edition=lite' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o $TargetBinary ./cmd/server
+    go build -tags "lite,sqlite_fts5" -ldflags="-w -s -X 'github.com/Tencent/WeKnora/internal/handler.Edition=lite' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o $TargetBinary ./cmd/server
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n=== Build Succeeded! ===" -ForegroundColor Green
         Write-Host "Binary: $TargetBinary`n"

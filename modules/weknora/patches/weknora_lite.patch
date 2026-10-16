@@ -83,13 +83,80 @@ index 2697fd6..d3a9c36 100644
  	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
  	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
 diff --git a/internal/container/container.go b/internal/container/container.go
-index 87c3ff0..965a136 100644
+index 87c3ff0..5723daa 100644
 --- a/internal/container/container.go
 +++ b/internal/container/container.go
-@@ -1791,6 +1791,13 @@ func initNeo4jClient() (neo4j.Driver, error) {
+@@ -21,7 +21,6 @@ import (
+ 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+ 
+ 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+-	_ "github.com/duckdb/duckdb-go/v2"
+ 	esv7 "github.com/elastic/go-elasticsearch/v7"
+ 	"github.com/elastic/go-elasticsearch/v8"
+ 	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+@@ -1790,39 +1789,6 @@ func initNeo4jClient() (neo4j.Driver, error) {
+ 	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
  }
  
- func NewDuckDB() (*sql.DB, error) {
+-func NewDuckDB() (*sql.DB, error) {
+-	sqlDB, err := sql.Open("duckdb", ":memory:")
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to open duckdb: %w", err)
+-	}
+-
+-	// Try to install and load required extensions unless explicitly disabled.
+-	//   - spatial: used for st_read_meta() to enumerate layer (sheet) names from .xlsx/.xls
+-	//   - excel:   used for read_xlsx() which gives proper type inference per sheet
+-	//
+-	// INSTALL hits extensions.duckdb.org (public internet). In locked-down
+-	// runtimes with no egress, set DUCKDB_SKIP_EXTENSION_LOAD=1 to avoid a
+-	// startup hang; xlsx/xls ingest may fail later without these extensions.
+-	if strings.EqualFold(os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD"), "true") ||
+-		os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD") == "1" {
+-		logger.Infof(context.Background(),
+-			"[DuckDB] Skipping spatial/excel extension install/load "+
+-				"(DUCKDB_SKIP_EXTENSION_LOAD is set; xlsx ingest may fail without them)")
+-	} else {
+-		bgCtx := context.Background()
+-		for _, ext := range []string{"spatial", "excel"} {
+-			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
+-				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
+-			}
+-			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
+-				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
+-			}
+-		}
+-	}
+-
+-	return sqlDB, nil
+-}
+-
+ // registerWebSearchProviders registers all web search provider types to the registry.
+ // Each provider type is registered with its factory function that accepts parameters.
+ // Provider instances are created on-demand when tenants configure them.
+diff --git a/internal/container/duckdb_full.go b/internal/container/duckdb_full.go
+new file mode 100644
+index 0000000..62bbe51
+--- /dev/null
++++ b/internal/container/duckdb_full.go
+@@ -0,0 +1,48 @@
++//go:build !lite
++
++package container
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"os"
++	"strings"
++
++	_ "github.com/duckdb/duckdb-go/v2"
++
++	"github.com/Tencent/WeKnora/internal/logger"
++)
++
++func NewDuckDB() (*sql.DB, error) {
 +	if strings.EqualFold(os.Getenv("DUCKDB_ENABLE"), "false") ||
 +		strings.EqualFold(os.Getenv("EDITION"), "lite") ||
 +		strings.EqualFold(os.Getenv("DUCKDB_DISABLE"), "true") {
@@ -97,9 +164,51 @@ index 87c3ff0..965a136 100644
 +		return nil, nil
 +	}
 +
- 	sqlDB, err := sql.Open("duckdb", ":memory:")
- 	if err != nil {
- 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
++	sqlDB, err := sql.Open("duckdb", ":memory:")
++	if err != nil {
++		return nil, fmt.Errorf("failed to open duckdb: %w", err)
++	}
++
++	if strings.EqualFold(os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD"), "true") ||
++		os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD") == "1" {
++		logger.Infof(context.Background(),
++			"[DuckDB] Skipping spatial/excel extension install/load "+
++				"(DUCKDB_SKIP_EXTENSION_LOAD is set; xlsx ingest may fail without them)")
++	} else {
++		bgCtx := context.Background()
++		for _, ext := range []string{"spatial", "excel"} {
++			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
++				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
++			}
++			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
++				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
++			}
++		}
++	}
++
++	return sqlDB, nil
++}
+diff --git a/internal/container/duckdb_lite.go b/internal/container/duckdb_lite.go
+new file mode 100644
+index 0000000..2307912
+--- /dev/null
++++ b/internal/container/duckdb_lite.go
+@@ -0,0 +1,15 @@
++//go:build lite
++
++package container
++
++import (
++	"context"
++	"database/sql"
++
++	"github.com/Tencent/WeKnora/internal/logger"
++)
++
++func NewDuckDB() (*sql.DB, error) {
++	logger.Infof(context.Background(), "[DuckDB] Disabled in Lite mode")
++	return nil, nil
++}
 diff --git a/internal/handler/auth.go b/internal/handler/auth.go
 index d17248d..f51abd0 100644
 --- a/internal/handler/auth.go

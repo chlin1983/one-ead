@@ -82,12 +82,11 @@ if %errorlevel% neq 0 (
 echo.
 echo [3/3] Compiling WeKnora Lite standalone binary...
 set EDITION=lite
-set GOTOOLCHAIN=local
 set CGO_ENABLED=1
 set CGO_CFLAGS=-Wno-deprecated-declarations
 set CGO_LDFLAGS=
 
-go build -tags "sqlite_fts5,duckdb_use_lib" -ldflags="-w -s -X 'github.com/Tencent/WeKnora/internal/handler.Edition=lite' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o "%MODULE_DIR%\WeKnora-lite.exe" ./cmd/server
+go build -tags "lite,sqlite_fts5" -ldflags="-w -s -X 'github.com/Tencent/WeKnora/internal/handler.Edition=lite' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o "%MODULE_DIR%\WeKnora-lite.exe" ./cmd/server
 if %errorlevel% equ 0 (
     echo.
     echo =======================================================

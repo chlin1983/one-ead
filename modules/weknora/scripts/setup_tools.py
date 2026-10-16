@@ -21,10 +21,6 @@ GCC_URL = "https://github.com/skeeto/w64devkit/releases/download/v1.20.0/w64devk
 
 
 def download_and_extract(url: str, dest_dir: Path, label: str) -> None:
-    if dest_dir.exists() and any(dest_dir.iterdir()):
-        print(f"[Toolchain] {label} already present at {dest_dir}")
-        return
-
     dest_dir.mkdir(parents=True, exist_ok=True)
     print(f"[Toolchain] Downloading {label} from {url}...")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -48,8 +44,14 @@ def setup():
         # Go zip extracts as 'go/bin/go.exe' inside dest_dir
         if (go_dir / "go" / "bin" / "go.exe").exists():
             for item in (go_dir / "go").iterdir():
+                target = go_dir / item.name
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                    else:
+                        target.unlink(missing_ok=True)
                 shutil.move(str(item), str(go_dir))
-            (go_dir / "go").rmdir()
+            shutil.rmtree(go_dir / "go", ignore_errors=True)
 
     # 2. Portable GCC / MinGW (w64devkit)
     gcc_dir = TOOLS_DIR / "w64devkit"
@@ -58,8 +60,14 @@ def setup():
         download_and_extract(GCC_URL, gcc_dir, "Portable w64devkit (GCC/MinGW)")
         if (gcc_dir / "w64devkit" / "bin" / "gcc.exe").exists():
             for item in (gcc_dir / "w64devkit").iterdir():
+                target = gcc_dir / item.name
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                    else:
+                        target.unlink(missing_ok=True)
                 shutil.move(str(item), str(gcc_dir))
-            (gcc_dir / "w64devkit").rmdir()
+            shutil.rmtree(gcc_dir / "w64devkit", ignore_errors=True)
 
     print("[Toolchain] Setup complete!")
     print(f"  Go  : {go_dir / 'bin' / 'go.exe'}")
