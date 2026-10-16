@@ -26,13 +26,30 @@ ICON = (
 router = APIRouter()
 
 
+def _verify_local_request(request: Request) -> None:
+    """Verifies that the request originates from a local trusted loopback client (CSRF protection)."""
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    sec_fetch_site = request.headers.get("sec-fetch-site")
+
+    if sec_fetch_site in ("cross-site",):
+        raise HTTPException(403, "Cross-site request rejected.")
+
+    loopback_prefixes = ("http://127.0.0.1", "http://localhost")
+    if origin and not any(origin.startswith(p) for p in loopback_prefixes):
+        raise HTTPException(403, f"Cross-origin request rejected: {origin}")
+    if referer and not any(referer.startswith(p) for p in loopback_prefixes):
+        raise HTTPException(403, f"Cross-origin referer rejected: {referer}")
+
+
 @router.get("/status")
 def get_status() -> dict:
     return manager.status()
 
 
 @router.post("/start")
-def start_service() -> dict:
+def start_service(request: Request) -> dict:
+    _verify_local_request(request)
     try:
         return manager.start_service()
     except RuntimeError as exc:
@@ -40,12 +57,14 @@ def start_service() -> dict:
 
 
 @router.post("/stop")
-def stop_service() -> dict:
+def stop_service(request: Request) -> dict:
+    _verify_local_request(request)
     return manager.stop_service()
 
 
 @router.post("/restart")
-def restart_service() -> dict:
+def restart_service(request: Request) -> dict:
+    _verify_local_request(request)
     try:
         return manager.restart_service()
     except RuntimeError as exc:
@@ -59,18 +78,23 @@ def get_logs(limit: int = 200) -> dict:
 
 @router.get("/config")
 def get_config() -> dict:
-    return {"config": manager.read_env()}
+    return {"config": manager.get_safe_config()}
 
 
 @router.post("/config")
-def update_config(payload: dict = Body(...)) -> dict:
+def update_config(request: Request, payload: dict = Body(...)) -> dict:
+    _verify_local_request(request)
     updates = {str(k): str(v) for k, v in payload.items() if v is not None}
-    return {"config": manager.write_env(updates)}
+    try:
+        return {"config": manager.write_env(updates)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/config/preset/6gb")
-def apply_6gb_preset() -> dict:
+def apply_6gb_preset(request: Request) -> dict:
     """Applies optimal tuning for 6GB VRAM & 16GB RAM."""
+    _verify_local_request(request)
     presets = {
         "CONCURRENCY_POOL_SIZE": "2",
         "WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY": "1",
@@ -87,7 +111,8 @@ def apply_6gb_preset() -> dict:
 
 
 @router.post("/build/frontend")
-def trigger_frontend_build() -> dict:
+def trigger_frontend_build(request: Request) -> dict:
+    _verify_local_request(request)
     manager.run_frontend_build()
     return {"ok": True, "message": "Frontend build started in background"}
 
@@ -99,9 +124,11 @@ def check_ollama(url: str = "") -> dict:
 
 @router.api_route("/proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def proxy_weknora(path: str, request: Request):
-    """Transparent reverse-proxy that strips X-Frame-Options & CSP so WeKnora embeds in iframe."""
+    """Transparent reverse-proxy with SSRF prevention and secure desktop token injection."""
+    _verify_local_request(request)
     cfg = manager.read_env()
-    host = cfg.get("SERVER_HOST", "127.0.0.1")
+    # Force host strictly to loopback to prevent SSRF
+    host = "127.0.0.1"
     port = cfg.get("SERVER_PORT", cfg.get("PORT", "8082"))
     target_base = f"http://{host}:{port}"
     target_url = f"{target_base}/{path}"
@@ -112,6 +139,10 @@ async def proxy_weknora(path: str, request: Request):
     for k, v in request.headers.items():
         if k.lower() not in {"host", "connection", "content-length"}:
             req_headers[k] = v
+
+    # Inject the setup token if proxying the auto-setup endpoint
+    if path == "api/v1/auth/auto-setup" or path.endswith("/auth/auto-setup"):
+        req_headers["X-WeKnora-Desktop-Token"] = manager.get_setup_token()
 
     body = await request.body()
 
@@ -135,6 +166,9 @@ async def proxy_weknora(path: str, request: Request):
         res_headers = {
             k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers
         }
+        # Secure framing policy: allow self and loopback
+        res_headers["content-security-policy"] = "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*"
+        res_headers["x-content-type-options"] = "nosniff"
 
         async def stream_generator():
             try:

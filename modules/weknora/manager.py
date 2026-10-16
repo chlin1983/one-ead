@@ -11,6 +11,7 @@ import collections
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,13 @@ _lock = threading.RLock()
 _process: Optional[subprocess.Popen] = None
 _logs: collections.deque = collections.deque(maxlen=1000)
 _build_thread: Optional[threading.Thread] = None
+_lite_setup_token: str = secrets.token_urlsafe(32)
+
+
+def get_setup_token() -> str:
+    """Returns the internal high-entropy token used for authenticating auto-setup."""
+    global _lite_setup_token
+    return _lite_setup_token
 _build_status = {
     "building": False,
     "phase": "idle",
@@ -113,10 +121,102 @@ def read_env() -> Dict[str, str]:
     return env_vars
 
 
+SAFE_PUBLIC_CONFIG_KEYS = {
+    "SERVER_PORT",
+    "PORT",
+    "OLLAMA_BASE_URL",
+    "LLM_MODEL_NAME",
+    "EMBEDDING_MODEL_NAME",
+    "CONCURRENCY_POOL_SIZE",
+    "WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY",
+    "WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES",
+    "WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC",
+    "WEKNORA_CHAT_ATTACHMENT_TTL_HOURS",
+    "GIN_MODE",
+    "LOG_LEVEL",
+}
+
+ALLOWED_CONFIG_KEYS = {
+    "SERVER_PORT",
+    "PORT",
+    "OLLAMA_BASE_URL",
+    "CONCURRENCY_POOL_SIZE",
+    "WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY",
+    "WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES",
+    "WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC",
+    "WEKNORA_CHAT_ATTACHMENT_TTL_HOURS",
+    "LLM_MODEL_NAME",
+    "EMBEDDING_MODEL_NAME",
+    "GIN_MODE",
+    "LOG_LEVEL",
+}
+
+
+def get_safe_config() -> Dict[str, str]:
+    """Returns only non-sensitive configuration keys safe for frontend/API display."""
+    raw = read_env()
+    return {k: v for k, v in raw.items() if k in SAFE_PUBLIC_CONFIG_KEYS}
+
+
+def validate_config_updates(updates: Dict[str, str]) -> Dict[str, str]:
+    """Strictly validates configuration updates against an allowlist and value schemas."""
+    validated: Dict[str, str] = {}
+    for key, val in updates.items():
+        if key not in ALLOWED_CONFIG_KEYS:
+            raise ValueError(f"Disallowed configuration key: '{key}'. Only safe operational settings can be updated.")
+        if "\r" in key or "\n" in key or "\r" in val or "\n" in val:
+            raise ValueError(f"Newline characters not permitted in configuration: {key}")
+
+        if key in ("SERVER_PORT", "PORT"):
+            try:
+                port = int(val)
+                if not (1024 <= port <= 65535):
+                    raise ValueError
+            except ValueError:
+                raise ValueError(f"Invalid port: {val}. Must be an integer between 1024 and 65535.")
+            validated["SERVER_PORT"] = str(port)
+            validated["PORT"] = str(port)
+        elif key in ("CONCURRENCY_POOL_SIZE", "WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY"):
+            try:
+                num = int(val)
+                if not (1 <= num <= 32):
+                    raise ValueError
+            except ValueError:
+                raise ValueError(f"Invalid concurrency for {key}: {val}. Must be between 1 and 32.")
+            validated[key] = str(num)
+        elif key == "WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES":
+            try:
+                num = int(val)
+                if not (1 <= num <= 100):
+                    raise ValueError
+            except ValueError:
+                raise ValueError(f"Invalid max pages: {val}. Must be between 1 and 100.")
+            validated[key] = str(num)
+        elif key == "WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC":
+            try:
+                num = int(val)
+                if not (5 <= num <= 600):
+                    raise ValueError
+            except ValueError:
+                raise ValueError(f"Invalid timeout: {val}. Must be between 5 and 600.")
+            validated[key] = str(num)
+        elif key == "OLLAMA_BASE_URL":
+            val_clean = val.strip()
+            if not (val_clean.startswith("http://") or val_clean.startswith("https://")):
+                raise ValueError("OLLAMA_BASE_URL must begin with http:// or https://")
+            if " " in val_clean:
+                raise ValueError("OLLAMA_BASE_URL cannot contain spaces")
+            validated[key] = val_clean
+        else:
+            validated[key] = val.strip()
+    return validated
+
+
 def write_env(updates: Dict[str, str]) -> Dict[str, str]:
     _ensure_paths()
+    validated_updates = validate_config_updates(updates)
     current = read_env()
-    current.update(updates)
+    current.update(validated_updates)
     
     # Read template or existing file to preserve structure
     source_file = ENV_FILE if ENV_FILE.exists() else ENV_TEMPLATE
@@ -150,7 +250,7 @@ def write_env(updates: Dict[str, str]) -> Dict[str, str]:
         except Exception:
             pass
 
-    return current
+    return get_safe_config()
 
 
 def check_port(port: int, host: str = "127.0.0.1") -> bool:
@@ -311,7 +411,7 @@ def status() -> Dict[str, Any]:
             "message": _build_status["message"],
             "error": _build_status["error"]
         },
-        "config": cfg,
+        "config": get_safe_config(),
     }
 
 
@@ -349,6 +449,8 @@ def start_service() -> Dict[str, Any]:
         # Build clean environment dictionary
         env = dict(os.environ)
         env.update(cfg)
+        env["SERVER_HOST"] = "127.0.0.1"
+        env["WEKNORA_LITE_SETUP_TOKEN"] = get_setup_token()
         env["EDITION"] = "lite"
         env["DB_DRIVER"] = "sqlite"
         env["RETRIEVE_DRIVER"] = "sqlite"
@@ -407,6 +509,20 @@ def stop_service() -> Dict[str, Any]:
     with _lock:
         if not _process or _process.poll() is not None:
             _process = None
+            cfg = read_env()
+            port = int(cfg.get("SERVER_PORT", cfg.get("PORT", "8082")))
+            if check_port(port, "127.0.0.1"):
+                try:
+                    if sys.platform == "win32":
+                        out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True, text=True)
+                        for line in out.strip().splitlines():
+                            parts = line.split()
+                            if len(parts) >= 5 and "LISTENING" in parts:
+                                orphan_pid = int(parts[-1])
+                                append_log(f"Terminating orphaned WeKnora instance (PID {orphan_pid})...")
+                                subprocess.run(["taskkill", "/PID", str(orphan_pid), "/F"], capture_output=True)
+                except Exception as exc:
+                    append_log(f"Error terminating orphaned process on port {port}: {exc}")
             return {"ok": True, "message": "Service is not running"}
 
         append_log(f"Stopping WeKnora Lite (PID {_process.pid})...")
