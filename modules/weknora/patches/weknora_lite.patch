@@ -13,19 +13,16 @@ index 06811ba..1eaedcb 100644
  # Conversation service configuration
  # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
 diff --git a/frontend/src/api/auth/index.ts b/frontend/src/api/auth/index.ts
-index 5e92a06..4774f70 100644
+index 5e92a06..3032f15 100644
 --- a/frontend/src/api/auth/index.ts
 +++ b/frontend/src/api/auth/index.ts
-@@ -308,11 +308,10 @@ export function autoSetup(): Promise<LoginResponse> {
-   const request = (async () => {
-     try {
+@@ -310,9 +310,9 @@ export function autoSetup(): Promise<LoginResponse> {
        const nativeApp = (window as any).go?.main?.App
--      if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
--      const token = await nativeApp.GetAutoSetupToken()
+       if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
+       const token = await nativeApp.GetAutoSetupToken()
 -      const response = await post('/api/v1/auth/auto-setup', {}, {
 -        headers: { 'X-WeKnora-Desktop-Token': token },
 -      })
-+      const token = nativeApp?.GetAutoSetupToken ? await nativeApp.GetAutoSetupToken() : ''
 +      const headers: Record<string, string> = {}
 +      if (token) headers['X-WeKnora-Desktop-Token'] = token
 +      const response = await post('/api/v1/auth/auto-setup', {}, { headers })
@@ -210,18 +207,20 @@ index 0000000..2307912
 +	return nil, nil
 +}
 diff --git a/internal/handler/auth.go b/internal/handler/auth.go
-index d17248d..f51abd0 100644
+index d17248d..b96cf40 100644
 --- a/internal/handler/auth.go
 +++ b/internal/handler/auth.go
-@@ -7,7 +7,6 @@ import (
+@@ -7,8 +7,8 @@ import (
  	"encoding/base64"
  	"encoding/json"
  	stderrors "errors"
 -	"fmt"
  	"net/http"
++	"os"
  	"strings"
  
-@@ -899,13 +898,8 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
+ 	"github.com/gin-gonic/gin"
+@@ -899,14 +899,13 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
  func (h *AuthHandler) AutoSetup(c *gin.Context) {
  	ctx := c.Request.Context()
  
@@ -229,15 +228,19 @@ index d17248d..f51abd0 100644
 -		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
 -		c.Error(appErr)
 -		return
--	}
--
++	requiredToken := liteSetupToken
++	if requiredToken == "" {
++		requiredToken = os.Getenv("WEKNORA_LITE_SETUP_TOKEN")
+ 	}
+ 
 -	if liteSetupToken == "" ||
-+	// In standalone Lite mode, auto-setup allows seamless zero-prompt login.
-+	if liteSetupToken != "" &&
- 		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(liteSetupToken)) != 1 {
+-		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(liteSetupToken)) != 1 {
++	if requiredToken == "" ||
++		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(requiredToken)) != 1 {
  		_ = c.Error(errors.NewUnauthorizedError("desktop authentication is required"))
  		return
-@@ -924,10 +918,9 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
+ 	}
+@@ -924,10 +923,9 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
  			return
  		}
  		randomPassword := base64.RawURLEncoding.EncodeToString(randomBytes)
@@ -433,10 +436,18 @@ index ae87075..87465f5 100644
  			return
  		}
 diff --git a/internal/router/static.go b/internal/router/static.go
-index 2acb63f..3b5c5cf 100644
+index 2acb63f..655f870 100644
 --- a/internal/router/static.go
 +++ b/internal/router/static.go
-@@ -28,8 +28,6 @@ func serveFrontendStatic(r *gin.Engine) {
+@@ -2,6 +2,7 @@ package router
+ 
+ import (
+ 	"context"
++	"fmt"
+ 	"net/http"
+ 	"os"
+ 	"path/filepath"
+@@ -28,8 +29,6 @@ func serveFrontendStatic(r *gin.Engine) {
  
  	logger.Infof(context.Background(), "[Router] Serving frontend static files from %s", absDir)
  
@@ -445,7 +456,7 @@ index 2acb63f..3b5c5cf 100644
  
  	r.Use(func(c *gin.Context) {
  		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
-@@ -49,17 +47,17 @@ func serveFrontendStatic(r *gin.Engine) {
+@@ -49,17 +48,29 @@ func serveFrontendStatic(r *gin.Engine) {
  			c.Abort()
  			return
  		}
@@ -463,6 +474,18 @@ index 2acb63f..3b5c5cf 100644
  		}
  		setFrontendCacheHeaders(c.Writer, "/index.html")
 -		c.File(indexPath)
++		setupToken := os.Getenv("WEKNORA_LITE_SETUP_TOKEN")
++		if setupToken != "" {
++			htmlBytes, err := os.ReadFile(indexPath)
++			if err == nil {
++				injection := fmt.Sprintf("<script>window.go={main:{App:{GetAutoSetupToken:async()=>%q}}};</script></head>", setupToken)
++				modified := strings.Replace(string(htmlBytes), "</head>", injection, 1)
++				c.Header("Content-Type", "text/html; charset=utf-8")
++				c.String(http.StatusOK, modified)
++				c.Abort()
++				return
++			}
++		}
 +		http.ServeFile(c.Writer, c.Request, indexPath)
  		c.Abort()
  	})
