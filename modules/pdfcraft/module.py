@@ -42,6 +42,21 @@ def check_updates() -> dict:
     return pdfcraft.status()
 
 
+@router.post("/open-source")
+def open_source() -> dict:
+    from modules.artcraft import source_sync
+    pdfcraft_item = next((r for r in source_sync.MANAGED_REPOS if r["id"] == "pdfcraft"), None)
+    if pdfcraft_item and pdfcraft_item["dir"].exists():
+        path = str(pdfcraft_item["dir"])
+        if os.name == "nt":
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
+        return {"status": "ok", "path": path}
+    return {"status": "error", "message": "Source not found"}
+
+
 @router.post("/install")
 def install(payload: dict = Body(default={})) -> dict:
     return pdfcraft.start_install(force=bool(payload.get("force")))
