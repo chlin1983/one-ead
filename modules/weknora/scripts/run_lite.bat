@@ -49,6 +49,22 @@ set AUTO_MIGRATE=true
 set WEKNORA_WEB_DIR=%REPO_DIR%\web
 set DOC_EXTRACTOR_SCRIPT=%MODULE_DIR%\scripts\doc_extractor.py
 
+:: Check if Ollama is running on 127.0.0.1:11434
+curl.exe -s http://127.0.0.1:11434/api/tags >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [INFO] Ollama service not detected on 127.0.0.1:11434. Starting Ollama...
+    if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" (
+        start /b "" "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" serve >nul 2>&1
+        timeout /t 2 /nobreak >nul
+    ) else (
+        where ollama >nul 2>&1
+        if %errorlevel% equ 0 (
+            start /b "" ollama serve >nul 2>&1
+            timeout /t 2 /nobreak >nul
+        )
+    )
+)
+
 echo Starting WeKnora Lite on %SERVER_HOST%:%SERVER_PORT%...
 cd /d "%MODULE_DIR%"
 "%BINARY%"

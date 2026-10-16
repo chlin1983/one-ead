@@ -190,6 +190,32 @@ def check_ollama(url: Optional[str] = None) -> Dict[str, Any]:
         }
 
 
+def ensure_ollama_running(url: Optional[str] = None) -> bool:
+    """Ensures the local Ollama server is running in background if available on system."""
+    info = check_ollama(url)
+    if info.get("available"):
+        return True
+    
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        default_path = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+        if default_path.exists():
+            ollama_path = str(default_path)
+            
+    if ollama_path:
+        append_log(f"Auto-launching local Ollama server: {ollama_path} serve")
+        try:
+            subprocess.Popen([ollama_path, "serve"], creationflags=_NO_WINDOW)
+            for _ in range(12):
+                time.sleep(0.5)
+                if check_ollama(url).get("available"):
+                    append_log("Local Ollama service online.")
+                    return True
+        except Exception as exc:
+            append_log(f"Failed to auto-start Ollama: {exc}")
+    return False
+
+
 def get_hardware_info() -> Dict[str, Any]:
     """Provides hardware profiles tailored for 6GB VRAM & 16GB RAM."""
     return {
@@ -336,6 +362,9 @@ def start_service() -> Dict[str, Any]:
         if web_dir.exists():
             env["WEKNORA_WEB_DIR"] = str(web_dir)
         env["DOC_EXTRACTOR_SCRIPT"] = str(MODULE_DIR / "scripts" / "doc_extractor.py")
+
+        # Automatically ensure Ollama is active on loopback
+        ensure_ollama_running(cfg.get("OLLAMA_BASE_URL"))
 
         append_log(f"Starting WeKnora Lite: {binary} on {host}:{port}")
         
