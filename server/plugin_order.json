@@ -1,15 +1,15 @@
 [
   "my_dashboard",
-  "excalidraw",
-  "pdfcraft",
   "hxml-viewer",
   "its-report-compiler",
   "component_database",
   "f1-ipp-filter-simulator",
   "mems-microphone-explorer",
   "balance-armature-receiver-explorer",
-  "chili3d",
   "deep-tutor",
+  "excalidraw",
+  "pdfcraft",
+  "chili3d",
   "gpt-researcher",
   "artcraft",
   "weknora"
