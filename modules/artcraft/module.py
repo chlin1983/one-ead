@@ -63,6 +63,22 @@ def check_updates_endpoint(payload: dict = Body(default={})) -> dict:
     return artcraft.status()
 
 
+@router.get("/source-status")
+def get_source_status() -> dict:
+    return artcraft.get_source_status()
+
+
+@router.post("/sync-sources")
+def sync_sources_endpoint(payload: dict = Body(default={})) -> dict:
+    background = bool(payload.get("background", True))
+    return artcraft.sync_sources(background=background)
+
+
+@router.post("/open-source/{app_id}")
+def open_source_folder(app_id: str) -> dict:
+    return artcraft.open_source_folder(app_id)
+
+
 MODULE = PortalModule(
     id="artcraft",
     title="ArtCraft",

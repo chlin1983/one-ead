@@ -1,0 +1,450 @@
+"""WeKnora Lite service supervisor & lifecycle manager for One EAD.
+
+Manages WeKnora Lite (SQLite + in-memory queue, zero external dependencies)
+optimized for local LLM inference under 6GB VRAM / 16GB RAM limits.
+"""
+
+from __future__ import annotations
+
+import atexit
+import collections
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+import urllib.error
+import urllib.request
+
+MODULE_DIR = Path(__file__).resolve().parent
+REPO_DIR = MODULE_DIR / "WeKnora"
+DATA_DIR = MODULE_DIR / "data"
+CONFIGS_DIR = MODULE_DIR / "configs"
+ENV_FILE = MODULE_DIR / ".env.lite"
+ENV_TEMPLATE = CONFIGS_DIR / ".env.lite.template"
+LOG_FILE = DATA_DIR / "service.log"
+BUILD_BAT = MODULE_DIR / "scripts" / "build_lite.bat"
+
+BINARY_NAME = "WeKnora-lite.exe" if os.name == "nt" else "WeKnora-lite"
+BINARY_PATH = MODULE_DIR / BINARY_NAME
+FALLBACK_BINARY_PATH = REPO_DIR / BINARY_NAME
+
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+_lock = threading.RLock()
+_process: Optional[subprocess.Popen] = None
+_logs: collections.deque = collections.deque(maxlen=1000)
+_build_thread: Optional[threading.Thread] = None
+_build_status = {
+    "building": False,
+    "phase": "idle",
+    "message": "",
+    "error": None,
+    "log": collections.deque(maxlen=300)
+}
+
+
+def _ensure_paths() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "files").mkdir(parents=True, exist_ok=True)
+    if not ENV_FILE.exists() and ENV_TEMPLATE.exists():
+        shutil.copy2(ENV_TEMPLATE, ENV_FILE)
+
+
+def append_log(line: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{timestamp}] {line.rstrip()}"
+    _logs.append(formatted)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(formatted + "\n")
+    except Exception:
+        pass
+
+
+def get_active_binary() -> Optional[Path]:
+    if BINARY_PATH.exists():
+        return BINARY_PATH
+    if FALLBACK_BINARY_PATH.exists():
+        return FALLBACK_BINARY_PATH
+    return None
+
+
+def read_env() -> Dict[str, str]:
+    _ensure_paths()
+    env_vars: Dict[str, str] = {}
+    if not ENV_FILE.exists():
+        return env_vars
+    try:
+        with open(ENV_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    env_vars[key.strip()] = val.strip()
+    except Exception as exc:
+        append_log(f"Error reading .env.lite: {exc}")
+    return env_vars
+
+
+def write_env(updates: Dict[str, str]) -> Dict[str, str]:
+    _ensure_paths()
+    current = read_env()
+    current.update(updates)
+    
+    # Read template or existing file to preserve structure
+    source_file = ENV_FILE if ENV_FILE.exists() else ENV_TEMPLATE
+    output_lines: List[str] = []
+    seen_keys = set()
+
+    if source_file.exists():
+        with open(source_file, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in current:
+                        output_lines.append(f"{key}={current[key]}\n")
+                        seen_keys.add(key)
+                        continue
+                output_lines.append(line)
+
+    for k, v in current.items():
+        if k not in seen_keys:
+            output_lines.append(f"{k}={v}\n")
+
+    with open(ENV_FILE, "w", encoding="utf-8") as f:
+        f.writelines(output_lines)
+    
+    # Also keep WeKnora/.env.lite in sync if repo exists
+    repo_env = REPO_DIR / ".env.lite"
+    if REPO_DIR.exists():
+        try:
+            shutil.copy2(ENV_FILE, repo_env)
+        except Exception:
+            pass
+
+    return current
+
+
+def check_port(port: int, host: str = "127.0.0.1") -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+
+def check_tool(cmd: str) -> bool:
+    return shutil.which(cmd) is not None
+
+
+def check_ollama(url: Optional[str] = None) -> Dict[str, Any]:
+    if not url:
+        cfg = read_env()
+        url = cfg.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    
+    endpoint = f"{url.rstrip('/')}/api/tags"
+    try:
+        req = urllib.request.Request(endpoint, headers={"User-Agent": "One-EAD-WeKnora"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            models = [m.get("name") for m in data.get("models", [])]
+            return {
+                "available": True,
+                "url": url,
+                "models": models,
+                "count": len(models)
+            }
+    except Exception as exc:
+        return {
+            "available": False,
+            "url": url,
+            "models": [],
+            "error": str(exc)
+        }
+
+
+def get_hardware_info() -> Dict[str, Any]:
+    """Provides hardware profiles tailored for 6GB VRAM & 16GB RAM."""
+    return {
+        "target_vram_gb": 6,
+        "target_ram_gb": 16,
+        "mode": "lite",
+        "budget": {
+            "os_reserve_mb": 800,
+            "embedding_mb": 300,
+            "chat_model_mb": 4400,
+            "kv_cache_buffer_mb": 644,
+            "total_vram_mb": 6144,
+        },
+        "recommended_tiers": [
+            {
+                "tier": "Tier 1: Ultra-Fast & Safe (Zero OOM Risk)",
+                "chat_model": "qwen2.5:3b",
+                "chat_vram": "~2.0 GB",
+                "embed_model": "nomic-embed-text",
+                "embed_vram": "~275 MB",
+                "total_vram": "~2.5 GB",
+                "fit_rating": "Flawless",
+                "pull_cmd": "ollama pull qwen2.5:3b && ollama pull nomic-embed-text"
+            },
+            {
+                "tier": "Tier 2: Max Intelligence within 6GB VRAM",
+                "chat_model": "qwen2.5:7b-instruct-q4_K_M",
+                "chat_vram": "~4.4 GB",
+                "embed_model": "bge-small-zh-v1.5",
+                "embed_vram": "~130 MB",
+                "total_vram": "~4.85 GB",
+                "fit_rating": "Recommended",
+                "pull_cmd": "ollama pull qwen2.5:7b-instruct-q4_K_M && ollama pull bge-small-zh-v1.5"
+            },
+            {
+                "tier": "Tier 3: Reasoning Specialist (DeepSeek-R1)",
+                "chat_model": "deepseek-r1:7b",
+                "chat_vram": "~4.7 GB",
+                "embed_model": "nomic-embed-text",
+                "embed_vram": "~275 MB",
+                "total_vram": "~5.1 GB",
+                "fit_rating": "Feasible (4k context)",
+                "pull_cmd": "ollama pull deepseek-r1:7b && ollama pull nomic-embed-text"
+            }
+        ]
+    }
+
+
+def status() -> Dict[str, Any]:
+    _ensure_paths()
+    cfg = read_env()
+    port = int(cfg.get("SERVER_PORT", cfg.get("PORT", "8082")))
+    host = cfg.get("SERVER_HOST", "127.0.0.1")
+    binary = get_active_binary()
+    repo_exists = (REPO_DIR / "cmd" / "server" / "main.go").exists()
+    web_dist_exists = (REPO_DIR / "web" / "index.html").exists() or (REPO_DIR / "frontend" / "dist" / "index.html").exists()
+
+    with _lock:
+        is_proc_alive = _process is not None and _process.poll() is None
+        port_open = check_port(port, host)
+        is_running = is_proc_alive or port_open
+        pid = _process.pid if _process and _process.poll() is None else None
+
+    ollama_info = check_ollama(cfg.get("OLLAMA_BASE_URL"))
+
+    tools = {
+        "git": check_tool("git"),
+        "node": check_tool("node"),
+        "npm": check_tool("npm"),
+        "go": check_tool("go"),
+        "gcc": check_tool("gcc") or check_tool("clang"),
+    }
+
+    return {
+        "name": "WeKnora Lite",
+        "edition": "lite",
+        "running": is_running,
+        "pid": pid,
+        "port": port,
+        "host": host,
+        "service_url": f"http://{host}:{port}",
+        "proxy_url": f"/api/weknora/proxy",
+        "installed": binary is not None,
+        "binary_path": str(binary) if binary else None,
+        "repo_exists": repo_exists,
+        "frontend_built": web_dist_exists,
+        "tools": tools,
+        "ollama": ollama_info,
+        "hardware": get_hardware_info(),
+        "build": {
+            "building": _build_status["building"],
+            "phase": _build_status["phase"],
+            "message": _build_status["message"],
+            "error": _build_status["error"]
+        },
+        "config": cfg,
+    }
+
+
+def _pipe_output(proc: subprocess.Popen) -> None:
+    if not proc.stdout:
+        return
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            if not line:
+                break
+            append_log(line)
+    except Exception:
+        pass
+
+
+def start_service() -> Dict[str, Any]:
+    global _process
+    with _lock:
+        if _process and _process.poll() is None:
+            return {"ok": True, "message": "Service is already running", "pid": _process.pid}
+
+        binary = get_active_binary()
+        if not binary:
+            raise RuntimeError(
+                "WeKnora-lite binary not found. Please build the Lite binary first."
+            )
+
+        cfg = read_env()
+        port = int(cfg.get("SERVER_PORT", cfg.get("PORT", "8082")))
+        host = cfg.get("SERVER_HOST", "127.0.0.1")
+
+        if check_port(port, host):
+            return {"ok": True, "message": f"Port {port} is already active", "pid": None}
+
+        # Build clean environment dictionary
+        env = dict(os.environ)
+        env.update(cfg)
+        env["EDITION"] = "lite"
+        env["DB_DRIVER"] = "sqlite"
+        env["RETRIEVE_DRIVER"] = "sqlite"
+        env["STREAM_MANAGER_TYPE"] = "memory"
+        env["STORAGE_TYPE"] = "local"
+
+        append_log(f"Starting WeKnora Lite: {binary} on {host}:{port}")
+        
+        try:
+            _process = subprocess.Popen(
+                [str(binary)],
+                cwd=str(binary.parent),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                creationflags=_NO_WINDOW,
+            )
+            
+            thread = threading.Thread(target=_pipe_output, args=(_process,), daemon=True)
+            thread.start()
+
+            # Wait briefly for startup
+            for _ in range(20):
+                time.sleep(0.2)
+                if _process.poll() is not None:
+                    break
+                if check_port(port, host):
+                    break
+
+            return {
+                "ok": True,
+                "message": "WeKnora Lite started",
+                "pid": _process.pid,
+                "url": f"http://{host}:{port}"
+            }
+        except Exception as exc:
+            append_log(f"Failed to start WeKnora Lite: {exc}")
+            raise RuntimeError(f"Failed to launch WeKnora Lite: {exc}")
+
+
+def stop_service() -> Dict[str, Any]:
+    global _process
+    with _lock:
+        if not _process or _process.poll() is not None:
+            _process = None
+            return {"ok": True, "message": "Service is not running"}
+
+        append_log(f"Stopping WeKnora Lite (PID {_process.pid})...")
+        try:
+            _process.terminate()
+            try:
+                _process.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                _process.kill()
+                _process.wait(timeout=2)
+            append_log("WeKnora Lite stopped successfully")
+        except Exception as exc:
+            append_log(f"Error stopping process: {exc}")
+        finally:
+            _process = None
+
+    return {"ok": True, "message": "Service stopped"}
+
+
+def restart_service() -> Dict[str, Any]:
+    stop_service()
+    time.sleep(1)
+    return start_service()
+
+
+def get_logs(limit: int = 200) -> List[str]:
+    with _lock:
+        items = list(_logs)
+        return items[-limit:]
+
+
+def run_frontend_build() -> None:
+    """Builds frontend SPA in background."""
+    global _build_thread
+    if _build_status["building"]:
+        return
+
+    def _worker():
+        _build_status["building"] = True
+        _build_status["phase"] = "frontend"
+        _build_status["message"] = "Running npm install & build..."
+        _build_status["error"] = None
+        _build_status["log"].clear()
+
+        frontend_dir = REPO_DIR / "frontend"
+        try:
+            append_log("[Build] Starting frontend build...")
+            proc = subprocess.Popen(
+                ["npm", "install", "--prefer-offline"],
+                cwd=str(frontend_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                shell=True,
+                creationflags=_NO_WINDOW,
+            )
+            for line in proc.stdout:
+                _build_status["log"].append(line.rstrip())
+            proc.wait()
+
+            proc2 = subprocess.Popen(
+                ["npm", "run", "build"],
+                cwd=str(frontend_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                shell=True,
+                creationflags=_NO_WINDOW,
+            )
+            for line in proc2.stdout:
+                _build_status["log"].append(line.rstrip())
+            proc2.wait()
+
+            dist = frontend_dir / "dist"
+            web_dir = REPO_DIR / "web"
+            if dist.exists():
+                if web_dir.exists():
+                    shutil.rmtree(web_dir)
+                shutil.copytree(dist, web_dir)
+                _build_status["phase"] = "done"
+                _build_status["message"] = "Frontend assets built and copied to web/ successfully."
+                append_log("[Build] Frontend build succeeded.")
+            else:
+                _build_status["phase"] = "error"
+                _build_status["error"] = "frontend/dist not found after build."
+        except Exception as exc:
+            _build_status["phase"] = "error"
+            _build_status["error"] = str(exc)
+            append_log(f"[Build] Frontend build failed: {exc}")
+        finally:
+            _build_status["building"] = False
+
+    _build_thread = threading.Thread(target=_worker, daemon=True)
+    _build_thread.start()
+
+
+atexit.register(stop_service)

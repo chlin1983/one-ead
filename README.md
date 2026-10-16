@@ -78,6 +78,7 @@ All plugins (modules) run 100% locally and offline.
 | **Chili3D CAD**                        | `chili3d`                            | WebAssembly + OpenCascade                               | Browser-native parametric 3D CAD modeling with dual local persistence                | Live   |
 | **DeepTutor**                          | `deep-tutor`                         | Upstream PyPI package (`deeptutor`) in a private venv | AI tutoring workspace that always tracks the newest upstream release                 | Live   |
 | **GPT Researcher**                     | `gpt-researcher`                     | `gpt-researcher` in private venv + local Ollama       | Offline-first engineering research assistant driven by local Ollama models           | Live   |
+| **WeKnora**                            | `weknora`                            | Standalone Lite Binary (Go/SQLite) + Local LLM          | Document understanding & RAG knowledge base optimized for 6GB VRAM / 16GB RAM       | Live   |
 
 
 ---

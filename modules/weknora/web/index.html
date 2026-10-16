@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WeKnora — Lite Mode (One EAD)</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="weknora-root">
+    <!-- Top Navigation & Control Toolbar -->
+    <header class="wk-toolbar">
+      <div class="brand-group">
+        <div class="logo-badge">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <circle cx="12" cy="8" r="2"/>
+            <path d="M9 13h6"/>
+            <path d="M12 10v3"/>
+          </svg>
+        </div>
+        <div class="title-meta">
+          <div class="brand-line">
+            <span class="brand-name">WeKnora</span>
+            <span class="pill-edition">Lite Mode</span>
+            <span class="pill-status" id="statusPill" data-state="stopped">Checking...</span>
+          </div>
+          <span class="brand-sub">Zero-Dependency SQLite RAG · Local LLM Engine</span>
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="action-group">
+        <button class="btn primary" id="btnStart" title="Launch WeKnora Lite service">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span>Start Service</span>
+        </button>
+        <button class="btn danger" id="btnStop" hidden title="Stop background WeKnora process">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          <span>Stop</span>
+        </button>
+        <button class="btn" id="btnRestart" hidden title="Restart service">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          <span>Restart</span>
+        </button>
+        <a class="btn" id="btnOpenTab" target="_blank" rel="noopener noreferrer" hidden title="Open WeKnora in standalone browser window">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>Open in New Tab</span>
+        </a>
+        <button class="btn icon" id="btnToggleConfig" title="Configure .env.lite settings">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="btn icon" id="btnToggleLogs" title="View service output logs">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Stage -->
+    <main class="wk-stage">
+      <!-- Active Service View (Embedded Iframe) -->
+      <div class="iframe-container" id="iframeWrap" hidden>
+        <iframe id="serviceFrame" title="WeKnora" allow="clipboard-read; clipboard-write; microphone; camera; fullscreen"></iframe>
+      </div>
+
+      <!-- Dashboard & Advisor View (Shown when not running or preparing) -->
+      <div class="dashboard-container" id="dashboardWrap">
+        <!-- Hero Introduction -->
+        <section class="card hero-card">
+          <div class="hero-content">
+            <h2>Tencent WeKnora (Lite Mode)</h2>
+            <p>
+              An enterprise LLM document understanding and knowledge retrieval system designed to run with
+              <strong>zero external dependencies</strong> (SQLite FTS5 + <code>sqlite-vec</code> vector storage, in-memory queues).
+              Pre-configured specifically for your <strong>6GB VRAM / 16GB RAM</strong> hardware profile.
+            </p>
+            <div class="hero-tags">
+              <span class="tag">Zero Redis/Postgres</span>
+              <span class="tag">Local SQLite Vector DB</span>
+              <span class="tag">Local LLM (Ollama)</span>
+              <span class="tag">Single Binary Deployment</span>
+            </div>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-box">
+              <span class="stat-label">Hardware Target</span>
+              <strong class="stat-val">6GB VRAM / 16GB RAM</strong>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Retrieval Driver</span>
+              <strong class="stat-val">SQLite + FTS5</strong>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Inference Mode</span>
+              <strong class="stat-val">Local Ollama Loopback</strong>
+            </div>
+          </div>
+        </section>
+
+        <!-- Hardware & Local LLM Advisor -->
+        <section class="card advisor-card">
+          <div class="card-head">
+            <div class="head-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+              <h3>Hardware Budget & Local Model Recommendations (6GB VRAM)</h3>
+            </div>
+            <span class="pill-badge">VRAM Capacity: 6,144 MB</span>
+          </div>
+
+          <!-- VRAM Budget Bar -->
+          <div class="vram-budget-wrap">
+            <div class="vram-bar-label">
+              <span>Estimated VRAM Distribution (6GB Total)</span>
+              <span id="vramTotalLabel">~4.9 GB / 6.0 GB (Recommended Profile)</span>
+            </div>
+            <div class="vram-bar">
+              <div class="bar-seg seg-os" style="width: 13%;" title="Windows DWM & Display: ~800 MB">DWM 800MB</div>
+              <div class="bar-seg seg-embed" style="width: 5%;" title="Embedding Model: ~300 MB">Embed ~300MB</div>
+              <div class="bar-seg seg-chat" style="width: 62%;" title="Chat Model Weights: ~3.8-4.4 GB">Chat Model ~4.4GB</div>
+              <div class="bar-seg seg-kv" style="width: 10%;" title="KV Cache Buffer: ~600 MB">KV 600MB</div>
+              <div class="bar-seg seg-free" style="width: 10%;" title="Safety Headroom: ~600 MB">Headroom</div>
+            </div>
+          </div>
+
+          <!-- Model Tiers Grid -->
+          <div class="tiers-grid" id="tiersGrid">
+            <!-- Dynamically populated -->
+          </div>
+
+          <div class="ollama-notice">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>
+              <strong>Note on Local LLM:</strong> Ollama is not installed in this cloud workspace per your request.
+              When launching on your real hardware computer, ensure Ollama is running (<code>http://127.0.0.1:11434</code>) with your preferred model pulled.
+            </span>
+          </div>
+        </section>
+
+        <!-- Compilation & Build Readiness -->
+        <section class="card build-card">
+          <div class="card-head">
+            <div class="head-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              <h3>Build & Binary Groundwork</h3>
+            </div>
+            <span class="pill-badge" id="binaryStatusPill">Detecting...</span>
+          </div>
+
+          <div class="build-grid">
+            <div class="build-item">
+              <div class="item-icon" id="iconRepo">✓</div>
+              <div class="item-text">
+                <strong>WeKnora Repository</strong>
+                <span id="txtRepo">Checking modules/weknora/WeKnora...</span>
+              </div>
+            </div>
+            <div class="build-item">
+              <div class="item-icon" id="iconNode">✓</div>
+              <div class="item-text">
+                <strong>Frontend Tools (Node / npm)</strong>
+                <span id="txtNode">Checking node & npm...</span>
+              </div>
+            </div>
+            <div class="build-item">
+              <div class="item-icon" id="iconGo">?</div>
+              <div class="item-text">
+                <strong>Go Toolchain (Go 1.23+)</strong>
+                <span id="txtGo">Checking Go compiler...</span>
+              </div>
+            </div>
+            <div class="build-item">
+              <div class="item-icon" id="iconCgo">?</div>
+              <div class="item-text">
+                <strong>CGO / MinGW Compiler (GCC)</strong>
+                <span id="txtCgo">Required for SQLite FTS5 & sqlite-vec...</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="build-actions">
+            <button class="btn" id="btnBuildFrontend">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+              <span>Build Frontend SPA Assets</span>
+            </button>
+            <div class="scripts-hint">
+              <span>Windows Build Scripts Ready:</span>
+              <code>modules\weknora\scripts\build_lite.bat</code>
+              <code>modules\weknora\scripts\run_lite.bat</code>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Slide-over Configuration Drawer -->
+    <aside class="drawer" id="configDrawer" hidden>
+      <div class="drawer-header">
+        <h3>Lite Configuration (.env.lite)</h3>
+        <button class="btn icon ghost" id="btnCloseConfig">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p class="drawer-desc">Tune your zero-dependency Lite parameters and Ollama endpoints.</p>
+        
+        <div class="form-group">
+          <label for="cfgPort">Server Port (SERVER_PORT)</label>
+          <input type="number" id="cfgPort" value="8082" />
+          <span class="help-text">Default 8082 (avoids conflict with One EAD on 8100)</span>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgOllamaUrl">Local LLM Endpoint (OLLAMA_BASE_URL)</label>
+          <input type="text" id="cfgOllamaUrl" value="http://127.0.0.1:11434" />
+          <span class="help-text">Points to Ollama on your real machine</span>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgConcurrency">Worker Concurrency Pool Size</label>
+          <input type="number" id="cfgConcurrency" value="2" min="1" max="4" />
+          <span class="help-text">Set to 2 to prevent high context OOM under 6GB VRAM</span>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgOcrConcurrency">Attachment OCR Concurrency</label>
+          <input type="number" id="cfgOcrConcurrency" value="1" min="1" max="4" />
+          <span class="help-text">Keep at 1 for 6GB VRAM to avoid VRAM exhaustion during OCR</span>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgOcrPages">Max OCR Pages per Document</label>
+          <input type="number" id="cfgOcrPages" value="4" min="1" max="10" />
+        </div>
+
+        <div class="form-actions">
+          <button class="btn" id="btnApply6gbPreset">Apply 6GB VRAM Recommended Presets</button>
+          <button class="btn primary" id="btnSaveConfig">Save Configuration</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Slide-over Console / Logs Drawer -->
+    <aside class="drawer logs-drawer" id="logsDrawer" hidden>
+      <div class="drawer-header">
+        <h3>WeKnora Lite Output Logs</h3>
+        <div class="log-btns">
+          <button class="btn small" id="btnRefreshLogs">Refresh</button>
+          <button class="btn icon ghost" id="btnCloseLogs">&times;</button>
+        </div>
+      </div>
+      <div class="drawer-body logs-body">
+        <pre class="console-output" id="consoleOutput">Waiting for logs...</pre>
+      </div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

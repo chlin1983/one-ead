@@ -51,13 +51,15 @@ modules/chili3d/exports/
 *.igs
 *.brep
 
-# PdfCraft generated WebAssembly bundle + user documents
+# PdfCraft generated WebAssembly bundle + user documents + upstream source
 modules/pdfcraft/web/app/
 modules/pdfcraft/data/
+modules/pdfcraft/upstream/
 
-# ArtCraft creative suite generated WebAssembly bundles and local works
+# ArtCraft creative suite generated WebAssembly bundles and local works + upstream source
 modules/artcraft/web/apps/
 modules/artcraft/data/
+modules/artcraft/upstream/
 
 # DeepTutor private venv, user data (API keys, chats), logs
 modules/deep_tutor/data/
@@ -70,6 +72,14 @@ modules/excalidraw/data/
 
 # Runtime root data directory
 data/
+
+# WeKnora local repository clone, builds, and user data
+modules/weknora/WeKnora/
+modules/weknora/upstream/
+modules/weknora/data/
+modules/weknora/*.exe
+modules/weknora/WeKnora-lite*
+modules/weknora/.env.lite
 
 # Temporary scratch and debug scripts
 scratch/

@@ -501,6 +501,19 @@
     }
 
     el.openFolderBtn?.addEventListener("click", openLibraryModal);
+    document.getElementById("btn-open-source")?.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/pdfcraft/open-source", { method: "POST" });
+        const data = await res.json();
+        if (data.path) {
+          showToast(`Opened PdfCraft Rust source: ${data.path}`);
+        } else {
+          showToast("PdfCraft source not found");
+        }
+      } catch (err) {
+        showToast("Could not open source folder");
+      }
+    });
     el.closeModalBtn?.addEventListener("click", closeLibraryModal);
     el.modalUploadBtn?.addEventListener("click", () => el.fileInput?.click());
     el.modalOpenExplorerBtn?.addEventListener("click", openStorageFolder);

@@ -50,5 +50,10 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :launch
+REM Background check: ensure upstream source repositories exist on fresh clone
+if not exist "modules\artcraft\upstream\photocraft\.git" (
+    start /b python -c "import sys; sys.path.insert(0, '.'); from modules.artcraft.source_sync import ensure_all_repos_in_background; ensure_all_repos_in_background()" >nul 2>&1
+)
+
 python run.py %*
 

@@ -336,6 +336,15 @@ def check_latest(force: bool = False) -> dict:
         if not force and _latest["info"] and (now - _latest["checked_at"] < LATEST_TTL_S):
             return dict(_latest)
 
+    # Automatically pull latest upstream bug fixes from official Storytold and sync to user fork
+    try:
+        from modules.artcraft import source_sync
+        pdfcraft_item = next((r for r in source_sync.MANAGED_REPOS if r["id"] == "pdfcraft"), None)
+        if pdfcraft_item:
+            source_sync.sync_single_repo(pdfcraft_item)
+    except Exception as exc:
+        _log_line(f"Git sync warning: {exc}")
+
     url = f"https://api.github.com/repos/{UPSTREAM}/releases"
     req = urllib.request.Request(
         url,
@@ -370,6 +379,15 @@ def check_latest(force: bool = False) -> dict:
             _latest["info"] = info
             _latest["checked_at"] = time.time()
             _latest["error"] = None
+
+        # If auto_update is enabled, seamlessly install new bug-fixed build in the background
+        if get_config().get("auto_update") and info.get("download_url"):
+            inst = get_installed()
+            if inst and inst.get("version") != info.get("version"):
+                _log_line(f"Auto-update: new version {info.get('version')} detected. Updating engine...")
+                start_install(force=True, target_info=info)
+
+        with _latest_lock:
             return dict(_latest)
     except Exception as exc:
         with _latest_lock:
@@ -468,9 +486,21 @@ def status() -> dict:
     with _latest_lock:
         latest_info = _latest.get("info")
         latest_ver = latest_info.get("version") if latest_info else None
+        last_checked = _latest.get("checked_at", 0.0)
+
+    # Automatically check official GitHub for bug fixes on launch in the background (TTL 30 min)
+    if (time.time() - last_checked > LATEST_TTL_S) and _job["state"] != "running":
+        threading.Thread(target=check_latest, kwargs={"force": False}, daemon=True).start()
 
     installed_ver = inst.get("version") if inst else None
     has_update = bool(installed_ver and latest_ver and installed_ver != latest_ver)
+
+    try:
+        from modules.artcraft import source_sync
+        pdfcraft_item = next((r for r in source_sync.MANAGED_REPOS if r["id"] == "pdfcraft"), None)
+        source_info = source_sync.get_repo_info(pdfcraft_item) if pdfcraft_item else None
+    except Exception:
+        source_info = None
 
     return {
         "installed": inst is not None,
@@ -478,6 +508,7 @@ def status() -> dict:
         "latest_version": latest_ver,
         "has_update": has_update,
         "latest_info": latest_info,
+        "source": source_info,
         "job": job_copy,
         "job_log": list(_job_log),
         "docs_count": len(list(DOCS_DIR.glob("*.pdf"))),

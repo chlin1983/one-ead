@@ -34,6 +34,9 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+import subprocess
+
+from modules.artcraft import source_sync
 
 TOOL_ID = "artcraft"
 _HERE = Path(__file__).resolve().parent
@@ -284,9 +287,16 @@ def _write_updates(data: dict) -> None:
 
 def _check_updates_worker() -> None:
     global _updates_checking
-    _log_line("Checking for latest ArtCraft releases on GitHub...")
+    _log_line("Checking for latest ArtCraft releases and pulling git bug fixes...")
     cache = _read_updates()
     updated_entries = dict(cache.get("apps", {}))
+
+    # 1. Sync all upstream git sources with official storytold and user fork
+    try:
+        source_sync.sync_all_sources(background=False)
+        _log_line("Successfully synced upstream git repositories with official bug fixes.")
+    except Exception as exc:
+        _log_line(f"Git source sync warning: {exc}")
 
     for app in CRAFT_APPS:
         aid = app["id"]
@@ -368,6 +378,9 @@ def get_app_info(app_id: str) -> Optional[dict]:
         # Simple semantic version check
         has_update = latest_ver != installed_ver
 
+    source_item = next((r for r in source_sync.MANAGED_REPOS if r["id"] == app_id), None)
+    source_info = source_sync.get_repo_info(source_item) if source_item else None
+
     return {
         **meta,
         "download_url": latest_url,
@@ -378,6 +391,7 @@ def get_app_info(app_id: str) -> Optional[dict]:
         "installed_at": rec.get("installed_at") if installed else None,
         "app_url": f"/modules/artcraft/apps/{app_id}/index.html",
         "icon_url": f"/modules/artcraft/icons/{app_id}.webp",
+        "source": source_info,
     }
 
 
@@ -513,6 +527,22 @@ def status() -> dict:
         logs = list(_job_logs)
 
     updates_cache = _read_updates()
+    checked_at = updates_cache.get("checked_at")
+
+    # Auto-check official GitHub for bug fixes on launch in the background (TTL 30 min)
+    if not _updates_checking:
+        should_check = False
+        if not checked_at:
+            should_check = True
+        else:
+            try:
+                last_dt = datetime.fromisoformat(checked_at)
+                if (datetime.now(timezone.utc) - last_dt).total_seconds() > 1800:
+                    should_check = True
+            except Exception:
+                should_check = True
+        if should_check:
+            check_updates(background=True)
 
     return {
         "installed": True,
@@ -523,8 +553,39 @@ def status() -> dict:
         "checking_updates": _updates_checking,
         "updates_checked_at": updates_cache.get("checked_at"),
         "apps": apps,
+        "source_status": source_sync.get_sync_status(),
         "job": job_copy,
         "job_log": logs[-50:],
         "entry_url": ENTRY_URL,
     }
+
+
+def get_source_status() -> dict:
+    return source_sync.get_sync_status()
+
+
+def sync_sources(background: bool = True) -> dict:
+    _log_line("Manual Git pull triggered: syncing all Craft sources from official...")
+    return source_sync.sync_all_sources(background=background)
+
+
+def open_source_folder(app_id: str) -> dict:
+    source_item = next((r for r in source_sync.MANAGED_REPOS if r["id"] == app_id), None)
+    if not source_item or not source_item["dir"].exists():
+        return {"status": "error", "message": f"Source directory for {app_id} not found"}
+
+    path = str(source_item["dir"])
+    if os.name == "nt":
+        try:
+            os.startfile(path)
+        except Exception:
+            subprocess.Popen(["explorer", path])
+    return {"status": "ok", "path": path}
+
+
+# Ensure any missing repositories are set up in the background on module import
+try:
+    source_sync.ensure_all_repos_in_background()
+except Exception:
+    pass
 
