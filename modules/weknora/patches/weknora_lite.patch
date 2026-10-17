@@ -29,6 +29,32 @@ index 5e92a06..3032f15 100644
        return response as unknown as LoginResponse
      } catch (error: any) {
        return {
+diff --git a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue b/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
+index eb5073c..eddae6a 100644
+--- a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
++++ b/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
+@@ -979,7 +979,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
+       customInstructions: ''
+     },
+     questionGenerationConfig: {
+-      enabled: true,
++      enabled: false,
+       questionCount: 3,
+       customInstructions: ''
+     },
+diff --git a/frontend/src/views/knowledge/components/UploadConfirmDialog.vue b/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
+index ba04d3b..d5e2e5f 100644
+--- a/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
++++ b/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
+@@ -1286,7 +1286,7 @@ function initFromKbInfo(kb: any) {
+       language: kb.asr_config?.language || '',
+     },
+     questionGenerationConfig: {
+-      enabled: kb.question_generation_config?.enabled ?? true,
++      enabled: kb.question_generation_config?.enabled ?? false,
+       questionCount: kb.question_generation_config?.question_count || 3,
+       customInstructions: kb.question_generation_config?.custom_instructions || '',
+     },
 diff --git a/internal/agent/tools/data_analysis.go b/internal/agent/tools/data_analysis.go
 index 46cfb44..3a6e490 100644
 --- a/internal/agent/tools/data_analysis.go

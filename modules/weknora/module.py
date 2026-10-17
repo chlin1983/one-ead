@@ -113,12 +113,17 @@ def apply_6gb_preset(request: Request) -> dict:
 @router.post("/build/frontend")
 def trigger_frontend_build(request: Request) -> dict:
     _verify_local_request(request)
+    if manager._build_status.get("building"):
+        return {"ok": False, "message": "Frontend build is already in progress"}
     manager.run_frontend_build()
     return {"ok": True, "message": "Frontend build started in background"}
 
 
 @router.get("/ollama/check")
-def check_ollama(url: str = "") -> dict:
+def check_ollama(request: Request, url: str = "") -> dict:
+    _verify_local_request(request)
+    if url and not manager.is_safe_ollama_url(url):
+        raise HTTPException(400, "SSRF Protection: Only local loopback Ollama endpoints (127.0.0.1 / localhost) may be probed.")
     return manager.check_ollama(url if url else None)
 
 

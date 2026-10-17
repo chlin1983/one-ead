@@ -63,6 +63,13 @@
     <main class="wk-stage">
       <!-- Active Service View (Embedded Iframe) -->
       <div class="iframe-container" id="iframeWrap" hidden>
+        <div class="wk-loader-overlay" id="iframeLoader">
+          <div class="wk-loader-card">
+            <div class="wk-spinner"></div>
+            <div class="wk-loader-title">Connecting to WeKnora</div>
+            <div class="wk-loader-subtitle">Loading local SQLite RAG &amp; knowledge workspace…</div>
+          </div>
+        </div>
         <iframe id="serviceFrame" title="WeKnora" allow="clipboard-read; clipboard-write; microphone; camera; fullscreen"></iframe>
       </div>
 

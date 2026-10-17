@@ -20,6 +20,46 @@ if (-not (Test-Path "$RepoDir\cmd\server\main.go")) {
     exit 1
 }
 
+$PinnedCommit = "2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5"
+$PatchFile = Join-Path $ModuleDir "patches\weknora_lite.patch"
+
+# Verify upstream revision
+Push-Location $RepoDir
+try {
+    $CurrentCommit = (git rev-parse HEAD 2>$null).Trim()
+    if ($CurrentCommit -ne $PinnedCommit) {
+        Write-Warning "Repository commit ($CurrentCommit) differs from pinned revision ($PinnedCommit)."
+    } else {
+        Write-Host "[INFO] Upstream revision verified: $PinnedCommit" -ForegroundColor Green
+    }
+
+    # Strict patch check
+    if (-not (Test-Path $PatchFile)) {
+        Write-Error "Required patch file not found at $PatchFile"
+        exit 1
+    }
+
+    git apply --ignore-whitespace --reverse --check $PatchFile 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[INFO] WeKnora Lite standalone patches are already applied." -ForegroundColor Green
+    } else {
+        git apply --ignore-whitespace --check $PatchFile 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[INFO] Cleanly applying WeKnora Lite standalone patches..." -ForegroundColor Cyan
+            git apply --ignore-whitespace $PatchFile
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Failed to apply WeKnora Lite patches! Aborting build."
+                exit 1
+            }
+        } else {
+            Write-Error "WeKnora Lite patch cannot be cleanly applied to current checkout! It is neither applied nor cleanly applicable."
+            exit 1
+        }
+    }
+} finally {
+    Pop-Location
+}
+
 # 1. Frontend
 Write-Host "[1/3] Building frontend assets..." -ForegroundColor Yellow
 if (Get-Command npm -ErrorAction SilentlyContinue) {
@@ -28,7 +68,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     } else {
         Push-Location "$RepoDir\frontend"
         try {
-            npm install --prefer-offline
+            npm install --prefer-offline --ignore-scripts
             npm run build
         } finally {
             Pop-Location
@@ -68,6 +108,16 @@ try {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n=== Build Succeeded! ===" -ForegroundColor Green
         Write-Host "Binary: $TargetBinary`n"
+        $BuildInfo = @{
+            build_time    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            pinned_commit = $PinnedCommit
+            actual_commit = $CurrentCommit
+            patch_file    = "weknora_lite.patch"
+            edition       = "lite"
+        }
+        $BuildInfoJson = Join-Path $ModuleDir "build_info.json"
+        $BuildInfo | ConvertTo-Json | Set-Content $BuildInfoJson
+        Write-Host "[INFO] Build metadata recorded at $BuildInfoJson" -ForegroundColor Cyan
     } else {
         Write-Error "Go build failed with exit code $LASTEXITCODE."
     }
