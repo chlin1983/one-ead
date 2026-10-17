@@ -18,6 +18,7 @@ const el = {
   btnToggleConfig: document.getElementById("btnToggleConfig"),
   btnToggleLogs: document.getElementById("btnToggleLogs"),
   iframeWrap: document.getElementById("iframeWrap"),
+  iframeLoader: document.getElementById("iframeLoader"),
   dashboardWrap: document.getElementById("dashboardWrap"),
   serviceFrame: document.getElementById("serviceFrame"),
   tiersGrid: document.getElementById("tiersGrid"),
@@ -45,6 +46,19 @@ const el = {
   btnApply6gbPreset: document.getElementById("btnApply6gbPreset"),
   btnSaveConfig: document.getElementById("btnSaveConfig"),
 };
+
+// Dismiss iframe loading overlay smoothly once WeKnora service page has loaded
+if (el.serviceFrame) {
+  el.serviceFrame.addEventListener("load", () => {
+    if (el.iframeLoader) {
+      el.iframeLoader.classList.add("fade-out");
+    }
+  });
+  // Safety timeout: never leave loading overlay indefinitely
+  setTimeout(() => {
+    if (el.iframeLoader) el.iframeLoader.classList.add("fade-out");
+  }, 4000);
+}
 
 async function fetchStatus() {
   try {
@@ -93,7 +107,11 @@ function renderStatus(s) {
     if (el.iframeWrap.hidden) {
       el.iframeWrap.hidden = false;
       el.dashboardWrap.hidden = true;
-      el.serviceFrame.src = s.service_url || "http://127.0.0.1:8082";
+      if (el.iframeLoader) el.iframeLoader.classList.remove("fade-out");
+      const targetUrl = s.service_url || "http://127.0.0.1:8082";
+      if (!el.serviceFrame.src || el.serviceFrame.src === "about:blank" || !el.serviceFrame.src.includes(":8082")) {
+        el.serviceFrame.src = targetUrl;
+      }
     }
   } else {
     el.iframeWrap.hidden = true;

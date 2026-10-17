@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import atexit
 import collections
+import ipaddress
 import json
 import os
 import re
@@ -20,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import urllib.error
+import urllib.parse
 import urllib.request
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -260,14 +262,64 @@ def check_port(port: int, host: str = "127.0.0.1") -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+_tool_cache: Dict[str, tuple[bool, float]] = {}
+_ollama_cache: Dict[str, tuple[Dict[str, Any], float]] = {}
+
+
 def check_tool(cmd: str) -> bool:
-    return shutil.which(cmd) is not None
+    now = time.time()
+    cached = _tool_cache.get(cmd)
+    if cached and (now - cached[1] < 30.0):
+        return cached[0]
+    result = shutil.which(cmd) is not None
+    _tool_cache[cmd] = (result, now)
+    return result
 
 
-def check_ollama(url: Optional[str] = None) -> Dict[str, Any]:
+def is_safe_ollama_url(url: str) -> bool:
+    """Validates that an Ollama URL strictly points to local loopback to prevent SSRF."""
+    if not url:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname_clean = hostname.lower().strip("[]")
+        if hostname_clean in ("127.0.0.1", "localhost", "::1"):
+            return True
+        try:
+            ip = ipaddress.ip_address(hostname_clean)
+            return ip.is_loopback
+        except ValueError:
+            return False
+    except Exception:
+        return False
+
+
+def check_ollama(url: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
     if not url:
         cfg = read_env()
         url = cfg.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    now = time.time()
+    if not force_refresh:
+        cached = _ollama_cache.get(url)
+        if cached and (now - cached[1] < 15.0):
+            return cached[0]
+
+    # Enforce loopback check to prevent SSRF
+    if not is_safe_ollama_url(url):
+        res = {
+            "available": False,
+            "url": url,
+            "models": [],
+            "error": "SSRF Protection: Only local loopback Ollama instances (127.0.0.1/localhost) may be probed."
+        }
+        _ollama_cache[url] = (res, now)
+        return res
     
     endpoint = f"{url.rstrip('/')}/api/tags"
     try:
@@ -275,19 +327,23 @@ def check_ollama(url: Optional[str] = None) -> Dict[str, Any]:
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             models = [m.get("name") for m in data.get("models", [])]
-            return {
+            res = {
                 "available": True,
                 "url": url,
                 "models": models,
                 "count": len(models)
             }
+            _ollama_cache[url] = (res, now)
+            return res
     except Exception as exc:
-        return {
+        res = {
             "available": False,
             "url": url,
             "models": [],
             "error": str(exc)
         }
+        _ollama_cache[url] = (res, now)
+        return res
 
 
 def ensure_ollama_running(url: Optional[str] = None) -> bool:
@@ -570,31 +626,47 @@ def run_frontend_build() -> None:
         frontend_dir = REPO_DIR / "frontend"
         try:
             append_log("[Build] Starting frontend build...")
-            proc = subprocess.Popen(
-                ["npm", "install", "--prefer-offline"],
-                cwd=str(frontend_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                shell=True,
-                creationflags=_NO_WINDOW,
-            )
-            for line in proc.stdout:
-                _build_status["log"].append(line.rstrip())
-            proc.wait()
+            npm_cmd = shutil.which("npm.cmd") if os.name == "nt" else shutil.which("npm")
+            if not npm_cmd:
+                npm_cmd = shutil.which("npm")
+            if not npm_cmd:
+                raise RuntimeError("npm executable not found in PATH.")
 
+            node_modules = frontend_dir / "node_modules"
+            if not node_modules.exists():
+                append_log("[Build] node_modules not present, installing with --ignore-scripts...")
+                proc = subprocess.Popen(
+                    [npm_cmd, "install", "--prefer-offline", "--ignore-scripts"],
+                    cwd=str(frontend_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    shell=False,
+                    creationflags=_NO_WINDOW,
+                )
+                for line in proc.stdout:
+                    _build_status["log"].append(line.rstrip())
+                proc.wait()
+                if proc.returncode != 0:
+                    raise RuntimeError(f"npm install failed with exit code {proc.returncode}")
+            else:
+                append_log("[Build] node_modules already exists. Skipping npm install to protect against script execution.")
+
+            append_log("[Build] Compiling frontend bundle...")
             proc2 = subprocess.Popen(
-                ["npm", "run", "build"],
+                [npm_cmd, "run", "build"],
                 cwd=str(frontend_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                shell=True,
+                shell=False,
                 creationflags=_NO_WINDOW,
             )
             for line in proc2.stdout:
                 _build_status["log"].append(line.rstrip())
             proc2.wait()
+            if proc2.returncode != 0:
+                raise RuntimeError(f"npm run build failed with exit code {proc2.returncode}")
 
             dist = frontend_dir / "dist"
             web_dir = REPO_DIR / "web"

@@ -24,12 +24,48 @@ if not exist "%REPO_DIR%\cmd\server\main.go" (
     exit /b 1
 )
 
-:: Apply Lite Mode Patches (Offline DocExtractor, AutoAuth, SQLite) if present
-if exist "%MODULE_DIR%\patches\weknora_lite.patch" (
-    git apply --check "%MODULE_DIR%\patches\weknora_lite.patch" >nul 2>&1
+set PINNED_COMMIT=2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5
+set PATCH_FILE=%MODULE_DIR%\patches\weknora_lite.patch
+
+:: Verify upstream revision
+set CURRENT_COMMIT=unknown
+for /f %%i in ('git rev-parse HEAD 2^>nul') do set CURRENT_COMMIT=%%i
+if not "!CURRENT_COMMIT!"=="%PINNED_COMMIT%" (
+    echo [WARN] Repository commit !CURRENT_COMMIT! differs from pinned revision %PINNED_COMMIT%
+) else (
+    echo [INFO] Upstream revision verified: %PINNED_COMMIT%
+)
+
+:: Verify and apply Lite patches strictly
+if not exist "%PATCH_FILE%" (
+    echo [ERROR] Required patch file not found at "%PATCH_FILE%".
+    exit /b 1
+)
+
+git apply --ignore-whitespace --reverse --check "%PATCH_FILE%" >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [INFO] WeKnora Lite standalone patches are already applied.
+    set PATCH_APPLIED=1
+) else (
+    git apply --ignore-whitespace --check "%PATCH_FILE%" >nul 2>&1
     if !errorlevel! equ 0 (
-        echo [INFO] Applying WeKnora Lite standalone patches...
-        git apply "%MODULE_DIR%\patches\weknora_lite.patch"
+        echo [INFO] Cleanly applying WeKnora Lite standalone patches...
+        git apply --ignore-whitespace "%PATCH_FILE%"
+        if !errorlevel! neq 0 (
+            echo [ERROR] Failed to apply WeKnora Lite patches! Aborting build.
+            exit /b 1
+        )
+        set PATCH_APPLIED=1
+    ) else (
+        echo.
+        echo [ERROR] ===============================================================
+        echo [ERROR] WeKnora Lite patch cannot be cleanly applied to current checkout!
+        echo [ERROR] It is neither applied nor cleanly applicable.
+        echo [ERROR] Pinned commit: %PINNED_COMMIT%
+        echo [ERROR] Current commit: !CURRENT_COMMIT!
+        echo [ERROR] Build halted to prevent creating an unpatched/vulnerable binary.
+        echo [ERROR] ===============================================================
+        exit /b 1
     )
 )
 
@@ -48,7 +84,7 @@ where npm >nul 2>nul
 if %errorlevel% equ 0 (
     echo [INFO] Building frontend SPA...
     cd /d "%REPO_DIR%\frontend"
-    call npm install --prefer-offline
+    call npm install --prefer-offline --ignore-scripts
     call npm run build
     cd /d "%REPO_DIR%"
     if exist "%REPO_DIR%\frontend\dist" (
@@ -93,6 +129,17 @@ if %errorlevel% equ 0 (
     echo [SUCCESS] WeKnora Lite compiled successfully!
     echo Binary: %MODULE_DIR%\WeKnora-lite.exe
     echo =======================================================
+    (
+        echo {
+        echo   "build_date": "%date%",
+        echo   "build_time": "%time%",
+        echo   "pinned_commit": "%PINNED_COMMIT%",
+        echo   "actual_commit": "!CURRENT_COMMIT!",
+        echo   "patch_file": "weknora_lite.patch",
+        echo   "edition": "lite"
+        echo }
+    ) > "%MODULE_DIR%\build_info.json"
+    echo [INFO] Build metadata recorded at "%MODULE_DIR%\build_info.json".
     exit /b 0
 ) else (
     echo.

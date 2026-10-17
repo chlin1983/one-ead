@@ -121,37 +121,35 @@ Navigate to [http://127.0.0.1:8082](http://127.0.0.1:8082).
 
 ---
 
-## 5. Security, Offline Isolation & Zero Data Leak Guarantee
+## 5. Security & Privacy Architecture
 
-WeKnora Lite is specifically engineered to run in **100% offline, air-gapped engineering environments**. No engineering documentation, proprietary acoustic measurements, or queries ever leave your local machine.
+WeKnora Lite is configured with a **local-first architecture**: by default, it uses embedded local storage (SQLite), in-memory task queues, and local Ollama on loopback (`127.0.0.1`). External connectivity depends on the configured endpoints and enabled features. Review network access, endpoint configurations, and security settings before processing confidential documents.
 
-### Component-by-Component Isolation Checklist
+### Local-First Component Architecture
 
-| Component | Target / Driver | Network Status |
+| Component | Default Target / Driver | Network Scope |
 | :--- | :--- | :--- |
-| **LLM Inference** | `http://127.0.0.1:11434` (`qwen3:8b` / `qwen2.5`) | **100% Local** (Local Ollama loopback only) |
-| **Vector Embeddings** | `http://127.0.0.1:11434` (`nomic-embed-text` / `bge-m3`) | **100% Local** (Local Ollama loopback only) |
-| **Document Extraction** | [`scripts/doc_extractor.py`](./scripts/doc_extractor.py) (PyMuPDF, docx, openpyxl, pptx) | **100% Local** (Child process, zero Docker, zero external APIs) |
-| **Relational Database** | [`data/weknora.db`](./data/weknora.db) | **100% Local** (Embedded SQLite with FTS5) |
-| **Vector Database** | `sqlite-vec` extension inside `data/weknora.db` | **100% Local** (No Milvus, Pinecone, or cloud vector DBs) |
-| **Document Storage** | [`data/files/`](./data/files) | **100% Local** (Local disk storage, zero S3 or MinIO) |
-| **Task / Stream Queue** | In-Memory (`STREAM_MANAGER_TYPE=memory`) | **100% Local** (Zero Redis or external message brokers) |
-| **Frontend Web Assets** | [`WeKnora/web/assets`](./WeKnora/web/assets) | **100% Local** (Zero external CDNs, zero Google Fonts) |
-| **Telemetry & Tracking** | Disabled | **Zero phone-home pings, zero telemetry, zero update checks** |
+| **LLM Inference** | `http://127.0.0.1:11434` (`qwen3:8b` / `qwen2.5`) | **Local Loopback** (Local Ollama daemon) |
+| **Vector Embeddings** | `http://127.0.0.1:11434` (`nomic-embed-text` / `bge-m3`) | **Local Loopback** (Local Ollama daemon) |
+| **Document Extraction** | [`scripts/doc_extractor.py`](./scripts/doc_extractor.py) (PyMuPDF, python-docx, openpyxl, python-pptx) | **Local Subprocess** (Direct file parsing, zero external APIs) |
+| **Relational Database** | [`data/weknora.db`](./data/weknora.db) | **Local Embedded** (SQLite with FTS5) |
+| **Vector Index** | `sqlite-vec` extension inside `data/weknora.db` | **Local Embedded** (Zero external vector services) |
+| **File Storage** | [`data/files/`](./data/files) | **Local Disk** (Local directory storage) |
+| **Task / Stream Queue** | In-Memory (`STREAM_MANAGER_TYPE=memory`) | **Local Process Memory** (Zero Redis dependency) |
+| **Frontend Web Assets** | [`WeKnora/web/assets`](./WeKnora/web/assets) | **Local Static** (Embedded assets) |
+| **Telemetry & Tracking** | Disabled | **Zero telemetry, zero update checks** |
 
-### Verified Operating System Sockets (`netstat`)
+### Security & Isolation Controls
 
-When inspected via Windows networking tools (`netstat -ano`), the `WeKnora-lite.exe` process maintains connections **only** on loopback:
+1. **Origin & CSRF Defense**: All modifying portal management APIs (`/start`, `/stop`, `/restart`, `/config`, `/build/frontend`) verify caller headers to ensure requests originate exclusively from the local portal (`127.0.0.1` / `localhost`) and reject cross-site requests (`Sec-Fetch-Site: cross-site`).
+2. **Auto-Setup Authentication Barrier**: Standalone auto-setup requires an internal high-entropy setup token (`WEKNORA_LITE_SETUP_TOKEN`) generated at startup, preventing unauthorized administrative token minting on port 8082.
+3. **Configuration Masking & Allowlist**: Status responses strictly filter out sensitive credentials (`OPENAI_API_KEY`, `JWT_SECRET`, `SYSTEM_AES_KEY`). Configuration updates are validated against a strict key allowlist, rejecting CRLF injection and host rebound attempts.
+4. **SSRF Mitigation**: Health check endpoints and reverse proxies strictly validate target URLs against loopback allowlists (`127.0.0.1`, `localhost`).
+5. **Deterministic Builds**: Build scripts pin the upstream WeKnora revision (`2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5`), enforce clean patch application, and record build metadata.
 
-```
-  TCP    127.0.0.1:8082         0.0.0.0:0              LISTENING       (Local web UI server)
-  TCP    127.0.0.1:8082         127.0.0.1:<port>       ESTABLISHED     (Local browser connection)
-  TCP    127.0.0.1:<port>       127.0.0.1:11434        ESTABLISHED     (Local Ollama communication)
-```
-No sockets connect to any external IP, domain, LAN address, or cloud server.
+### Outbound Network Actions to Review
 
-### Only User-Triggered Actions That Could Attempt External Access
-
-The application will only attempt an outbound network connection under two specific, deliberate user actions:
-1. **Importing via "Web URL"**: If you click *Add Document* and explicitly enter an external website URL (e.g. `https://example.com`), WeKnora will attempt to scrape that page. When only uploading local files (`.pdf`, `.docx`, `.xlsx`, `.md`, etc.), this is never invoked.
-2. **Adding Cloud API Keys**: If you manually open *Settings -> Models* and input third-party cloud API keys (e.g. OpenAI, DeepSeek, or Tencent Cloud), it will attempt to contact those providers. As long as you use local models via Ollama, no cloud keys are present or needed.
+Outbound network traffic may be initiated under the following scenarios:
+1. **Configuring External LLM / Embedding Providers**: If you configure remote endpoints or cloud API keys (e.g. OpenAI, DeepSeek, or remote Ollama servers) in `.env.lite` or Settings, model inference requests will travel to those configured hosts.
+2. **Importing via "Web URL"**: If you use the *Add Document* dialog and enter an external HTTP/HTTPS URL, WeKnora will attempt to fetch and parse that web resource.
+3. **Installing Dependencies during Build**: Running the optional frontend rebuild script will invoke `npm install` (executed with `--ignore-scripts`). Default pre-built static assets are bundled locally and do not require internet access at runtime.
