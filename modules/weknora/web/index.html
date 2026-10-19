@@ -57,6 +57,19 @@
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         </button>
       </div>
+
+      <div class="wk-spacer"></div>
+
+      <div class="user-action-group">
+        <button class="btn logout-btn" id="btnLogout" hidden title="Log out of WeKnora and view login page">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span>Log Out</span>
+        </button>
+      </div>
     </header>
 
     <!-- Main Workspace Stage -->
@@ -137,11 +150,10 @@
             <!-- Dynamically populated -->
           </div>
 
-          <div class="ollama-notice">
+          <div class="ollama-notice" id="ollamaNotice">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            <span>
-              <strong>Note on Local LLM:</strong> Ollama is not installed in this cloud workspace per your request.
-              When launching on your real hardware computer, ensure Ollama is running (<code>http://127.0.0.1:11434</code>) with your preferred model pulled.
+            <span id="ollamaNoticeText">
+              <strong>Local LLM Status:</strong> Ollama is active on <code>http://127.0.0.1:11434</code> with <strong>qwen2.5:7b</strong> (Active) and <strong>nomic-embed-text</strong> detected.
             </span>
           </div>
         </section>

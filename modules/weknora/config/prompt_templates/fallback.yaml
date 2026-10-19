@@ -22,17 +22,17 @@ templates:
         description: "回答できないことを丁寧に伝え、提案を提示するメッセージ"
     default: true
     content: |
-      Sorry, I could not find content directly related to your question in the knowledge base.
+      Not specified in the provided document(s).
 
-      You can try:
-      1. Rephrasing your question in a different way
-      2. Providing more specific information
-      3. Consulting a professional in the relevant field
+      I could not find content directly related to your question in the uploaded knowledge base documents.
 
-      If you have other questions, I'm happy to continue helping you.
+      Suggestions:
+      1. Verify that the relevant PDF document is uploaded and indexed in this knowledge base.
+      2. Check if the question uses the exact terminology or acronyms found in the document.
+      3. Try rephrasing with specific keywords from the document.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      ## Language Requirement
+      - ALL internal thinking and responses MUST be strictly in English (Strictly NO Chinese/Mandarin).
 
   - id: "polite_fallback"
     name: "Polite Fallback"
@@ -106,14 +106,11 @@ templates:
 
       {{kb_documents}}
 
-      Important Notes:
-      1. If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need)
-      2. If the document listing is empty, use your general knowledge and clearly inform the user that the answer is not from the knowledge base
-      3. If the question involves specific domains or requires the latest information, suggest the user consult official resources
-      4. Maintain accuracy and objectivity in the response
-
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Important Grounding Rules:
+      1. State explicitly: "Not specified in the provided document(s): No relevant information was found in the uploaded documents for this query."
+      2. Strictly DO NOT use general training knowledge or fabricate an answer.
+      3. If the document listing above is available, you may list which document titles exist in the knowledge base, but do not invent their contents.
+      4. ALL internal thinking and responses MUST be strictly in English (Strictly NO Chinese/Mandarin).
 
       User question: {{query}}
 
@@ -142,12 +139,10 @@ templates:
       {{kb_documents}}
 
       ## Response Requirements
-      - Treat the document listing as metadata: it can identify titles or suggest relevant documents, but cannot support a summary of unread contents or detailed factual claims.
-      - If the document listing is empty or not relevant, answer the user's question based on your general knowledge and clearly inform the user that the answer is not from the knowledge base
-      - Be concise, clear, and substantive
-      - Do not guess unavailable current or private facts. Explain the specific evidence gap when it affects the answer.
-      - Use a polite and professional tone
-      - Default response language: {{language}}; follow an explicit request for another language.
+      - State explicitly: "Not specified in the provided document(s): No relevant information regarding this query was found in the uploaded knowledge base documents."
+      - Strictly DO NOT use general training knowledge or guess, fabricate, or extrapolate an answer.
+      - If relevant document titles are shown in {{kb_documents}}, you may mention which document titles are present, but do not invent their unread contents.
+      - ALL internal thinking (<think>...</think>) and response MUST be strictly in English (Strictly NO Chinese/Mandarin).
 
       ## User's question:
       {{query}}

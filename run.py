@@ -126,7 +126,8 @@ def main() -> None:
 
     # If the port is already in use by an existing instance, terminate it so that
     # any new git pull changes, updated plugins, and dependencies are loaded fresh.
-    if _port_in_use(args.host, args.port):
+    was_busy = _port_in_use(args.host, args.port)
+    if was_busy:
         pid = _find_pid_on_port(args.port)
         if pid:
             print(f"[One EAD] Releasing port {args.port} (terminating previous instance PID {pid})...")
@@ -134,6 +135,18 @@ def main() -> None:
             time.sleep(1.0)
         else:
             print(f"[One EAD] Port {args.port} is busy, attempting to start...")
+
+    # Cleanly ensure WeKnora Lite service on port 8082 is active with latest configs.
+    # When restarting One EAD, restart WeKnora as well so both services remain in sync.
+    try:
+        from modules.weknora import manager as weknora_manager
+        if args.restart or was_busy:
+            print("[One EAD] Ensuring WeKnora Lite service is freshly synchronized...")
+            weknora_manager.restart_service()
+        else:
+            weknora_manager.start_service()
+    except Exception as exc:
+        print(f"[One EAD] Note: Could not auto-start WeKnora Lite: {exc}")
 
     print(f"One EAD -> {url}")
     if not args.no_browser:

@@ -165,6 +165,37 @@
   border-radius: var(--radius-sm);
 }
 
+.wk-spacer {
+  flex: 1;
+}
+
+.user-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn.logout-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s var(--ease);
+  cursor: pointer;
+}
+
+.btn.logout-btn:hover {
+  background: rgba(229, 72, 77, 0.08);
+  border-color: rgba(229, 72, 77, 0.35);
+  color: var(--danger);
+}
+
 /* Stage Area */
 .wk-stage {
   flex: 1;

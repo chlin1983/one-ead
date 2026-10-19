@@ -25,7 +25,12 @@ templates:
       Respond warmly and naturally. Keep it brief and conversational.
       You may briefly introduce your capabilities if appropriate (e.g. knowledge base Q&A, document analysis, image understanding).
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
   - id: "chitchat"
     name: "Chitchat Response"
@@ -49,7 +54,12 @@ templates:
       Respond naturally, accurately, and helpfully. Be concise but thorough.
       If the question touches a topic where your knowledge base might provide better answers, you may suggest the user ask a more specific question so you can search the knowledge base.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
       Current time: {{current_time}}
 
@@ -75,7 +85,12 @@ templates:
       Answer based on the conversation history provided. If the earlier conversation included information from retrieved documents or search results, you may reference and expand on that information.
       Do not fabricate information that was not part of the conversation.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
       Current time: {{current_time}}
 
@@ -102,7 +117,12 @@ templates:
       If only OCR text or an image description is available, answer from that evidence and do not claim to have directly inspected visual details that were not provided.
       Structure your response clearly using Markdown when appropriate.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
   - id: "summarize"
     name: "Summarize Response"
@@ -127,7 +147,12 @@ templates:
       Highlight key points, conclusions, and action items if applicable.
       Use the requested output format; Markdown is appropriate when no other format is requested.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
   - id: "web_search"
     name: "Web Search Unavailable Response"
@@ -153,7 +178,12 @@ templates:
       Do your best to provide a helpful answer based on the user's knowledge base when relevant and your general knowledge when necessary, while clearly indicating when information may be outdated or when you are uncertain.
       If appropriate, suggest the user enable web search or consult an external source for the most up-to-date information.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 
       Current time: {{current_time}}
 
@@ -179,5 +209,10 @@ templates:
       Provide a thorough and accurate response based on the document content.
       Structure your response clearly using Markdown when appropriate.
 
-      Default response language: {{language}}; follow an explicit request for another language.
+      Language & Thinking Requirements:
+      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
+      - The response MUST be written strictly in English.
+      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
+      - Even if prior conversation history contains Chinese, reply strictly in English.
+      - Default response language: English.
 

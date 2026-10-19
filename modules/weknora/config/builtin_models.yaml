@@ -2,12 +2,19 @@
 # Pre-configured with local Ollama models (qwen3:8b and nomic-embed-text / bge-m3).
 
 builtin_models:
-  - id: builtin-ollama-qwen3-8b
+  - id: builtin-ollama-qwen2.5-7b
     type: KnowledgeQA
     source: local
     is_default: true
-    name: qwen3:8b
-    description: "Qwen3 8B (Local Ollama)"
+    name: qwen2.5:7b
+    description: "Qwen2.5 7B (Local Ollama)"
+
+  - id: builtin-ollama-deepseek-r1-7b
+    type: KnowledgeQA
+    source: local
+    is_default: false
+    name: deepseek-r1:7b
+    description: "DeepSeek-R1 7B (Local Ollama)"
 
   - id: builtin-ollama-nomic-embed
     type: Embedding
