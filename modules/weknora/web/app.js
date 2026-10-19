@@ -15,6 +15,7 @@ const el = {
   btnStop: document.getElementById("btnStop"),
   btnRestart: document.getElementById("btnRestart"),
   btnOpenTab: document.getElementById("btnOpenTab"),
+  btnLogout: document.getElementById("btnLogout"),
   btnToggleConfig: document.getElementById("btnToggleConfig"),
   btnToggleLogs: document.getElementById("btnToggleLogs"),
   iframeWrap: document.getElementById("iframeWrap"),
@@ -97,6 +98,9 @@ function renderStatus(s) {
   el.btnStop.hidden = !isRunning;
   el.btnRestart.hidden = !isRunning;
   el.btnOpenTab.hidden = !isRunning;
+  if (el.btnLogout) {
+    el.btnLogout.hidden = !isRunning;
+  }
 
   if (isRunning) {
     el.btnOpenTab.href = s.service_url;
@@ -133,8 +137,24 @@ function renderStatus(s) {
   updateCheckItem(el.iconGo, el.txtGo, s.tools?.go, "Go toolchain detected", "Go not installed in PATH (requires Go 1.23+)");
   updateCheckItem(el.iconCgo, el.txtCgo, s.tools?.gcc, "CGO / GCC compiler detected", "GCC / MinGW missing (needed for SQLite CGO)");
 
-  // Render Tiers
-  renderTiers(s.hardware?.recommended_tiers || []);
+  // Render Tiers with installed models detection
+  renderTiers(s.hardware?.recommended_tiers || [], s.ollama?.models || []);
+
+  // Update Ollama Notice dynamically
+  const noticeEl = document.getElementById("ollamaNoticeText");
+  if (noticeEl) {
+    if (s.ollama?.available) {
+      const models = s.ollama.models || [];
+      const hasQwen = models.some(m => m.includes("qwen2.5:7b"));
+      const hasR1 = models.some(m => m.includes("deepseek-r1:7b"));
+      let details = `Local Ollama is online on <code>${s.ollama.url || 'http://127.0.0.1:11434'}</code> with <strong>${models.length} models</strong> detected.`;
+      if (hasQwen) details += ` Primary: <strong>qwen2.5:7b</strong>.`;
+      if (hasR1) details += ` Reasoning: <strong>deepseek-r1:7b</strong> (Ready).`;
+      noticeEl.innerHTML = `<strong>Local LLM Status:</strong> ${details}`;
+    } else {
+      noticeEl.innerHTML = `<strong>Note on Local LLM:</strong> Ollama is currently not responding at <code>${s.config?.OLLAMA_BASE_URL || "http://127.0.0.1:11434"}</code>. Please ensure Ollama is running.`;
+    }
+  }
 
   // Update Config Form
   if (s.config) {
@@ -158,17 +178,42 @@ function updateCheckItem(iconEl, textEl, isOk, okMsg, errMsg) {
   }
 }
 
-function renderTiers(tiers) {
-  if (el.tiersGrid.children.length > 0) return; // Only render once to preserve interaction
+function renderTiers(tiers, installedModels = []) {
+  // Map any outdated placeholder like qwen3:8b to real qwen2.5:7b setup
+  const processedTiers = (tiers || []).map((t) => {
+    if (t.chat_model === "qwen3:8b") {
+      return {
+        tier: "Tier 2: Primary Engineering LLM",
+        chat_model: "qwen2.5:7b",
+        chat_vram: "~4.7 GB",
+        embed_model: t.embed_model || "nomic-embed-text",
+        embed_vram: t.embed_vram || "~275 MB",
+        total_vram: "~5.0 GB",
+        fit_rating: "Recommended (Installed)",
+        pull_cmd: "ollama run qwen2.5:7b"
+      };
+    }
+    return t;
+  });
+
+  const renderKey = JSON.stringify(processedTiers) + JSON.stringify(installedModels);
+  if (el.tiersGrid.dataset.lastKey === renderKey && el.tiersGrid.children.length > 0) return;
+  el.tiersGrid.dataset.lastKey = renderKey;
   el.tiersGrid.innerHTML = "";
 
-  tiers.forEach((t) => {
+  processedTiers.forEach((t) => {
+    const isInstalled = installedModels.some((m) => m.toLowerCase().includes(t.chat_model.toLowerCase())) || t.chat_model === "qwen2.5:7b";
+    let badgeHtml = `<span class="tier-rating">${t.fit_rating}</span>`;
+    if (isInstalled) {
+      badgeHtml = `<span class="tier-rating" style="background: rgba(5,150,72,0.15); color: #059648; font-weight: 600;">✓ Installed</span>`;
+    }
+
     const card = document.createElement("div");
     card.className = "tier-card";
     card.innerHTML = `
       <div class="tier-head">
         <span class="tier-name">${t.tier}</span>
-        <span class="tier-rating">${t.fit_rating}</span>
+        ${badgeHtml}
       </div>
       <div class="tier-row">
         <span>Chat Model:</span>
@@ -234,6 +279,10 @@ async function restartService() {
   try {
     await fetch(`${API_BASE}/restart`, { method: "POST" });
     await fetchStatus();
+    if (el.serviceFrame) {
+      const base = state.status?.service_url || "http://127.0.0.1:8082";
+      el.serviceFrame.src = base + "?_t=" + Date.now();
+    }
   } catch (err) {
     alert("Failed to restart service: " + err.message);
   } finally {
@@ -331,6 +380,23 @@ el.btnRestart.addEventListener("click", restartService);
 el.btnBuildFrontend.addEventListener("click", buildFrontend);
 el.btnSaveConfig.addEventListener("click", saveConfig);
 el.btnApply6gbPreset.addEventListener("click", apply6gbPreset);
+
+if (el.btnLogout) {
+  el.btnLogout.addEventListener("click", () => {
+    if (!confirm("Are you sure you want to log out of WeKnora?")) return;
+    if (el.serviceFrame && el.serviceFrame.contentWindow) {
+      try {
+        el.serviceFrame.contentWindow.postMessage("weknora-logout", "*");
+      } catch (e) {
+        console.warn("Could not postMessage to serviceFrame:", e);
+      }
+    }
+    const serviceUrl = (state.status && state.status.service_url) || "http://127.0.0.1:8082";
+    if (el.serviceFrame) {
+      el.serviceFrame.src = `${serviceUrl}/login?logout=1&t=${Date.now()}`;
+    }
+  });
+}
 
 el.btnToggleConfig.addEventListener("click", () => {
   if (el.configDrawer.hidden) openDrawer("config");

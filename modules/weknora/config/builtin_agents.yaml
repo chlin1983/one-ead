@@ -26,9 +26,9 @@ builtin_agents:
       agent_mode: "quick-answer"
       system_prompt_id: "default_kb"
       context_template_id: "default_context"
-      temperature: 0.7
+      temperature: 0.2
       max_completion_tokens: 0
-      web_search_enabled: true
+      web_search_enabled: false
       web_search_max_results: 5
       multi_turn_enabled: true
       history_turns: 5
@@ -37,13 +37,13 @@ builtin_agents:
       faq_priority_enabled: true
       faq_direct_answer_threshold: 0.9
       faq_score_boost: 1.2
-      embedding_top_k: 10
+      embedding_top_k: 5
       keyword_threshold: 0.3
-      vector_threshold: 0.5
-      rerank_top_k: 10
+      vector_threshold: 0.35
+      rerank_top_k: 3
       rerank_threshold: 0.3
-      enable_query_expansion: true
-      enable_rewrite: true
+      enable_query_expansion: false
+      enable_rewrite: false
       fallback_strategy: "model"
 
   - id: "builtin-smart-reasoning"

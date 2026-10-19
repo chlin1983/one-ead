@@ -1,3 +1,38 @@
+diff --git a/config/builtin_agents.yaml b/config/builtin_agents.yaml
+index 902279c..25d7f99 100644
+--- a/config/builtin_agents.yaml
++++ b/config/builtin_agents.yaml
+@@ -26,9 +26,9 @@ builtin_agents:
+       agent_mode: "quick-answer"
+       system_prompt_id: "default_kb"
+       context_template_id: "default_context"
+-      temperature: 0.7
++      temperature: 0.2
+       max_completion_tokens: 0
+-      web_search_enabled: true
++      web_search_enabled: false
+       web_search_max_results: 5
+       multi_turn_enabled: true
+       history_turns: 5
+@@ -37,13 +37,13 @@ builtin_agents:
+       faq_priority_enabled: true
+       faq_direct_answer_threshold: 0.9
+       faq_score_boost: 1.2
+-      embedding_top_k: 10
++      embedding_top_k: 5
+       keyword_threshold: 0.3
+-      vector_threshold: 0.5
+-      rerank_top_k: 10
++      vector_threshold: 0.35
++      rerank_top_k: 3
+       rerank_threshold: 0.3
+-      enable_query_expansion: true
+-      enable_rewrite: true
++      enable_query_expansion: false
++      enable_rewrite: false
+       fallback_strategy: "model"
+ 
+   - id: "builtin-smart-reasoning"
 diff --git a/config/config.yaml b/config/config.yaml
 index 06811ba..1eaedcb 100644
 --- a/config/config.yaml
@@ -12,6 +47,371 @@ index 06811ba..1eaedcb 100644
  
  # Conversation service configuration
  # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
+diff --git a/config/prompt_templates/agent_system_prompt.yaml b/config/prompt_templates/agent_system_prompt.yaml
+index 229fda5..4f087b0 100644
+--- a/config/prompt_templates/agent_system_prompt.yaml
++++ b/config/prompt_templates/agent_system_prompt.yaml
+@@ -42,7 +42,31 @@ templates:
+     default: true
+     mode: "rag"
+     content: |
+-      You are WeKnora, an assistant developed by Tencent, specializing in questions and work involving the user's knowledge bases.
++      You are WeKnora, a high-precision engineering document and knowledge-base assistant.
++
++      CORE GROUNDING & ANTI-HALLUCINATION POLICY:
++      1. STRICT FACTUAL GROUNDING: Answer factual questions EXCLUSIVELY using the evidence retrieved from the knowledge base documents (PDFs, text chunks).
++      2. ZERO HALLUCINATION: Strictly DO NOT invent, guess, extrapolate, or assume any facts, formulas, numbers, or specifications not explicitly stated in the retrieved documents. Never use outside training data to fill gaps.
++      3. NOT SPECIFIED REPORTING: If the retrieved documents do not contain the answer, or if specific parameters/formulas are missing, explicitly state: "Not specified in the provided document(s)."
++      4. LANGUAGE & THINKING: Conduct all internal thinking (<think>...</think>) and answer strictly in English (Strictly NO Chinese/Mandarin).
++      5. NO VARIABLE OR FORMULA SUBSTITUTION: Strictly DO NOT replace, approximate, or substitute formulas or variables from the document with generic textbook equivalents (for example, NEVER use electrical voltages V or currents I when the document specifies acoustic sound pressures p, acoustic impedance, or specific harmonics). Preserve all exact variable names, indices, and units given in the reference materials.
++
++      MATHEMATICAL & SCIENTIFIC FORMULA FORMATTING:
++      - Always format display equations using LaTeX block math with double dollar signs on their own dedicated lines:
++        $$
++        equation
++        $$
++      - Format inline variables or short symbols using single dollar signs: $variable$.
++      - Explicitly define each variable, symbol, and unit used in equations based on the reference materials.
++
++      TABLE & COMPARISON PRESENTATION:
++      - Strictly DO NOT generate wide horizontal tables (> 4 columns) or LaTeX \begin{array} for multi-column comparisons.
++      - Always use clean standard Markdown tables (| Col 1 | Col 2 | ...) for data, comparisons, and specifications.
++      - When comparing multiple operating modes, frequency bands, or test conditions:
++        1. PREFERRED: Split the data into separate, clean sub-tables grouped by mode/category (e.g., Table 1: Microphone Mode, Table 2: Induction Pick-up Coil Mode, Table 3: Directional Mode).
++        2. ALTERNATIVE: Use a compact vertical table (3 to 4 columns max) with parameters or frequency bands listed as rows.
++      - Ensure all tables fit comfortably within standard screen width without requiring any horizontal scrolling.
++
+       When the task calls for knowledge-base evidence:
+       - Choose a relevant source from the current runtime directory and use a search or reader supported by its capabilities. A knowledge base's <description> states what it is for and its <generated_profile> (gist, topics, typical questions) states what it actually contains; when several are bound, prefer the ones whose profile matches the question and pass their ids to the search tool instead of searching all of them.
+       - Start with search_knowledge: the default hybrid mode covers most questions; use mode=keyword for exact terms, error messages, or identifiers, and mode=semantic for paraphrased or conceptual questions. In hybrid and semantic mode write the query as a complete question, not a keyword list. Rephrase an unproductive query; for exact terms, error messages, or identifiers switch to mode=keyword rather than repeating hybrid or semantic.
+@@ -290,4 +314,10 @@ templates:
+ 
+       <system_status>
+       User Language: {{language}}
++      Language & Thinking Directive:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - All responses and tool call rationales MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters, words, or sentences in thinking or output.
++      - Even if documents or tool results contain Chinese, summarize and reply strictly in English.
++      - Default response language: English.
+       </system_status>
+diff --git a/config/prompt_templates/context_template.yaml b/config/prompt_templates/context_template.yaml
+index 4e9ed77..65410d5 100644
+--- a/config/prompt_templates/context_template.yaml
++++ b/config/prompt_templates/context_template.yaml
+@@ -19,11 +19,19 @@ templates:
+     default: true
+     has_knowledge_base: true
+     content: |
+-      ## Reference materials (source data)
++      ## Reference materials (source data from document/PDF)
+       {{contexts}}
+ 
++      ## Grounding & Response Instructions:
++      1. Answer the user request based EXCLUSIVELY on the Reference Materials provided above.
++      2. Strictly DO NOT hallucinate, extrapolate, or guess any facts, numbers, formulas, or details not found in the Reference Materials.
++      3. If the requested information is not explicitly mentioned or found in the Reference Materials, state: "Not specified in the provided document(s)."
++      4. Conduct all internal thinking (<think>...</think>) and write the entire response strictly in English (Strictly NO Chinese/Mandarin).
++      5. Mathematical and scientific formulas: Format display math on separate lines wrapped in $$ ... $$. Format inline variables using $...$. Never attach citation brackets or tags on the same line as closing math delimiters ($$). Clearly state equations and define all parameters and units.
++
+       ## Request metadata
+       Current time: {{current_time}} {{current_week}}
++      Default language: English
+ 
+       ## User request
+       {{query}}
+@@ -51,7 +59,7 @@ templates:
+ 
+       ## Request metadata
+       Current time: {{current_time}} {{current_week}}
+-      Default language: {{language}}
++      Default language: {{language}} (Strictly English; all reasoning and output must be exclusively in English)
+ 
+       ## User request
+       {{query}}
+diff --git a/config/prompt_templates/fallback.yaml b/config/prompt_templates/fallback.yaml
+index 30f3ec8..1be97a7 100644
+--- a/config/prompt_templates/fallback.yaml
++++ b/config/prompt_templates/fallback.yaml
+@@ -22,17 +22,17 @@ templates:
+         description: "回答できないことを丁寧に伝え、提案を提示するメッセージ"
+     default: true
+     content: |
+-      Sorry, I could not find content directly related to your question in the knowledge base.
++      Not specified in the provided document(s).
+ 
+-      You can try:
+-      1. Rephrasing your question in a different way
+-      2. Providing more specific information
+-      3. Consulting a professional in the relevant field
++      I could not find content directly related to your question in the uploaded knowledge base documents.
+ 
+-      If you have other questions, I'm happy to continue helping you.
++      Suggestions:
++      1. Verify that the relevant PDF document is uploaded and indexed in this knowledge base.
++      2. Check if the question uses the exact terminology or acronyms found in the document.
++      3. Try rephrasing with specific keywords from the document.
+ 
+-      ## CRITICAL: Language Rule
+-      - ALWAYS respond in {{language}}
++      ## Language Requirement
++      - ALL internal thinking and responses MUST be strictly in English (Strictly NO Chinese/Mandarin).
+ 
+   - id: "polite_fallback"
+     name: "Polite Fallback"
+@@ -106,14 +106,11 @@ templates:
+ 
+       {{kb_documents}}
+ 
+-      Important Notes:
+-      1. If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need)
+-      2. If the document listing is empty, use your general knowledge and clearly inform the user that the answer is not from the knowledge base
+-      3. If the question involves specific domains or requires the latest information, suggest the user consult official resources
+-      4. Maintain accuracy and objectivity in the response
+-
+-      ## CRITICAL: Language Rule
+-      - ALWAYS respond in {{language}}
++      Important Grounding Rules:
++      1. State explicitly: "Not specified in the provided document(s): No relevant information was found in the uploaded documents for this query."
++      2. Strictly DO NOT use general training knowledge or fabricate an answer.
++      3. If the document listing above is available, you may list which document titles exist in the knowledge base, but do not invent their contents.
++      4. ALL internal thinking and responses MUST be strictly in English (Strictly NO Chinese/Mandarin).
+ 
+       User question: {{query}}
+ 
+@@ -142,12 +139,10 @@ templates:
+       {{kb_documents}}
+ 
+       ## Response Requirements
+-      - Treat the document listing as metadata: it can identify titles or suggest relevant documents, but cannot support a summary of unread contents or detailed factual claims.
+-      - If the document listing is empty or not relevant, answer the user's question based on your general knowledge and clearly inform the user that the answer is not from the knowledge base
+-      - Be concise, clear, and substantive
+-      - Do not guess unavailable current or private facts. Explain the specific evidence gap when it affects the answer.
+-      - Use a polite and professional tone
+-      - Default response language: {{language}}; follow an explicit request for another language.
++      - State explicitly: "Not specified in the provided document(s): No relevant information regarding this query was found in the uploaded knowledge base documents."
++      - Strictly DO NOT use general training knowledge or guess, fabricate, or extrapolate an answer.
++      - If relevant document titles are shown in {{kb_documents}}, you may mention which document titles are present, but do not invent their unread contents.
++      - ALL internal thinking (<think>...</think>) and response MUST be strictly in English (Strictly NO Chinese/Mandarin).
+ 
+       ## User's question:
+       {{query}}
+diff --git a/config/prompt_templates/intent_prompts.yaml b/config/prompt_templates/intent_prompts.yaml
+index 529d5a8..433c93b 100644
+--- a/config/prompt_templates/intent_prompts.yaml
++++ b/config/prompt_templates/intent_prompts.yaml
+@@ -25,7 +25,12 @@ templates:
+       Respond warmly and naturally. Keep it brief and conversational.
+       You may briefly introduce your capabilities if appropriate (e.g. knowledge base Q&A, document analysis, image understanding).
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "chitchat"
+     name: "Chitchat Response"
+@@ -49,7 +54,12 @@ templates:
+       Respond naturally, accurately, and helpfully. Be concise but thorough.
+       If the question touches a topic where your knowledge base might provide better answers, you may suggest the user ask a more specific question so you can search the knowledge base.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+       Current time: {{current_time}}
+ 
+@@ -75,7 +85,12 @@ templates:
+       Answer based on the conversation history provided. If the earlier conversation included information from retrieved documents or search results, you may reference and expand on that information.
+       Do not fabricate information that was not part of the conversation.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+       Current time: {{current_time}}
+ 
+@@ -102,7 +117,12 @@ templates:
+       If only OCR text or an image description is available, answer from that evidence and do not claim to have directly inspected visual details that were not provided.
+       Structure your response clearly using Markdown when appropriate.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "summarize"
+     name: "Summarize Response"
+@@ -127,7 +147,12 @@ templates:
+       Highlight key points, conclusions, and action items if applicable.
+       Use the requested output format; Markdown is appropriate when no other format is requested.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "web_search"
+     name: "Web Search Unavailable Response"
+@@ -153,7 +178,12 @@ templates:
+       Do your best to provide a helpful answer based on the user's knowledge base when relevant and your general knowledge when necessary, while clearly indicating when information may be outdated or when you are uncertain.
+       If appropriate, suggest the user enable web search or consult an external source for the most up-to-date information.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+       Current time: {{current_time}}
+ 
+@@ -179,5 +209,10 @@ templates:
+       Provide a thorough and accurate response based on the document content.
+       Structure your response clearly using Markdown when appropriate.
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if prior conversation history contains Chinese, reply strictly in English.
++      - Default response language: English.
+ 
+diff --git a/config/prompt_templates/system_prompt.yaml b/config/prompt_templates/system_prompt.yaml
+index a58739f..4d60e58 100644
+--- a/config/prompt_templates/system_prompt.yaml
++++ b/config/prompt_templates/system_prompt.yaml
+@@ -19,12 +19,38 @@ templates:
+     default: true
+     has_knowledge_base: true
+     content: |
+-      You are WeKnora, a knowledge-base question-answering assistant developed by Tencent.
+-      Answer factual questions about the knowledge base using the reference materials supplied for the current request. You may reason, calculate, summarize, or translate those materials, but do not invent missing source facts.
+-      Distinguish what the sources state from your inferences. If sources disagree, compare their dates, scope, and provenance and explain unresolved differences.
+-      If the materials do not answer the question, say what is missing and give a useful next step. Do not claim that the absence of a retrieval result proves something does not exist.
+-      Use the response format and level of detail requested by the user. Runtime instructions define source handling, citation syntax, and image presentation.
+-      Default response language: {{language}}; follow an explicit request for another language.
++      You are WeKnora, a high-precision engineering document and knowledge-base question-answering assistant.
++
++      CORE GROUNDING & ANTI-HALLUCINATION POLICY:
++      1. STRICT FACTUAL GROUNDING: Answer questions EXCLUSIVELY using the reference materials (PDF documents, text excerpts, tables) supplied for the current request.
++      2. ZERO HALLUCINATION: Strictly DO NOT invent, assume, extrapolate, or guess any facts, numbers, dates, equations, or specifications not explicitly stated in the provided reference materials. Never use outside training knowledge to fill in gaps or fabricate plausible-sounding answers.
++      3. NOT SPECIFIED REPORTING: If the provided reference materials do not contain the answer, or if a specific formula, parameter, or detail requested by the user is missing from the document, explicitly state: "Not specified in the provided document(s)." Clearly differentiate what is confirmed in the document versus what is not specified.
++      4. ACCURATE CITATIONS: Always cite or reference the document title, section, page, or context passage where the confirmed facts appear.
++      5. NO VARIABLE OR FORMULA SUBSTITUTION: Strictly DO NOT replace, approximate, or substitute formulas or variables from the document with generic textbook equivalents (for example, NEVER use electrical voltages V or currents I when the document specifies acoustic sound pressures p, acoustic impedance, or specific harmonics). Preserve all exact variable names, indices, and units given in the reference materials.
++
++      LANGUAGE & THINKING REQUIREMENTS:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly and exclusively in English.
++      - The response MUST be written strictly and exclusively in English.
++      - Strictly NO Chinese/Mandarin characters, words, or grammar anywhere in your thinking process or output.
++      - Even if the reference materials (PDFs), citations, or previous conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
++
++      MATHEMATICAL & SCIENTIFIC FORMULA FORMATTING:
++      - Always format display equations using LaTeX block math with double dollar signs on their own dedicated lines:
++        $$
++        equation
++        $$
++      - Format inline variables or short symbols using single dollar signs: $variable$.
++      - NEVER place citation tags or brackets on the same line as closing math delimiters ($$). Always place citations on a separate line below the equation or in the following sentence.
++      - Explicitly define each variable, symbol, and unit used in equations based on the reference materials.
++
++      TABLE & COMPARISON PRESENTATION:
++      - Strictly DO NOT generate wide horizontal tables (> 4 columns) or LaTeX \begin{array} for multi-column comparisons.
++      - Always use clean standard Markdown tables (| Col 1 | Col 2 | ...) for data, comparisons, and specifications.
++      - When comparing multiple operating modes, frequency bands, or test conditions:
++        1. PREFERRED: Split the data into separate, clean sub-tables grouped by mode/category (e.g., Table 1: Microphone Mode, Table 2: Induction Pick-up Coil Mode, Table 3: Directional Mode).
++        2. ALTERNATIVE: Use a compact vertical table (3 to 4 columns max) with parameters or frequency bands listed as rows.
++      - Ensure all tables fit comfortably within standard screen width without requiring any horizontal scrolling.
+ 
+   - id: "expert_assistant"
+     name: "Domain Expert"
+@@ -57,7 +83,12 @@ templates:
+       - Key points highlighted with clear structure
+       - Highly practical and actionable
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "customer_service"
+     name: "Customer Service"
+@@ -90,7 +121,12 @@ templates:
+       - Concise and clear answers with highlighted key points
+       - Proactively provide related information when necessary
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "technical_support"
+     name: "Technical Support"
+@@ -124,7 +160,12 @@ templates:
+       - Well-formatted code examples with complete comments
+       - Consider different scenarios and edge cases
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "pure_chat"
+     name: "General Chat"
+@@ -152,7 +193,12 @@ templates:
+       3. Accurate, objective, and insightful answers
+       4. Natural language with approachable tone
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
+ 
+   - id: "web_search_assistant"
+     name: "Web Search Assistant"
+@@ -186,4 +232,9 @@ templates:
+       - Compare multiple sources to provide a comprehensive perspective
+       - Note the timeliness of information
+ 
+-      Default response language: {{language}}; follow an explicit request for another language.
++      Language & Thinking Requirements:
++      - All internal thinking and reasoning (<think>...</think>) MUST be conducted strictly in English.
++      - The response MUST be written strictly in English.
++      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
++      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
++      - Default response language: English.
 diff --git a/frontend/src/api/auth/index.ts b/frontend/src/api/auth/index.ts
 index 5e92a06..3032f15 100644
 --- a/frontend/src/api/auth/index.ts
@@ -29,6 +429,1371 @@ index 5e92a06..3032f15 100644
        return response as unknown as LoginResponse
      } catch (error: any) {
        return {
+diff --git a/frontend/src/assets/theme/theme.css b/frontend/src/assets/theme/theme.css
+index 678ebd6..917f498 100644
+--- a/frontend/src/assets/theme/theme.css
++++ b/frontend/src/assets/theme/theme.css
+@@ -221,18 +221,18 @@ select:-webkit-autofill {
+     --app-accent-teal: #3cc4b4;
+ }
+ 
+-/* 引用原文定位：纸面荧光笔色，文字与整块区域使用不同强度。 */
++/* 引用原文定位：纸面荧光笔色，统一高亮强度保持清晰可见。 */
+ :root {
+     --app-source-highlight: #d6a124;
+     --app-source-highlight-bg: rgba(250, 204, 75, 0.34);
+-    --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.09);
+-    --app-source-highlight-border: rgba(183, 130, 22, 0.5);
++    --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.34);
++    --app-source-highlight-border: rgba(183, 130, 22, 0.6);
+ }
+ :root[theme-mode="dark"] {
+     --app-source-highlight: #e6b94f;
+-    --app-source-highlight-bg: rgba(230, 185, 79, 0.26);
+-    --app-source-highlight-soft-bg: rgba(230, 185, 79, 0.08);
+-    --app-source-highlight-border: rgba(230, 185, 79, 0.5);
++    --app-source-highlight-bg: rgba(230, 185, 79, 0.34);
++    --app-source-highlight-soft-bg: rgba(230, 185, 79, 0.34);
++    --app-source-highlight-border: rgba(230, 185, 79, 0.6);
+ }
+ 
+ /* 全局旋转动画：spinner / 刷新图标统一用 `animation: wk-spin 0.8s linear infinite` */
+diff --git a/frontend/src/components/ChatReferencesDrawer.vue b/frontend/src/components/ChatReferencesDrawer.vue
+index 3efbdd0..20f5139 100644
+--- a/frontend/src/components/ChatReferencesDrawer.vue
++++ b/frontend/src/components/ChatReferencesDrawer.vue
+@@ -1,5 +1,5 @@
+ <template>
+-  <Teleport to="body" :disabled="!useOverlay">
++  <Teleport to="body">
+     <Transition name="references-panel" @after-enter="handlePanelAfterEnter">
+       <aside
+         v-if="visible"
+@@ -23,17 +23,45 @@
+         />
+         <header class="chat-references-panel__header">
+           <div class="chat-references-panel__heading">
+-            <button
+-              v-if="sourceTarget"
+-              type="button"
+-              class="chat-references-panel__back"
+-              :aria-label="t('chat.referenceSourceBack')"
+-              @click="backToList"
+-            >
+-              <t-icon name="chevron-left" size="16px" />
+-              <span>{{ t('chat.referenceSourceBack') }}</span>
+-              <span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
+-            </button>
++            <template v-if="sourceTarget">
++              <button
++                type="button"
++                class="chat-references-panel__back"
++                :title="t('chat.referenceSourceBack')"
++                :aria-label="t('chat.referenceSourceBack')"
++                @click="backToList"
++              >
++                <t-icon name="chevron-left" size="16px" />
++                <span>{{ t('chat.referenceSourceBack') }}</span>
++                <span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
++              </button>
++
++              <div v-if="navigableSources.length > 1" class="chat-references-panel__source-nav">
++                <button
++                  type="button"
++                  class="chat-references-panel__source-nav-btn"
++                  :disabled="currentSourceIndex <= 0"
++                  :title="t('chat.referenceSourcePrevious')"
++                  :aria-label="t('chat.referenceSourcePrevious')"
++                  @click="goToPrevSource"
++                >
++                  <t-icon name="chevron-left" size="14px" />
++                </button>
++                <span class="chat-references-panel__source-nav-count">
++                  {{ currentSourceIndex >= 0 ? currentSourceIndex + 1 : 1 }} / {{ navigableSources.length }}
++                </span>
++                <button
++                  type="button"
++                  class="chat-references-panel__source-nav-btn"
++                  :disabled="currentSourceIndex >= navigableSources.length - 1"
++                  :title="t('chat.referenceSourceNext')"
++                  :aria-label="t('chat.referenceSourceNext')"
++                  @click="goToNextSource"
++                >
++                  <t-icon name="chevron-right" size="14px" />
++                </button>
++              </div>
++            </template>
+             <h3 v-else class="chat-references-panel__title">
+               {{ panelTitle }}<span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
+             </h3>
+@@ -102,7 +130,14 @@
+                     <ArtifactFileIcon :file-name="item.fileName || item.title" />
+                     <div class="reference-item__document-main">
+                       <div class="reference-item__title-row">
+-                        <h5 class="reference-item__title" :title="item.title">{{ item.title }}</h5>
++                        <h5
++                          class="reference-item__title"
++                          :class="{ 'is-clickable': canOpenSource(item) }"
++                          :title="canOpenSource(item) ? `${item.title} — ${t('chat.referenceSourceView')}` : item.title"
++                          @click.stop="canOpenSource(item) ? openItemSource(item) : undefined"
++                        >
++                          {{ item.title }}
++                        </h5>
+                         <button
+                           v-if="canOpenSource(item)"
+                           type="button"
+@@ -166,15 +201,15 @@
+         </div>
+       </aside>
+     </Transition>
+-  </Teleport>
+ 
+-  <Transition name="references-backdrop">
+-    <div
+-      v-if="visible && useOverlay"
+-      class="chat-references-panel__backdrop"
+-      @click="close"
+-    />
+-  </Transition>
++    <Transition name="references-backdrop">
++      <div
++        v-if="visible && useOverlay"
++        class="chat-references-panel__backdrop"
++        @click="close"
++      />
++    </Transition>
++  </Teleport>
+ </template>
+ 
+ <script setup lang="ts">
+@@ -188,6 +223,8 @@ import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
+ import {
+   buildReferenceSections,
+   formatReferenceSnippet,
++  isToolReference,
++  isWebReference,
+   resolveReferenceHighlightKey,
+   type ReferenceListItem,
+ } from '@/utils/referenceSources'
+@@ -293,7 +330,84 @@ function onSourceUnavailable() {
+ }
+ 
+ const sections = computed(() => buildReferenceSections(references.value))
+-const totalCount = computed(() => sections.value.reduce((sum, section) => sum + section.items.length, 0))
++
++export type NavigableSource = {
++  chunkId: string
++  knowledgeId: string
++  knowledgeBaseId?: string
++  title: string
++  fileName?: string
++}
++
++const navigableSources = computed<NavigableSource[]>(() => {
++  const list: NavigableSource[] = []
++  const seenKeys = new Set<string>()
++
++  for (const ref of references.value) {
++    if (!ref || !ref.knowledge_id || isWebReference(ref) || isToolReference(ref) || ref.chunk_type === 'faq') {
++      continue
++    }
++    const chunkId = String(ref.id || ref.source_chunk_id || '').trim()
++    const key = chunkId ? `${ref.knowledge_id}:${chunkId}` : `${ref.knowledge_id}:${list.length}`
++    if (seenKeys.has(key)) continue
++    seenKeys.add(key)
++
++    list.push({
++      chunkId,
++      knowledgeId: ref.knowledge_id,
++      knowledgeBaseId: ref.knowledge_base_id,
++      title: ref.knowledge_title || ref.knowledge_filename || 'Document',
++      fileName: ref.knowledge_filename,
++    })
++  }
++
++  return list
++})
++
++const totalCount = computed(() => {
++  if (navigableSources.value.length > 0) {
++    return navigableSources.value.length
++  }
++  return references.value.length || sections.value.reduce((sum, section) => sum + section.items.length, 0)
++})
++
++const currentSourceIndex = computed(() => {
++  if (!sourceTarget.value || !navigableSources.value.length) return -1
++  const target = sourceTarget.value
++  if (target.chunkId) {
++    const idx = navigableSources.value.findIndex(
++      (s) => s.chunkId === target.chunkId && s.knowledgeId === target.knowledgeId,
++    )
++    if (idx >= 0) return idx
++  }
++  return navigableSources.value.findIndex((s) => s.knowledgeId === target.knowledgeId)
++})
++
++function goToPrevSource() {
++  if (currentSourceIndex.value > 0) {
++    const prevItem = navigableSources.value[currentSourceIndex.value - 1]
++    if (prevItem) openNavigableSource(prevItem)
++  }
++}
++
++function goToNextSource() {
++  if (currentSourceIndex.value >= 0 && currentSourceIndex.value < navigableSources.value.length - 1) {
++    const nextItem = navigableSources.value[currentSourceIndex.value + 1]
++    if (nextItem) openNavigableSource(nextItem)
++  }
++}
++
++function openNavigableSource(item: NavigableSource) {
++  if (!drawer || !item.knowledgeId) return
++  drawer.openSource({
++    chunkId: item.chunkId,
++    knowledgeId: item.knowledgeId,
++    knowledgeBaseId: item.knowledgeBaseId,
++    title: item.title,
++    fileName: item.fileName,
++  })
++}
++
+ 
+ const activeHighlightKey = computed(() =>
+   resolveReferenceHighlightKey(references.value, highlight.value),
+@@ -425,6 +539,9 @@ async function scrollToHighlight() {
+ function handlePanelAfterEnter() {
+   panelEntered.value = true
+   void scrollToHighlight()
++  if (typeof window !== 'undefined') {
++    window.dispatchEvent(new Event('resize'))
++  }
+ }
+ 
+ watch(activeHighlightKey, () => {
+@@ -482,21 +599,66 @@ watch(visible, (open) => {
+ .chat-references-panel__back {
+   display: inline-flex;
+   align-items: center;
+-  gap: 2px;
++  gap: 4px;
+   min-width: 0;
+-  padding: 4px 6px 4px 2px;
+-  border: 0;
++  padding: 4px 10px;
++  border: 1px solid var(--td-component-stroke);
+   border-radius: var(--app-radius-md);
+-  background: transparent;
+-  color: var(--td-text-color-secondary);
+-  font-size: var(--app-text-base);
++  background: var(--td-bg-color-secondarycontainer);
++  color: var(--td-text-color-primary);
++  font-size: var(--app-text-sm);
+   font-weight: 500;
+   cursor: pointer;
++  transition: all 0.2s cubic-bezier(0.38, 0, 0.24, 1);
+ 
+   &:hover {
++    background: var(--td-bg-color-container-hover);
++    border-color: var(--td-brand-color);
++    color: var(--td-brand-color);
++  }
++}
++
++.chat-references-panel__source-nav {
++  display: inline-flex;
++  align-items: center;
++  gap: 2px;
++  padding: 2px 4px;
++  border: 1px solid var(--td-component-stroke);
++  border-radius: var(--app-radius-md);
++  background: var(--td-bg-color-container);
++}
++
++.chat-references-panel__source-nav-btn {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 22px;
++  height: 22px;
++  padding: 0;
++  border: 0;
++  border-radius: var(--app-radius-xs);
++  background: transparent;
++  color: var(--td-text-color-secondary);
++  cursor: pointer;
++  transition: all 0.15s ease;
++
++  &:hover:not(:disabled) {
+     background: var(--td-bg-color-container-hover);
+     color: var(--td-text-color-primary);
+   }
++
++  &:disabled {
++    opacity: 0.35;
++    cursor: not-allowed;
++  }
++}
++
++.chat-references-panel__source-nav-count {
++  font-size: var(--app-text-xs);
++  color: var(--td-text-color-secondary);
++  font-variant-numeric: tabular-nums;
++  padding: 0 4px;
++  user-select: none;
+ }
+ 
+ .chat-references-panel__header {
+@@ -715,6 +877,15 @@ watch(visible, (open) => {
+   -webkit-box-orient: vertical;
+   overflow: hidden;
+   word-break: break-word;
++
++  &.is-clickable {
++    cursor: pointer;
++    transition: color var(--app-motion-fast) ease;
++
++    &:hover {
++      color: var(--td-brand-color);
++    }
++  }
+ }
+ 
+ .reference-item__open {
+@@ -726,7 +897,7 @@ watch(visible, (open) => {
+   cursor: pointer;
+   color: var(--td-text-color-placeholder);
+   line-height: 1;
+-  opacity: 0;
++  opacity: 0.85;
+   transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+ }
+ 
+diff --git a/frontend/src/components/UserMenu.vue b/frontend/src/components/UserMenu.vue
+index e57f028..1731075 100644
+--- a/frontend/src/components/UserMenu.vue
++++ b/frontend/src/components/UserMenu.vue
+@@ -129,13 +129,11 @@
+             </svg>
+           </span>
+         </div>
+-        <template v-if="!authStore.isLiteMode">
+-          <div class="menu-divider"></div>
+-          <div class="menu-item danger" @click="handleLogout">
+-            <t-icon name="logout" class="menu-icon" />
+-            <span>{{ $t('auth.logout') }}</span>
+-          </div>
+-        </template>
++        <div class="menu-divider"></div>
++        <div class="menu-item danger" @click="handleLogout">
++          <t-icon name="logout" class="menu-icon" />
++          <span>{{ $t('auth.logout') }}</span>
++        </div>
+       </div>
+     </Transition>
+ 
+diff --git a/frontend/src/components/css/chat-markdown.less b/frontend/src/components/css/chat-markdown.less
+index 82a7ff8..eba16c8 100644
+--- a/frontend/src/components/css/chat-markdown.less
++++ b/frontend/src/components/css/chat-markdown.less
+@@ -737,5 +737,88 @@
+     color: var(--td-text-color-placeholder);
+   }
+ 
++  // KaTeX display equations & array tables (\begin{array})
++  :deep(.katex-display) {
++    display: block !important;
++    max-width: 100% !important;
++    width: 100% !important;
++    overflow-x: auto !important;
++    overflow-y: hidden !important;
++    text-align: left !important;
++    padding: 10px 4px 14px 4px !important;
++    margin: 1em 0 !important;
++    box-sizing: border-box !important;
++    -webkit-overflow-scrolling: touch !important;
++    scrollbar-width: thin !important;
++    scrollbar-color: rgba(120, 120, 120, 0.45) rgba(0, 0, 0, 0.05) !important;
++
++    > .katex {
++      display: inline-block !important;
++      text-align: left !important;
++      white-space: nowrap !important;
++      min-width: min-content !important;
++      max-width: none !important;
++    }
++
++    &::-webkit-scrollbar {
++      height: 8px !important;
++      background: rgba(0, 0, 0, 0.04) !important;
++    }
++    &::-webkit-scrollbar-track {
++      background: rgba(0, 0, 0, 0.04) !important;
++      border-radius: 4px !important;
++    }
++    &::-webkit-scrollbar-thumb {
++      background: rgba(100, 100, 100, 0.45) !important;
++      border-radius: 4px !important;
++      &:hover {
++        background: rgba(100, 100, 100, 0.75) !important;
++      }
++    }
++  }
++
++  // Standard Markdown HTML Tables
++  :deep(table) {
++    display: block !important;
++    max-width: 100% !important;
++    width: max-content !important;
++    overflow-x: auto !important;
++    overflow-y: hidden !important;
++    border-collapse: collapse !important;
++    margin: 1em 0 !important;
++    box-sizing: border-box !important;
++    -webkit-overflow-scrolling: touch !important;
++    scrollbar-width: thin !important;
++    scrollbar-color: rgba(120, 120, 120, 0.45) rgba(0, 0, 0, 0.05) !important;
++
++    th, td {
++      padding: 8px 14px !important;
++      border: 1px solid var(--td-component-stroke, #dcdcdc) !important;
++      text-align: left !important;
++      white-space: nowrap !important;
++    }
++
++    th {
++      background-color: var(--td-bg-color-secondarycontainer, #f3f3f3) !important;
++      font-weight: 600 !important;
++    }
++
++    &::-webkit-scrollbar {
++      height: 8px !important;
++      background: rgba(0, 0, 0, 0.04) !important;
++    }
++    &::-webkit-scrollbar-track {
++      background: rgba(0, 0, 0, 0.04) !important;
++      border-radius: 4px !important;
++    }
++    &::-webkit-scrollbar-thumb {
++      background: rgba(100, 100, 100, 0.45) !important;
++      border-radius: 4px !important;
++      &:hover {
++        background: rgba(100, 100, 100, 0.75) !important;
++      }
++    }
++  }
++
+   .chat-markdown-hljs();
+ }
+diff --git a/frontend/src/components/css/chat-message-shared.less b/frontend/src/components/css/chat-message-shared.less
+index 2d83f18..914408d 100644
+--- a/frontend/src/components/css/chat-message-shared.less
++++ b/frontend/src/components/css/chat-message-shared.less
+@@ -172,6 +172,34 @@
+   }
+ }
+ 
++.answer-toolbar__references {
++  position: relative;
++  display: inline-flex;
++  flex-shrink: 0;
++}
++
++.answer-toolbar__references-count {
++  position: absolute;
++  top: -2px;
++  right: -2px;
++  z-index: 1;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  box-sizing: border-box;
++  min-width: 14px;
++  height: 14px;
++  padding: 0 3px;
++  border-radius: 7px;
++  background: var(--td-brand-color);
++  color: var(--td-text-color-anti);
++  font-size: var(--app-text-2xs);
++  font-weight: 600;
++  line-height: 1;
++  font-variant-numeric: tabular-nums;
++  pointer-events: none;
++}
++
+ .answer-toolbar__follow-up-loading {
+   display: inline-flex;
+   align-items: center;
+diff --git a/frontend/src/components/document-preview.vue b/frontend/src/components/document-preview.vue
+index f6cacff..32e3fff 100644
+--- a/frontend/src/components/document-preview.vue
++++ b/frontend/src/components/document-preview.vue
+@@ -89,6 +89,13 @@ const mermaidSvg = ref('');
+ const htmlViewMode = ref<'render' | 'source'>('render');
+ const pptxData = shallowRef<ArrayBuffer | null>(null);
+ const pdfData = shallowRef<ArrayBuffer | null>(null);
++const pdfViewerMode = ref<'highlight' | 'native'>('highlight');
++const pdfRenderFailed = ref(false);
++
++function onPdfSourceError(err: any) {
++  console.warn('PdfSourceViewer failed, falling back to native PDF viewer:', err);
++  pdfRenderFailed.value = true;
++}
+ const epubHtml = ref('');
+ let epubObjectUrls: string[] = [];
+ let excelSheetNames: string[] = [];
+@@ -438,18 +445,20 @@ async function loadPreview() {
+ 
+     const blob = ensureBlobType(rawBlob, ft);
+     loadedForId = sourceKey;
++    previewExt = ft;
++
++    if (kind === 'pdf') {
++      blobUrl.value = URL.createObjectURL(blob);
++      if (props.sourceMode) {
++        pdfData.value = await blob.arrayBuffer();
++      }
++    }
+ 
+     loading.value = false;
+     await nextTick();
+ 
+-    previewExt = ft;
+     switch (kind) {
+       case 'pdf': {
+-        if (props.sourceMode) {
+-          pdfData.value = await blob.arrayBuffer();
+-        } else {
+-          blobUrl.value = URL.createObjectURL(blob);
+-        }
+         break;
+       }
+       case 'image':
+@@ -521,6 +530,8 @@ function cleanup() {
+   excelHtml.value = '';
+   mermaidSvg.value = '';
+   htmlViewMode.value = 'render';
++  pdfRenderFailed.value = false;
++  pdfViewerMode.value = 'highlight';
+   pptxData.value = null;
+   pdfData.value = null;
+   for (const url of epubObjectUrls) URL.revokeObjectURL(url);
+@@ -873,6 +884,15 @@ onUnmounted(() => {
+           >
+             <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
+           </t-button>
++          <t-button
++            v-if="previewType === 'pdf' && blobUrl && pdfData"
++            theme="default" variant="text" size="small" shape="square"
++            :title="pdfViewerMode === 'highlight' ? 'Switch to Standard PDF Viewer' : 'Switch to Highlighted View'"
++            :aria-label="pdfViewerMode === 'highlight' ? 'Switch to Standard PDF Viewer' : 'Switch to Highlighted View'"
++            @click="pdfViewerMode = pdfViewerMode === 'highlight' ? 'native' : 'highlight'"
++          >
++            <template #icon><t-icon :name="pdfViewerMode === 'highlight' ? 'file-pdf' : 'highlight'" /></template>
++          </t-button>
+           <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
+             :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+             :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+@@ -905,9 +925,15 @@ onUnmounted(() => {
+       <p class="unsupported-hint">{{ $t('preview.unsupportedHint') }}</p>
+     </div>
+ 
+-    <!-- PDF -->
+-    <div v-else-if="previewType === 'pdf' && pdfData" class="preview-pdf preview-pdf--source">
+-      <PdfSourceViewer :data="pdfData" :file-name="fileName" :locate="locate" @located="(r) => emit('located', r)" />
++    <!-- PDF: Highlighted view with automatic fallback to standard PDF iframe if needed -->
++    <div v-else-if="previewType === 'pdf' && pdfData && !pdfRenderFailed && pdfViewerMode === 'highlight'" class="preview-pdf preview-pdf--source">
++      <PdfSourceViewer
++        :data="pdfData"
++        :file-name="fileName"
++        :locate="locate"
++        @located="(r) => emit('located', r)"
++        @error="onPdfSourceError"
++      />
+     </div>
+     <div v-else-if="previewType === 'pdf' && blobUrl" class="preview-pdf">
+       <iframe ref="previewContent" tabindex="0" :title="fileName" :src="blobUrl" class="pdf-iframe" @load="onPreviewFrameLoad" />
+@@ -1073,7 +1099,23 @@ onUnmounted(() => {
+     }
+ 
+     .preview-pdf {
+-      height: auto;
++      height: 100%;
++      min-height: 0;
++      display: flex;
++      flex-direction: column;
++    }
++
++    .preview-pdf--source {
++      height: 100%;
++      min-height: 0;
++      display: flex;
++      flex-direction: column;
++      flex: 1;
++    }
++
++    .preview-pdf .pdf-iframe {
++      height: 100%;
++      flex: 1;
+       min-height: 0;
+     }
+ 
+@@ -1245,9 +1287,18 @@ onUnmounted(() => {
+   width: 100%;
+   height: @preview-max-h;
+   min-height: 500px;
++  display: flex;
++  flex-direction: column;
++
++  &--source {
++    height: 100%;
++    min-height: 500px;
++  }
++
+   .pdf-iframe {
+     width: 100%;
+     height: 100%;
++    flex: 1;
+     border: none;
+     border-radius: @border-radius;
+   }
+diff --git a/frontend/src/components/source-preview/PdfSourceViewer.vue b/frontend/src/components/source-preview/PdfSourceViewer.vue
+index 2d12554..9b8d332 100644
+--- a/frontend/src/components/source-preview/PdfSourceViewer.vue
++++ b/frontend/src/components/source-preview/PdfSourceViewer.vue
+@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
+ import type { SourceLocateRequest } from '@/utils/sourceLocator'
+ import { resolvePdfSource, mergeSourceRects, type PdfTarget } from '@/utils/pdfSourceLocate'
+ import { findTextRanges } from '@/utils/sourceLocatorDom'
+-import { loadPdfJs, type PdfJs } from './pdfjsLoader'
++import { loadPdfJs, getPdfJsAssetUrls, type PdfJs } from './pdfjsLoader'
+ 
+ type PdfDocument = Awaited<ReturnType<PdfJs['getDocument']>['promise']>
+ type PdfPage = Awaited<ReturnType<PdfDocument['getPage']>>
+@@ -79,17 +79,32 @@ function setPageRef(page: number, el: unknown) {
+   if (node) {
+     pageElements.set(page, node)
+     observer?.observe(node)
++    // Eagerly render page 1 as soon as its element mounts if not yet rendered
++    if (page === 1 && rendered.size === 0 && pdf.value) {
++      void renderPage(1)
++    }
+   } else {
+     pageElements.delete(page)
+   }
+ }
+ 
+ async function openDocument(data: ArrayBuffer) {
++  if (loadingTask) {
++    try { await loadingTask.destroy() } catch {}
++    loadingTask = null
++  }
+   const lib = await loadPdfJs()
+   pdfjs = lib
+   if (disposed) return
++  const assets = getPdfJsAssetUrls()
+   // pdf.js takes ownership of the buffer; keep the caller's copy intact.
+-  const task = lib.getDocument({ data: new Uint8Array(data.slice(0)) })
++  const task = lib.getDocument({
++    data: new Uint8Array(data.slice(0)),
++    wasmUrl: assets.wasmUrl,
++    cMapUrl: assets.cMapUrl,
++    cMapPacked: assets.cMapPacked,
++    standardFontDataUrl: assets.standardFontDataUrl,
++  })
+   loadingTask = task
+   const doc = await task.promise
+   if (disposed) {
+@@ -103,9 +118,18 @@ async function openDocument(data: ArrayBuffer) {
+   ratios[1] = vp.height / vp.width
+ }
+ 
++function getContainerWidth(): number {
++  if (containerWidth > 0) return containerWidth
++  if (scroller.value?.clientWidth) {
++    containerWidth = Math.max(300, scroller.value.clientWidth - 24)
++    return containerWidth
++  }
++  return 700
++}
++
+ function renderScale(page: PdfPage): number {
+   const vp = page.getViewport({ scale: 1 })
+-  const width = Math.max(200, containerWidth * zoom.value)
++  const width = Math.max(200, getContainerWidth() * zoom.value)
+   return width / vp.width
+ }
+ 
+@@ -153,15 +177,30 @@ async function paintPage(
+ ): Promise<void> {
+   const lib = pdfjs
+   if (!lib) return
++  const canvasContext = canvas.getContext('2d')
++  if (!canvasContext) return
++
++  const oldCanvas = el.querySelector('.pdf-source-page__canvas')
++  if (oldCanvas) {
++    oldCanvas.replaceWith(canvas)
++  } else {
++    el.prepend(canvas)
++  }
++
+   const task = page.render({
+     canvas,
++    canvasContext,
+     viewport,
+     transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+   })
+   entry.task = task
+   try {
+     await task.promise
+-  } catch {
++  } catch (err: any) {
++    if (err?.name !== 'RenderingCancelledException') {
++      console.error('PDF page render failed for page', pageNumber, err)
++      emit('error', err?.message || 'PDF render failed')
++    }
+     return // cancelled by a newer render or unrender
+   }
+   if (rendered.get(pageNumber) !== entry) return
+@@ -170,10 +209,7 @@ async function paintPage(
+   textDiv.className = 'textLayer'
+   el.style.setProperty('--scale-factor', String(entry.scale))
+   el.style.setProperty('--total-scale-factor', String(entry.scale))
+-  const oldCanvas = el.querySelector('.pdf-source-page__canvas')
+   const oldText = el.querySelector('.textLayer')
+-  oldCanvas?.replaceWith(canvas)
+-  if (!oldCanvas) el.prepend(canvas)
+   oldText?.remove()
+   canvas.after(textDiv)
+ 
+@@ -225,12 +261,19 @@ function onScroll() {
+   for (const [page, el] of pageElements) {
+     if (el.offsetTop <= mid && el.offsetTop + el.offsetHeight + PAGE_GAP > mid) {
+       currentPage.value = page
++      if (!rendered.has(page)) void renderPage(page)
+       break
+     }
+   }
+ }
+ 
+ function rerenderVisible() {
++  if (rendered.size === 0 && pageCount.value > 0) {
++    const p = currentPage.value || 1
++    void renderPage(p)
++    if (p + 1 <= pageCount.value) void renderPage(p + 1)
++    return
++  }
+   const pages = [...rendered.keys()]
+   for (const p of pages) void renderPage(p)
+ }
+@@ -374,6 +417,22 @@ watch(
+   },
+ )
+ 
++watch(
++  () => props.data,
++  (newData) => {
++    if (newData) {
++      locateVersion++
++      for (const p of [...rendered.keys()]) unrenderPage(p)
++      rendered.clear()
++      renderOrder.length = 0
++      pageTexts.clear()
++      clearMarks()
++      currentPage.value = 1
++      void load()
++    }
++  },
++)
++
+ async function load() {
+   error.value = ''
+   if (!props.data) return
+@@ -381,7 +440,13 @@ async function load() {
+   try {
+     await openDocument(props.data)
+     await nextTick()
+-    containerWidth = scroller.value?.clientWidth ? scroller.value.clientWidth - 24 : 600
++    containerWidth = scroller.value?.clientWidth ? Math.max(300, scroller.value.clientWidth - 24) : 700
++    if (pageCount.value > 0) {
++      void renderPage(1)
++      if (pageCount.value > 1) {
++        void renderPage(2)
++      }
++    }
+     if (props.locate) await applyLocate(props.locate)
+   } catch (err) {
+     console.error('PDF preview failed:', err)
+@@ -419,7 +484,10 @@ onBeforeUnmount(() => {
+ 
+ const pageLabel = computed(() => (pageCount.value ? `${currentPage.value} / ${pageCount.value}` : ''))
+ 
+-defineExpose({ relocate: () => applyLocate(props.locate) })
++defineExpose({
++  relocate: () => applyLocate(props.locate),
++  refresh: () => rerenderVisible(),
++})
+ </script>
+ 
+ <template>
+@@ -517,8 +585,8 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
+   isolation: isolate;
+   // The PDF canvas stays white even when the surrounding app is dark.
+   --app-source-highlight-bg: rgba(250, 204, 75, 0.34);
+-  --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.09);
+-  --app-source-highlight-border: rgba(183, 130, 22, 0.5);
++  --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.34);
++  --app-source-highlight-border: rgba(183, 130, 22, 0.6);
+   // Block flow with auto margins keeps zoomed pages scrollable to the left.
+   margin: 0 auto 12px;
+   max-width: none;
+@@ -549,14 +617,19 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
+ .pdf-source-mark {
+   position: absolute;
+   border-radius: var(--app-radius-xs);
+-  background: var(--app-source-highlight-soft-bg);
++  background: var(--app-source-highlight-bg);
++
++  &--text {
++    background: var(--app-source-highlight-bg);
++  }
+ 
+   &--text.is-active {
+     background: var(--app-source-highlight-bg);
+   }
+ 
+   &--box {
+-    outline: 1px solid var(--app-source-highlight-border);
++    outline: 1.5px solid var(--app-source-highlight-border);
++    background: var(--app-source-highlight-soft-bg);
+ 
+     &.is-active {
+       box-shadow: inset 3px 0 var(--app-source-highlight-border);
+diff --git a/frontend/src/components/source-preview/pdfjsLoader.ts b/frontend/src/components/source-preview/pdfjsLoader.ts
+index b4cbb37..7c58f88 100644
+--- a/frontend/src/components/source-preview/pdfjsLoader.ts
++++ b/frontend/src/components/source-preview/pdfjsLoader.ts
+@@ -13,7 +13,11 @@ let loading: Promise<PdfJs> | null = null
+ export function loadPdfJs(): Promise<PdfJs> {
+   if (!loading) {
+     loading = import('pdfjs-dist/legacy/build/pdf.mjs').then((lib) => {
+-      lib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
++      let workerSrc = pdfWorkerUrl
++      if (typeof window !== 'undefined' && workerSrc && workerSrc.startsWith('/')) {
++        workerSrc = `${window.location.origin}${workerSrc}`
++      }
++      lib.GlobalWorkerOptions.workerSrc = workerSrc
+       return lib
+     })
+     loading.catch(() => {
+@@ -22,3 +26,17 @@ export function loadPdfJs(): Promise<PdfJs> {
+   }
+   return loading
+ }
++
++export function getPdfJsAssetUrls() {
++  const origin = typeof window !== 'undefined' ? window.location.origin : ''
++  const baseUrl = typeof window !== 'undefined' ? (import.meta.env.BASE_URL || '/') : '/'
++  const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
++  const prefix = `${origin}${cleanBase}pdfjs/`
++  return {
++    wasmUrl: `${prefix}wasm/`,
++    cMapUrl: `${prefix}cmaps/`,
++    cMapPacked: true,
++    standardFontDataUrl: `${prefix}standard_fonts/`,
++  }
++}
++
+diff --git a/frontend/src/i18n/locales/en-US.ts b/frontend/src/i18n/locales/en-US.ts
+index 2727fd0..3ccbaae 100755
+--- a/frontend/src/i18n/locales/en-US.ts
++++ b/frontend/src/i18n/locales/en-US.ts
+@@ -4137,6 +4137,8 @@ export default {
+     navigateToDocument: 'View document details',
+     referenceSourceBack: 'All sources',
+     referenceSourceView: 'View in original',
++    viewSourcePdf: 'View Sources & Original PDF',
++    viewSourcePdfCount: 'View Sources & Original PDF ({count} citations)',
+     referenceSourceRelocate: 'Locate again',
+     referenceSourceLocating: 'Locating the cited passage…',
+     referenceSourceExact: "Located the source passage",
+diff --git a/frontend/src/i18n/locales/zh-CN.ts b/frontend/src/i18n/locales/zh-CN.ts
+index 384d522..03df980 100755
+--- a/frontend/src/i18n/locales/zh-CN.ts
++++ b/frontend/src/i18n/locales/zh-CN.ts
+@@ -4225,6 +4225,8 @@ export default {
+     navigateToDocument: '查看文档详情',
+     referenceSourceBack: '全部引用',
+     referenceSourceView: '查看原文',
++    viewSourcePdf: '查看引用来源与原始 PDF',
++    viewSourcePdfCount: '查看引用来源与原始 PDF（{count} 条引用）',
+     referenceSourceRelocate: '重新定位',
+     referenceSourceLocating: '正在定位引用位置…',
+     referenceSourceExact: "已精确定位原文片段",
+diff --git a/frontend/src/i18n/locales/zh-TW.ts b/frontend/src/i18n/locales/zh-TW.ts
+index d8c5875..272bf8b 100644
+--- a/frontend/src/i18n/locales/zh-TW.ts
++++ b/frontend/src/i18n/locales/zh-TW.ts
+@@ -4225,6 +4225,8 @@ export default {
+     navigateToDocument: '查看文件詳情',
+     referenceSourceBack: '全部引用',
+     referenceSourceView: '查看原文',
++    viewSourcePdf: '查看引用來源與原始 PDF',
++    viewSourcePdfCount: '查看引用來源與原始 PDF（{count} 條引用）',
+     referenceSourceRelocate: '重新定位',
+     referenceSourceLocating: '正在定位引用位置…',
+     referenceSourceExact: "已精確定位原文片段",
+diff --git a/frontend/src/router/index.ts b/frontend/src/router/index.ts
+index dd6d065..26c7b84 100644
+--- a/frontend/src/router/index.ts
++++ b/frontend/src/router/index.ts
+@@ -351,7 +351,8 @@ router.beforeEach(async (to, from, next) => {
+         return
+       }
+ 
+-      if (!autoSetupAttempted) {
++      const isManualLogin = typeof window !== 'undefined' && sessionStorage.getItem('weknora_manual_login') === 'true'
++      if (!autoSetupAttempted && !isManualLogin) {
+         autoSetupAttempted = true
+         localStorage.removeItem('weknora_auto_setup_failed')
+         try {
+diff --git a/frontend/src/stores/menu.ts b/frontend/src/stores/menu.ts
+index b8e6110..cd3ad35 100644
+--- a/frontend/src/stores/menu.ts
++++ b/frontend/src/stores/menu.ts
+@@ -66,7 +66,7 @@ export const useMenuStore = defineStore('menuStore', () => {
+     }
+   )
+ 
+-  const liteHiddenPaths = new Set(['logout', 'organizations'])
++  const liteHiddenPaths = new Set(['organizations'])
+ 
+   // 共享空间 (organizations) 仅对当前空间的 admin / owner 暴露入口。
+   // viewer / contributor 即便在共享空间里拥有资源，也无需自行管理共享关系，
+diff --git a/frontend/src/utils/chatMarkdownRenderer.test.ts b/frontend/src/utils/chatMarkdownRenderer.test.ts
+index f97dd80..66871e5 100644
+--- a/frontend/src/utils/chatMarkdownRenderer.test.ts
++++ b/frontend/src/utils/chatMarkdownRenderer.test.ts
+@@ -578,6 +578,18 @@ test('joinCitationTagsToPreviousLine does not merge citations onto an unlabeled
+   assert.equal(joinCitationTagsToPreviousLine(input), '```\nAPR = principal\n```\n' + tag)
+ })
+ 
++test('joinCitationTagsToPreviousLine does not merge citations onto display math closing delimiter ($$)', () => {
++  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
++  const input = '$$\nZ_{rec} = \\frac{V_1 - V_R}{I}\n$$\n\n' + tag
++  assert.equal(joinCitationTagsToPreviousLine(input), '$$\nZ_{rec} = \\frac{V_1 - V_R}{I}\n$$\n\n' + tag)
++})
++
++test('joinCitationTagsToPreviousLine does not merge citations onto display math closing delimiter on single newline', () => {
++  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
++  const input = '$$\nZ_{rec} = (V_1/V_R - 1) R_1\n$$\n' + tag
++  assert.equal(joinCitationTagsToPreviousLine(input), '$$\nZ_{rec} = (V_1/V_R - 1) R_1\n$$\n' + tag)
++})
++
+ test('applyStreamingTailFade wraps the trailing text run', () => {
+   const out = applyStreamingTailFade('<p>Great, that narrows it down a lot. Two more quick</p>')
+   assert.match(out, /<span class="stream-fade-tail">[^<]*Two more quick<\/span><\/p>$/)
+diff --git a/frontend/src/utils/citationMarkdown.ts b/frontend/src/utils/citationMarkdown.ts
+index dd33782..623fc15 100644
+--- a/frontend/src/utils/citationMarkdown.ts
++++ b/frontend/src/utils/citationMarkdown.ts
+@@ -228,10 +228,18 @@ export function restoreCitationHtmlPlaceholders(html: string, htmlSnippets: stri
+ /** Opening/closing fence for GFM fenced code blocks (up to 3 spaces indent). */
+ const FENCED_CODE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(\s*\S.*)?\s*$/
+ 
++/** Delimiter for display math blocks: $$ or \] (up to 3 spaces indent). */
++const MATH_BLOCK_DELIMITER_RE = /^ {0,3}(\$\$|\\\])\s*$/
++
+ function isFencedCodeDelimiterLine(line: string): boolean {
+   return FENCED_CODE_DELIMITER_RE.test(line)
+ }
+ 
++function isMathBlockDelimiterLine(line: string): boolean {
++  const trimmed = line.trim()
++  return MATH_BLOCK_DELIMITER_RE.test(trimmed) || trimmed === '$$' || trimmed === '\\]' || trimmed.endsWith('$$')
++}
++
+ /** Collapse newlines around <kb/> / <web/> so marked keeps citations inline. */
+ export function joinCitationTagsToPreviousLine(content: string): string {
+   if (!content) return content
+@@ -249,11 +257,11 @@ export function joinCitationTagsToPreviousLine(content: string): string {
+   }
+ 
+   // Blank lines before citations: join to the previous content. Fenced-code
+-  // delimiters are the only exception because ``` / ~~~ must stay on their own line.
++  // and math block delimiters must stay on their own line.
+   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
+     const before = full.slice(0, offset)
+     const lastLine = before.split('\n').filter((line: string) => line.trim()).pop() || ''
+-    if (isFencedCodeDelimiterLine(lastLine)) {
++    if (isFencedCodeDelimiterLine(lastLine) || isMathBlockDelimiterLine(lastLine)) {
+       return `\n\n${kbStart}`
+     }
+     return ` ${kbStart.trimStart()}`
+@@ -267,7 +275,7 @@ export function joinCitationTagsToPreviousLine(content: string): string {
+       // partial line (e.g. ``` captured as ``), which would skip the fence check.
+       const lineStart = full.lastIndexOf('\n', offset - 1) + 1
+       const fullPrevLine = full.slice(lineStart, offset + beforePart.length)
+-      if (isFencedCodeDelimiterLine(fullPrevLine)) {
++      if (isFencedCodeDelimiterLine(fullPrevLine) || isMathBlockDelimiterLine(fullPrevLine)) {
+         return match
+       }
+       return `${beforePart} ${kbStart.trimStart()}`
+diff --git a/frontend/src/utils/referenceSources.ts b/frontend/src/utils/referenceSources.ts
+index 311ce42..b01723e 100644
+--- a/frontend/src/utils/referenceSources.ts
++++ b/frontend/src/utils/referenceSources.ts
+@@ -107,11 +107,11 @@ export function formatReferenceSnippet(text: string | undefined): string {
+   return value
+ }
+ 
+-function isWebReference(item: KnowledgeReferenceLike): boolean {
++export function isWebReference(item: KnowledgeReferenceLike): boolean {
+   return item.chunk_type === 'web_search'
+ }
+ 
+-function isToolReference(item: KnowledgeReferenceLike): boolean {
++export function isToolReference(item: KnowledgeReferenceLike): boolean {
+   return item.chunk_type === 'tool_result'
+ }
+ 
+diff --git a/frontend/src/views/auth/Login.vue b/frontend/src/views/auth/Login.vue
+index 12324a8..206c076 100755
+--- a/frontend/src/views/auth/Login.vue
++++ b/frontend/src/views/auth/Login.vue
+@@ -808,16 +808,19 @@ onMounted(async () => {
+     return
+   }
+ 
+-  localStorage.removeItem('weknora_auto_setup_failed')
+-  try {
+-    const response = await autoSetup()
+-    if (response.success) {
+-      authStore.setLiteMode(true)
+-      await persistLoginResponse(response)
+-      return
++  const isManualLogin = sessionStorage.getItem('weknora_manual_login') === 'true'
++  if (!isManualLogin) {
++    localStorage.removeItem('weknora_auto_setup_failed')
++    try {
++      const response = await autoSetup()
++      if (response.success) {
++        authStore.setLiteMode(true)
++        await persistLoginResponse(response)
++        return
++      }
++    } catch {
++      // Auto-setup may be unavailable outside the native Lite shell.
+     }
+-  } catch {
+-    // Auto-setup may be unavailable outside the native Lite shell.
+   }
+ 
+   loadOIDCConfig()
+@@ -832,31 +835,16 @@ onMounted(async () => {
+   min-height: 100%;
+   overflow: hidden;
+   position: relative;
+-  background: linear-gradient(225deg, #022c22 0%, #064e3b 15%, #065f46 25%, #047857 38%, #059669 50%, #07C05F 65%, #10B981 78%, #34D399 90%, #6EE7B7 100%);
++  background: #ffffff;
+ 
+   &::before {
++    display: none;
+     content: '';
+-    position: absolute;
+-    top: 0;
+-    left: 0;
+-    right: 0;
+-    bottom: 0;
+-    background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.06) 0%, transparent 50%),
+-      radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.04) 0%, transparent 50%);
+-    pointer-events: none;
+   }
+ }
+ 
+ .animated-bg {
+-  position: absolute;
+-  top: 0;
+-  left: 0;
+-  right: 0;
+-  bottom: 0;
+-  pointer-events: none;
+-  z-index: 1;
+-  overflow: hidden;
+-  contain: strict;
++  display: none;
+ }
+ 
+ .knowledge-node {
+@@ -1079,16 +1067,16 @@ onMounted(async () => {
+ .showcase-subtitle {
+   margin-top: 0;
+   font-size: 22px;
+-  color: rgba(255, 255, 255, 0.95);
++  color: #0f172a;
+   margin: 0 0 8px 0;
+   font-family: var(--app-font-family);
+   line-height: 1.4;
+-  font-weight: 500;
++  font-weight: 600;
+ }
+ 
+ .showcase-description {
+   font-size: var(--app-text-lg);
+-  color: rgba(255, 255, 255, 0.8);
++  color: #475569;
+   margin: 0 0 28px 0;
+   font-family: var(--app-font-family);
+   line-height: 1.5;
+@@ -1104,9 +1092,10 @@ onMounted(async () => {
+ .tag {
+   display: inline-block;
+   padding: 8px 20px;
+-  background: rgba(255, 255, 255, 0.2);
++  background: #f8fafc;
+   border-radius: 20px;
+-  color: var(--td-text-color-anti);
++  color: #334155;
++  border: 1px solid #e2e8f0;
+   font-size: var(--app-text-base);
+   font-weight: 500;
+   font-family: var(--app-font-family);
+@@ -1216,9 +1205,10 @@ onMounted(async () => {
+   gap: 7px;
+   padding: 9px 15px;
+   border-radius: 20px;
+-  background: rgba(255, 255, 255, 0.2);
+-  border: 1px solid rgba(255, 255, 255, 0.25);
+-  color: var(--td-text-color-anti);
++  background: #ffffff;
++  border: 1px solid #e2e8f0;
++  color: #334155;
++  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+   text-decoration: none;
+   font-size: var(--app-text-md);
+   font-weight: 600;
+@@ -1236,9 +1226,9 @@ onMounted(async () => {
+   }
+ 
+   &:hover {
+-    background: rgba(255, 255, 255, 0.3);
+-    border-color: rgba(255, 255, 255, 0.4);
+-    color: var(--td-text-color-anti);
++    background: #f8fafc;
++    border-color: #cbd5e1;
++    color: #0f172a;
+   }
+ }
+ 
+@@ -1246,9 +1236,10 @@ onMounted(async () => {
+   position: relative;
+ 
+   button {
+-    background: rgba(255, 255, 255, 0.2);
+-    border: 1px solid rgba(255, 255, 255, 0.25);
+-    color: var(--td-text-color-anti);
++    background: #ffffff;
++    border: 1px solid #e2e8f0;
++    color: #334155;
++    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+ 
+     .lang-flag-icon {
+       font-size: var(--app-text-xl);
+@@ -1257,8 +1248,9 @@ onMounted(async () => {
+     }
+ 
+     &:hover {
+-      background: rgba(255, 255, 255, 0.3);
+-      border-color: rgba(255, 255, 255, 0.4);
++      background: #f8fafc;
++      border-color: #cbd5e1;
++      color: #0f172a;
+     }
+ 
+     svg:last-child {
+diff --git a/frontend/src/views/chat/components/AgentStreamDisplay.vue b/frontend/src/views/chat/components/AgentStreamDisplay.vue
+index da5f3c9..def9d88 100644
+--- a/frontend/src/views/chat/components/AgentStreamDisplay.vue
++++ b/frontend/src/views/chat/components/AgentStreamDisplay.vue
+@@ -441,6 +441,16 @@
+                   :title="$t('agent.addToKnowledgeBase')">
+                   <t-icon name="bookmark-add" />
+                 </t-button>
++                <!-- View source documents / PDF button -->
++                <span v-if="hasAgentReferences" class="answer-toolbar__references">
++                  <t-tooltip :content="viewSourceTooltip" placement="top">
++                    <t-button size="small" variant="outline" shape="round"
++                      @click.stop="handleToggleReferences">
++                      <t-icon name="file-search" />
++                    </t-button>
++                  </t-tooltip>
++                  <span v-if="agentReferenceCount > 1" class="answer-toolbar__references-count" aria-hidden="true">{{ agentReferenceCount }}</span>
++                </span>
+                 <!-- Skill artifact download: only shown when the persisted
+                      assistant message recorded any generated files. Agent
+                      mode is the primary path for skills, so this is where
+@@ -1198,6 +1208,55 @@ const openReferencesDrawer = (
+   return true
+ }
+ 
++const agentKnowledgeReferences = computed(() => getReferencesForDrawer());
++const hasAgentReferences = computed(() => agentKnowledgeReferences.value.length > 0);
++const agentReferenceCount = computed(() => agentKnowledgeReferences.value.length);
++const viewSourceTooltip = computed(() => {
++  const count = agentReferenceCount.value;
++  if (count > 1) {
++    return t('chat.viewSourcePdfCount', { count });
++  }
++  return t('chat.viewSourcePdf');
++});
++
++const handleToggleReferences = () => {
++  const refs = agentKnowledgeReferences.value;
++  if (!referencesDrawer || !refs.length) return;
++
++  const msgId = String(props.session?.id || props.session?.request_id || '');
++
++  if (referencesDrawer.visible.value && referencesDrawer.source.value && referencesDrawer.messageId.value === msgId) {
++    referencesDrawer.close();
++    return;
++  }
++
++  const docRef = refs.find(
++    (r) =>
++      r.chunk_type !== 'web_search' &&
++      r.chunk_type !== 'tool_result' &&
++      r.chunk_type !== 'faq' &&
++      r.knowledge_id,
++  );
++
++  if (docRef) {
++    referencesDrawer.open({
++      references: refs,
++      messageId: msgId,
++      highlight: {
++        chunkId: docRef.id || docRef.source_chunk_id,
++        openSource: true,
++        documentTitle: docRef.knowledge_title || docRef.knowledge_filename,
++        knowledgeBaseId: docRef.knowledge_base_id,
++      },
++    });
++  } else {
++    referencesDrawer.open({
++      references: refs,
++      messageId: msgId,
++    });
++  }
++};
++
+ const cleanToolOutputContent = (output: unknown): string => {
+   const raw = typeof output === 'string' ? output : '';
+   return raw
+diff --git a/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs b/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
+index fd61a65..3de6798 100644
+--- a/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
++++ b/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
+@@ -93,3 +93,17 @@ test('follow-up suggestions wait until the answer is fully rendered', () => {
+   assert.match(botMessage, /emit\('render-complete-change', ready\)/)
+   assert.match(agentStream, /emit\('render-complete-change', ready\)/)
+ })
++
++test('references toolbar button is present when references exist and opens drawer', () => {
++  assert.match(botMessage, /class="answer-toolbar__references"/)
++  assert.match(agentStream, /class="answer-toolbar__references"/)
++  assert.match(botMessage, /class="answer-toolbar__references-count"/)
++  assert.match(agentStream, /class="answer-toolbar__references-count"/)
++  assert.match(botMessage, /name="file-search"/)
++  assert.match(agentStream, /name="file-search"/)
++  assert.match(sharedStyles, /\.answer-toolbar__references\s*\{/)
++  assert.match(sharedStyles, /\.answer-toolbar__references-count\s*\{/)
++  assert.match(botMessage, /referencesDrawer\.open\(/)
++  assert.match(agentStream, /referencesDrawer\.open\(/)
++})
++
+diff --git a/frontend/src/views/chat/components/botmsg.vue b/frontend/src/views/chat/components/botmsg.vue
+index c794b18..7d4f0ac 100644
+--- a/frontend/src/views/chat/components/botmsg.vue
++++ b/frontend/src/views/chat/components/botmsg.vue
+@@ -87,6 +87,16 @@
+                     :title="$t('agent.addToKnowledgeBase')">
+                     <t-icon name="bookmark-add" />
+                 </t-button>
++                <!-- View source documents / PDF button -->
++                <span v-if="hasReferences" class="answer-toolbar__references">
++                    <t-tooltip :content="viewSourceTooltip" placement="top">
++                        <t-button size="small" variant="outline" shape="round"
++                            @click.stop="handleToggleReferences">
++                            <t-icon name="file-search" />
++                        </t-button>
++                    </t-tooltip>
++                    <span v-if="referenceCount > 1" class="answer-toolbar__references-count" aria-hidden="true">{{ referenceCount }}</span>
++                </span>
+                 <!-- Skill artifact download: only shown when this reply's
+                      assistant message actually recorded any generated files.
+                      Emptiness is the default: the button stays hidden for
+@@ -185,6 +195,7 @@ import {
+ } from '@/utils/mermaidShared';
+ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
+ import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
++import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+ import { useTypewriter } from '@/composables/useTypewriter';
+ import { vStableHtml } from '@/directives/stableHtml';
+ import { SKILL_ICON } from '@/types/mention';
+@@ -271,6 +282,53 @@ const emitRewind = () => {
+ 
+ const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+ 
++const referencesDrawer = useChatReferencesDrawer();
++const knowledgeReferences = computed(() => {
++    const raw = props.session?.knowledge_references;
++    return Array.isArray(raw) ? raw.filter(Boolean) : [];
++});
++const hasReferences = computed(() => knowledgeReferences.value.length > 0);
++const referenceCount = computed(() => knowledgeReferences.value.length);
++const viewSourceTooltip = computed(() => {
++    const count = referenceCount.value;
++    if (count > 1) {
++        return t('chat.viewSourcePdfCount', { count });
++    }
++    return t('chat.viewSourcePdf');
++});
++
++const handleToggleReferences = () => {
++    const refs = knowledgeReferences.value;
++    if (!referencesDrawer || !refs.length) return;
++
++    const msgId = String(props.session?.id || props.session?.request_id || '');
++
++    if (referencesDrawer.visible.value && referencesDrawer.source.value && referencesDrawer.messageId.value === msgId) {
++        referencesDrawer.close();
++        return;
++    }
++
++    const docRef = refs.find(r => r.chunk_type !== 'web_search' && r.chunk_type !== 'tool_result' && r.chunk_type !== 'faq' && r.knowledge_id);
++
++    if (docRef) {
++        referencesDrawer.open({
++            references: refs,
++            messageId: msgId,
++            highlight: {
++                chunkId: docRef.id || docRef.source_chunk_id,
++                openSource: true,
++                documentTitle: docRef.knowledge_title || docRef.knowledge_filename,
++                knowledgeBaseId: docRef.knowledge_base_id,
++            }
++        });
++    } else {
++        referencesDrawer.open({
++            references: refs,
++            messageId: msgId,
++        });
++    }
++};
++
+ // -----------------------------------------------------------------------------
+ // Skill artifact download (drawer in embedded mode; sandbox panel otherwise)
+ // -----------------------------------------------------------------------------
 diff --git a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue b/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
 index eb5073c..eddae6a 100644
 --- a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
@@ -106,7 +1871,7 @@ index 2697fd6..d3a9c36 100644
  	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
  	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
 diff --git a/internal/container/container.go b/internal/container/container.go
-index 87c3ff0..5723daa 100644
+index 87c3ff0..2e50968 100644
 --- a/internal/container/container.go
 +++ b/internal/container/container.go
 @@ -21,7 +21,6 @@ import (
@@ -117,7 +1882,44 @@ index 87c3ff0..5723daa 100644
  	esv7 "github.com/elastic/go-elasticsearch/v7"
  	"github.com/elastic/go-elasticsearch/v8"
  	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
-@@ -1790,39 +1789,6 @@ func initNeo4jClient() (neo4j.Driver, error) {
+@@ -885,7 +884,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+ 			}
+ 		}
+ 		sqlite_vec.Auto()
+-		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
++		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=60000&_foreign_keys=on&_txlock=immediate"
+ 		dialector = sqlite.Open(dsn)
+ 		sqliteDBPath = dbPath
+ 		migrateDSN = "sqlite3://" + dbPath
+@@ -919,6 +918,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+ 		if err != nil {
+ 			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+ 		}
++		// In embedded SQLite mode, restrict connection pool to 1 open connection.
++		// Go's database/sql connection pool serializes all read/write transactions
++		// in memory, eliminating SQLite file-level lock contention and "database is locked" errors.
++		sqlDB.SetMaxOpenConns(1)
++		sqlDB.SetMaxIdleConns(1)
+ 		if err := sqlDB.Ping(); err != nil {
+ 			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+ 		}
+@@ -972,10 +976,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+ 
+ 	// Configure connection pool parameters
+ 	if os.Getenv("DB_DRIVER") == "sqlite" {
+-		// SQLite only supports one concurrent writer even in WAL mode.
+-		// Limiting to a single open connection serialises all DB access and
+-		// prevents "database is locked" errors from concurrent goroutines.
+-		sqlDB.SetMaxOpenConns(1)
++		// SQLite WAL mode supports concurrent readers without blocking.
++		// Using a modest pool prevents goroutines from head-of-line blocking
++		// on concurrent read requests while busy_timeout handles serialized writes.
++		sqlDB.SetMaxOpenConns(10)
++		sqlDB.SetMaxIdleConns(5)
+ 	} else {
+ 		sqlDB.SetMaxIdleConns(10)
+ 	}
+@@ -1790,39 +1795,6 @@ func initNeo4jClient() (neo4j.Driver, error) {
  	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
  }
  

@@ -31,7 +31,17 @@ set PATCH_FILE=%MODULE_DIR%\patches\weknora_lite.patch
 set CURRENT_COMMIT=unknown
 for /f %%i in ('git rev-parse HEAD 2^>nul') do set CURRENT_COMMIT=%%i
 if not "!CURRENT_COMMIT!"=="%PINNED_COMMIT%" (
-    echo [WARN] Repository commit !CURRENT_COMMIT! differs from pinned revision %PINNED_COMMIT%
+    echo.
+    echo [ERROR] ===============================================================
+    echo [ERROR] Upstream repository commit differs from reviewed pin!
+    echo [ERROR] Expected pinned commit: %PINNED_COMMIT%
+    echo [ERROR] Actual checked out commit: !CURRENT_COMMIT!
+    echo [ERROR]
+    echo [ERROR] Build halted by default to enforce reviewed code and patch integrity.
+    echo [ERROR] Updating to a new pin requires an explicit review, verifying
+    echo [ERROR] weknora_lite.patch applies cleanly, and updating PINNED_COMMIT in build_lite.bat.
+    echo [ERROR] ===============================================================
+    exit /b 1
 ) else (
     echo [INFO] Upstream revision verified: %PINNED_COMMIT%
 )
@@ -71,9 +81,11 @@ if !errorlevel! equ 0 (
 
 :: Step 1: Check Node.js and build Frontend assets
 echo [1/3] Checking frontend assets...
-if exist "%REPO_DIR%\web\index.html" (
-    echo [INFO] Frontend assets already built at "%REPO_DIR%\web". Skipping frontend build.
-    goto check_go
+if not defined REBUILD_FRONTEND (
+    if exist "%REPO_DIR%\web\index.html" (
+        echo [INFO] Frontend assets already built at "%REPO_DIR%\web". Skipping frontend build.
+        goto check_go
+    )
 )
 if defined SKIP_FRONTEND (
     echo [INFO] SKIP_FRONTEND set, skipping frontend build.

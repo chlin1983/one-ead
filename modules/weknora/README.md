@@ -141,15 +141,35 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 
 ### Security & Isolation Controls
 
-1. **Origin & CSRF Defense**: All modifying portal management APIs (`/start`, `/stop`, `/restart`, `/config`, `/build/frontend`) verify caller headers to ensure requests originate exclusively from the local portal (`127.0.0.1` / `localhost`) and reject cross-site requests (`Sec-Fetch-Site: cross-site`).
-2. **Auto-Setup Authentication Barrier**: Standalone auto-setup requires an internal high-entropy setup token (`WEKNORA_LITE_SETUP_TOKEN`) generated at startup, preventing unauthorized administrative token minting on port 8082.
-3. **Configuration Masking & Allowlist**: Status responses strictly filter out sensitive credentials (`OPENAI_API_KEY`, `JWT_SECRET`, `SYSTEM_AES_KEY`). Configuration updates are validated against a strict key allowlist, rejecting CRLF injection and host rebound attempts.
-4. **SSRF Mitigation**: Health check endpoints and reverse proxies strictly validate target URLs against loopback allowlists (`127.0.0.1`, `localhost`).
-5. **Deterministic Builds**: Build scripts pin the upstream WeKnora revision (`2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5`), enforce clean patch application, and record build metadata.
+1. **Origin & CSRF Defense**: All portal management and proxy APIs verify request origin and fetch metadata. Requests are validated using exact URL parsing (`urllib.parse.urlsplit`), requiring loopback hostnames (`127.0.0.1`, `localhost`, `::1`) and approved portal ports (`8100`, `8082`). Hostname prefix tricks (`127.0.0.1.attacker.com`) and cross-site requests (`Sec-Fetch-Site: cross-site`) are rejected with HTTP 403. An explicit safe policy requires valid origin/referer headers on all mutating operations (`POST`, `PUT`, `DELETE`).
+2. **Desktop Auto-Setup Authentication Barrier**: The auto-setup endpoint requires a high-entropy, 256-bit setup token (`WEKNORA_LITE_SETUP_TOKEN`) generated at startup and compared in constant time (`subtle.ConstantTimeCompare` / `secrets.compare_digest`). The reverse proxy strictly verifies caller possession of the token before proxying auto-setup requests, preventing authorization bypasses while preserving the automated first-run setup for the local portal.
+3. **SSRF Mitigation & Approved Ports**: Ollama health checks and endpoints are strictly validated and canonicalized against loopback hosts (`127.0.0.1`, `localhost`, `::1`) and explicitly approved ports (`11434`, `11435`). Credentials, userinfo tricks (`user@host`), unexpected ports (such as SSH, MySQL, or web admin ports), and path injection are strictly rejected.
+4. **Configuration Allowlist & Preset Integrity**: Status responses strictly filter out sensitive credentials (`OPENAI_API_KEY`, `JWT_SECRET`, `SYSTEM_AES_KEY`). Configuration updates are validated against a strict key allowlist, rejecting arbitrary keys and verifying values against strict schemas before writing to prevent configuration corruption. The 6GB preset keys (`STREAM_MANAGER_TYPE`, `DB_DRIVER`, `RETRIEVE_DRIVER`, `STORAGE_TYPE`) are strictly validated against their Lite runtime drivers (`memory`, `sqlite`, `local`).
+5. **Deterministic Builds & Pinned Upstream Enforcement**: Build scripts pin the reviewed upstream WeKnora revision (`2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5`). Build pipelines halt by default with exit code 1 if the checked-out upstream commit differs from the reviewed pin or if patches do not apply cleanly. Frontend dependencies are installed using `--ignore-scripts`.
+6. **Content Security Policy Preservation**: When proxying WeKnora through One EAD, upstream CSP directives (`default-src`, `script-src`, `style-src`, etc.) are preserved intact while dynamically adapting `frame-ancestors` (`'self' http://127.0.0.1:* http://localhost:*`) to permit local portal embedding without degrading security posture.
 
-### Outbound Network Actions to Review
+---
 
-Outbound network traffic may be initiated under the following scenarios:
-1. **Configuring External LLM / Embedding Providers**: If you configure remote endpoints or cloud API keys (e.g. OpenAI, DeepSeek, or remote Ollama servers) in `.env.lite` or Settings, model inference requests will travel to those configured hosts.
-2. **Importing via "Web URL"**: If you use the *Add Document* dialog and enter an external HTTP/HTTPS URL, WeKnora will attempt to fetch and parse that web resource.
-3. **Installing Dependencies during Build**: Running the optional frontend rebuild script will invoke `npm install` (executed with `--ignore-scripts`). Default pre-built static assets are bundled locally and do not require internet access at runtime.
+## 6. Upstream Advisory Review & Scope
+
+| Advisory / CVE | Upstream Context | One EAD / WeKnora Lite Applicability |
+| :--- | :--- | :--- |
+| **CVE-2026-30860** (PostgreSQL RCE) | Unsanitized child nodes in PostgreSQL row/array expressions in `<= 0.2.11` | **Not Applicable in Lite**: Lite mode completely eliminates PostgreSQL and runs on embedded SQLite. |
+| **CVE-2026-108821** (Subquery SQLi) | SQL injection in subquery validation (`<= 0.8.1`) | **Mitigated**: Upstream pinned commit (`2fbfb44`) contains post-0.8.x tree revisions, and Lite runs strictly local SQLite queries. |
+| **CVE-2026-30861** (MCP Command Injection) | Unsanitized argument injection in MCP stdio configurations (`0.2.5` - `0.2.10`) | **Mitigated**: Upstream revision is pinned past the affected branch; external MCP processes are disabled in Lite configuration. |
+| **CVE-2026-91750 / CVE-2026-30247** (URL Ingestion SSRF) | SSRF via HTTP redirects when ingesting external URLs (`< 0.7.0`) | **Mitigated by Local-First Policy**: External URL ingestion is not used for local document workflows. Python `doc_extractor.py` parses local files directly without outbound HTTP requests. |
+
+---
+
+## 7. Operational Boundaries & Threat Model
+
+* **Loopback Limitation**: Loopback binding (`127.0.0.1`) protects the application from incoming requests from external local area networks (LAN) or the internet. However, loopback binding **does not** protect against other unprivileged or malicious processes running locally under the same OS user.
+* **No LAN Exposure**: Do not expose One EAD or WeKnora to a local area network (e.g. by binding to `0.0.0.0` or using port forwarding) unless a full multi-user authentication, authorization, and session management architecture is explicitly implemented and verified.
+* **Updating the Pinned Upstream Commit Safely**:
+  To update to a newer upstream WeKnora commit:
+  1. Fetch and inspect commits: `git -C modules/weknora/WeKnora fetch origin`
+  2. Perform a security diff review: `git -C modules/weknora/WeKnora diff <OLD_PIN> <NEW_PIN>`
+  3. Verify clean application of `modules/weknora/patches/weknora_lite.patch` or rebase the patch.
+  4. Update `PINNED_COMMIT` in `modules/weknora/scripts/build_lite.bat`.
+  5. Run automated tests and recompile binary.
+
