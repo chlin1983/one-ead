@@ -8,8 +8,57 @@ without needing Docker or any external cloud services.
 import sys
 import os
 import io
-
+import re
+import shutil
+import subprocess
+import tempfile
 import unicodedata
+
+def find_tesseract_binary() -> str:
+    """Finds local Tesseract OCR executable if available."""
+    env_cmd = os.environ.get("TESSERACT_CMD")
+    if env_cmd and os.path.isfile(env_cmd):
+        return env_cmd
+    which_cmd = shutil.which("tesseract") or shutil.which("tesseract.exe")
+    if which_cmd and os.path.isfile(which_cmd):
+        return which_cmd
+    candidates = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ]
+    home = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+    if home:
+        candidates.append(os.path.join(home, "AppData", "Local", "Programs", "Tesseract-OCR", "tesseract.exe"))
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return ""
+
+def try_tesseract_ocr(page, lang="eng", dpi=200) -> str:
+    """Renders page to image and performs OCR if Tesseract is available."""
+    tess_bin = find_tesseract_binary()
+    if not tess_bin:
+        return ""
+    try:
+        pix = page.get_pixmap(dpi=dpi)
+        img_bytes = pix.tobytes("png")
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_in:
+            tmp_path = tmp_in.name
+            tmp_in.write(img_bytes)
+        try:
+            cmd = [tess_bin, tmp_path, "stdout", "-l", lang]
+            proc = subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+            out = proc.stdout.decode("utf-8", errors="replace").strip()
+            return out
+        finally:
+            if os.path.isfile(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+    except Exception:
+        return ""
+
 
 def normalize_math_unicode(text: str) -> str:
     """Normalizes Mathematical Alphanumeric Symbols (U+1D400 to U+1D7FF) to standard ASCII equivalents."""
@@ -74,19 +123,24 @@ def extract_pdf(path: str) -> str:
             if len(items) >= 2 and w > 15 and h > 8:
                 sqrt_rects.append(r)
 
-        # 2b. Extract vector drawing fraction lines and assemble LaTeX equations outside tables
+        # 2b. Extract vector drawing fraction lines, vertical modulus bars, and assemble LaTeX equations outside tables
         words = page.get_text("words")
         frac_lines = []
+        vert_bars = []
         for d in drawings:
             r = d.get("rect")
-            if not r or r.height > 3.0 or r.width < 8.0:
+            if not r:
                 continue
             if any(r.x0 >= tb[0] - 5 and r.x1 <= tb[2] + 5 and r.y0 >= tb[1] - 5 and r.y1 <= tb[3] + 5 for tb in table_bboxes):
                 continue
-            # Exclude header/footer metadata
             if r.y0 < 110 or r.y1 > 750:
                 continue
-            frac_lines.append(r)
+            # Fraction line
+            if r.height <= 3.0 and r.width >= 8.0:
+                frac_lines.append(r)
+            # Vertical stroke bar (modulus / absolute value / norm)
+            elif r.width <= 2.5 and r.height >= 8.0:
+                vert_bars.append(r)
 
         # Group into equation rows
         frac_rows = {}
@@ -116,17 +170,48 @@ def extract_pdf(path: str) -> str:
                 for w in row_words:
                     cx = (w[0] + w[2]) / 2.0
                     cy = (w[1] + w[3]) / 2.0
-                    if (fl.x0 - 3.0 <= cx <= fl.x1 + 3.0 or
+                    if (fl.x0 - 4.0 <= cx <= fl.x1 + 4.0 or
                         (w[0] >= fl.x0 - 2.0 and w[2] <= fl.x1 + 2.0) or
                         (w[2] > fl.x0 and w[0] < fl.x1 and (w[2] - max(w[0], fl.x0)) >= 0.5 * (w[2] - w[0]))):
+                        txt = normalize_math_unicode(w[4])
                         if cy < avg_y:
-                            above.append(w)
+                            above.append((w[0], txt))
                         elif cy > avg_y:
-                            below.append(w)
+                            below.append((w[0], txt))
+
+                # Include vertical modulus bars (|) within horizontal span of fraction
+                for vb in vert_bars:
+                    if fl.x0 - 4.0 <= vb.x0 <= fl.x1 + 4.0:
+                        if vb.y1 <= avg_y + 3.0 and abs(vb.y1 - avg_y) <= 25.0:
+                            above.append((vb.x0, "|"))
+                        elif vb.y0 >= avg_y - 3.0 and abs(vb.y0 - avg_y) <= 25.0:
+                            below.append((vb.x0, "|"))
+
                 if not above or not below:
                     continue
-                num_str = " ".join(normalize_math_unicode(w[4]) for w in sorted(above, key=lambda x: x[0])).strip()
-                den_str = " ".join(normalize_math_unicode(w[4]) for w in sorted(below, key=lambda x: x[0])).strip()
+
+                above.sort(key=lambda x: x[0])
+                below.sort(key=lambda x: x[0])
+
+                num_str = " ".join(x[1] for x in above).strip()
+                den_str = " ".join(x[1] for x in below).strip()
+
+                # Clean up spacing around | and parentheses and variable subscripts
+                for target_str in ("num_str", "den_str"):
+                    val = locals()[target_str]
+                    val = re.sub(r'\|\s*', '|', val)
+                    val = re.sub(r'\s*\|', '|', val)
+                    val = re.sub(r'\(\s*', '(', val)
+                    val = re.sub(r'\s*\)', ')', val)
+                    val = re.sub(r'\s*−\s*', ' - ', val)
+                    val = re.sub(r'\s*\+\s*', ' + ', val)
+                    val = re.sub(r'f\s*([0-9])', r'f_{\1}', val)
+                    val = re.sub(r'p\s*\(', r'p(', val)
+                    if target_str == "num_str":
+                        num_str = val
+                    else:
+                        den_str = val
+
                 if not num_str or not den_str:
                     continue
 
@@ -137,8 +222,10 @@ def extract_pdf(path: str) -> str:
 
                 frac_latex = f"{prefix}\\frac{{{num_str}}}{{{den_str}}}"
                 frac_map[fl.x0] = frac_latex
-                for w in above + below:
-                    used_words.add(id(w))
+                for w in row_words:
+                    cx = (w[0] + w[2]) / 2.0
+                    if fl.x0 - 4.0 <= cx <= fl.x1 + 4.0:
+                        used_words.add(id(w))
 
             if not frac_map:
                 continue
@@ -157,6 +244,8 @@ def extract_pdf(path: str) -> str:
             elements.sort(key=lambda x: x[0])
             eq_text = " ".join(e[1] for e in elements)
             if eq_text:
+                # Format left side subscripts (e.g. D DF 2- -> D_{DF2-})
+                eq_text = re.sub(r'D\s+DF\s+([0-9][\+\-]*)', r'D_{DF\1}', eq_text)
                 combined_items.append((avg_y, "formula", f"$$\n{eq_text}\n$$"))
                 min_x = min(w[0] for w in row_words)
                 max_x = max(w[2] for w in row_words)
@@ -181,8 +270,8 @@ def extract_pdf(path: str) -> str:
             if any(b_bbox[0] >= tb[0] - 5 and b_bbox[2] <= tb[2] + 5 and b_bbox[1] >= tb[1] - 5 and b_bbox[3] <= tb[3] + 5 for tb in table_bboxes):
                 continue
 
-            # Exclude text that is already captured inside an equation row
-            if any(b_bbox[0] >= sr[0] and b_bbox[2] <= sr[2] and b_bbox[1] >= sr[1] and b_bbox[3] <= sr[3] for sr in equation_suppress_rects):
+            # Exclude text that is already captured inside an equation row (check vertical & horizontal overlap)
+            if any(abs((b_bbox[1] + b_bbox[3]) / 2.0 - ((sr[1] + sr[3]) / 2.0)) <= 15.0 and max(b_bbox[0], sr[0]) < min(b_bbox[2], sr[2]) for sr in equation_suppress_rects):
                 continue
 
             bh = b_bbox[3] - b_bbox[1]
@@ -273,6 +362,11 @@ def extract_pdf(path: str) -> str:
         # Sort all items (tables and text) by vertical y0 coordinate
         combined_items.sort(key=lambda x: x[0])
         page_text = "\n\n".join(item[2] for item in combined_items).strip()
+        if not page_text or len(page_text.split()) < 8:
+            ocr_res = try_tesseract_ocr(page)
+            if ocr_res:
+                page_text = f"{page_text}\n\n{ocr_res}".strip() if page_text else ocr_res
+
         if page_text:
             pages.append(f"<!-- Page {i+1} -->\n{page_text}")
 

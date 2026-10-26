@@ -18,6 +18,12 @@ PdfCraft is a full-featured, private, and local PDF workbench compiled to WebAss
 - **Forms, Layers & Comments**: Interactive form field filling, optional content layer visibility toggling, and review comments.
 - **Command Palette**: <kbd>Ctrl+K</kbd> (or <kbd>Cmd+K</kbd>) to instantly search and launch every tool and action.
 - **Fearless Undo**: Deep multi-level undo (<kbd>Ctrl+Z</kbd>) that stays functional even after saving.
+- **Clean Distraction-Free Chrome**: External Discord community buttons have been removed for an uncluttered, focused workbench experience.
+- **Manual-Only On-Demand Updates (SolidCraft Style)**:
+  - No background 24-hour automatic update routines or battery/bandwidth drains.
+  - Users can manually check for releases via the settings menu ("Check for updates").
+  - When a newer version is available on GitHub, the workbench displays a prominent "Update available" badge and an "Update to vX.Y.Z" button.
+  - Clicking update runs an automated download and unpack process, followed by a 1-click "Reload to use new version" button.
 - **One EAD Local Workbench Library**:
   - Local disk storage under `data/docs/` for engineering reports and datasheets.
   - Seamless document selector and 1-click PDF upload.
@@ -32,14 +38,14 @@ modules/pdfcraft/
 ├── README.md           # Plugin documentation
 ├── __init__.py         # Package entrypoint exposing MODULE
 ├── module.py           # PortalModule manifest & FastAPI endpoints (/api/pdfcraft)
-├── pdfcraft.py         # Lifecycle manager, version checker, and document library
+├── pdfcraft.py         # Lifecycle manager, manual version checker, and document library
 ├── data/
 │   ├── config.json     # User preferences & channel config
 │   ├── installed.json  # Installed version signature
 │   └── docs/           # Local PDF library & specimens
 └── web/
-    ├── index.html      # Host container with workbench bar & iframe
+    ├── index.html      # Host container with workbench bar, update chips & iframe
     ├── wrapper.css     # Responsive workbench styling (light & dark)
-    ├── wrapper.js      # Document switching, upload, fullscreen, and update client
+    ├── wrapper.js      # Document switching, upload, fullscreen, and manual update controller
     └── app/            # Extracted upstream WebAssembly bundle (WASM + JS + HTML)
 ```

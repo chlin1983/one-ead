@@ -30,6 +30,7 @@ const el = {
   dot: document.getElementById("stage-dot"),
   reloadBtn: document.getElementById("reload-btn"),
   openNewBtn: document.getElementById("open-new-btn"),
+  fullscreenBtn: document.getElementById("fullscreen-btn"),
   collapseBtn: document.getElementById("collapse-btn"),
   themeToggle: document.getElementById("theme-toggle"),
 };
@@ -137,7 +138,7 @@ function renderSidebar() {
     btn.innerHTML = `
       <span class="m-icon">${m.icon || FALLBACK_ICON}</span>
       <span class="m-text">
-        <span class="m-title">${escapeHtml(m.title)}</span>
+        <span class="m-title">${escapeHtml(m.title)}${m.badge ? ` <span class="m-badge">${escapeHtml(m.badge)}</span>` : ""}</span>
         <span class="m-sub">${escapeHtml(m.subtitle || "")}</span>
       </span>
       <span class="m-grip" title="Drag up or down to relocate">
@@ -274,7 +275,10 @@ function renderLanding() {
       <span class="tc-grip" title="Drag to relocate">
         ${GRIP_ICON}
       </span>
-      <span class="tc-icon">${m.icon || FALLBACK_ICON}</span>
+      <div class="tc-top">
+        <span class="tc-icon">${m.icon || FALLBACK_ICON}</span>
+        ${m.badge ? `<span class="tc-badge">${escapeHtml(m.badge)}</span>` : ""}
+      </div>
       <h3>${escapeHtml(m.title)}</h3>
       <p>${escapeHtml(m.subtitle || "")}</p>
       <span class="tc-launch">Launch
@@ -397,6 +401,7 @@ function showLanding() {
   el.frameHost.hidden = true;
   el.reloadBtn.hidden = true;
   el.openNewBtn.hidden = true;
+  if (el.fullscreenBtn) el.fullscreenBtn.hidden = true;
 
   // Reset stage header back to portal welcome title
   el.title.textContent = "Welcome";
@@ -434,6 +439,7 @@ function openModule(id, updateHash = true) {
   el.frameHost.hidden = false;
   el.reloadBtn.hidden = false;
   el.openNewBtn.hidden = false;
+  if (el.fullscreenBtn) el.fullscreenBtn.hidden = false;
 
   // Hide every other cached iframe; only the active plugin's frame is shown.
   if (isSwitch) {
@@ -485,7 +491,7 @@ function wireChrome() {
     frame?.contentWindow?.postMessage({ type: "ead:escape" }, window.location.origin);
   });
 
-  // Handle fullscreen keyboard lock (e.g. Chili3D CAD uses Escape to deselect objects without exiting fullscreen)
+  // Handle fullscreen keyboard lock (e.g. CAD tools use Escape to deselect objects without exiting fullscreen)
   window.addEventListener("message", async (e) => {
     if (e.data && e.data.type === "ead:fullscreen-lock-esc") {
       if (e.data.lock) {
@@ -543,6 +549,80 @@ function wireChrome() {
   el.openNewBtn.addEventListener("click", () => {
     const m = state.modules.find((x) => x.id === state.activeId);
     if (m) window.open(m.entry, "_blank");
+  });
+
+  function togglePluginFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+
+    const activeFrame = state.frames[state.activeId];
+    if (!activeFrame) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      return;
+    }
+
+    // Target the inner CAD canvas frame directly so the wrapper sub-bar is completely absent
+    let target = activeFrame;
+    try {
+      const innerDoc = activeFrame.contentDocument || activeFrame.contentWindow?.document;
+      if (innerDoc) {
+        innerDoc.body?.classList.add("fs");
+        const innerFrame = innerDoc.getElementById("app-frame");
+        if (innerFrame) {
+          target = innerFrame;
+        }
+      }
+    } catch (_) {}
+
+    target.requestFullscreen().catch(() => {
+      if (target !== activeFrame) {
+        activeFrame.requestFullscreen().catch(() => {
+          document.documentElement.requestFullscreen().catch(() => {});
+        });
+      } else {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    });
+  }
+
+  el.fullscreenBtn?.addEventListener("click", togglePluginFullscreen);
+
+  // Intercept F11 so it triggers true edge-to-edge CAD fullscreen instead of just window fullscreen
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "F11") {
+      e.preventDefault();
+      togglePluginFullscreen();
+    }
+  });
+
+  // Listen for F11 or fullscreen requests from inside plugin iframes
+  window.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "ead:toggle-fullscreen") {
+      togglePluginFullscreen();
+    }
+  });
+
+  document.addEventListener("fullscreenchange", () => {
+    const isFs = Boolean(document.fullscreenElement);
+    if (el.fullscreenBtn) {
+      el.fullscreenBtn.classList.toggle("active", isFs);
+      const span = el.fullscreenBtn.querySelector("span");
+      if (span) span.textContent = isFs ? "Exit Full Screen" : "Full Screen";
+    }
+
+    // Broadcast fullscreen state to active iframe and ensure wrapper bar is hidden
+    const activeFrame = state.frames[state.activeId];
+    if (activeFrame) {
+      try {
+        activeFrame.contentWindow?.postMessage({ type: "ead:fullscreen-change", isFullscreen: isFs }, "*");
+        const innerDoc = activeFrame.contentDocument || activeFrame.contentWindow?.document;
+        if (innerDoc) {
+          innerDoc.body?.classList.toggle("fs", isFs);
+        }
+      } catch (_) {}
+    }
   });
 
   el.collapseBtn.addEventListener("click", () => {

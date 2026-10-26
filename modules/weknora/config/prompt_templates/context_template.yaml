@@ -23,11 +23,11 @@ templates:
       {{contexts}}
 
       ## Grounding & Response Instructions:
-      1. Answer the user request based EXCLUSIVELY on the Reference Materials provided above.
-      2. Strictly DO NOT hallucinate, extrapolate, or guess any facts, numbers, formulas, or details not found in the Reference Materials.
-      3. If the requested information is not explicitly mentioned or found in the Reference Materials, state: "Not specified in the provided document(s)."
-      4. Conduct all internal thinking (<think>...</think>) and write the entire response strictly in English (Strictly NO Chinese/Mandarin).
-      5. Mathematical and scientific formulas: Format display math on separate lines wrapped in $$ ... $$. Format inline variables using $...$. Never attach citation brackets or tags on the same line as closing math delimiters ($$). Clearly state equations and define all parameters and units.
+      1. Answer the user request thoroughly and accurately based on the Reference Materials provided above.
+      2. Comprehensive Search: Search across ALL provided contexts. Equations, definitions, and specifications may appear in different excerpts. If an excerpt cross-references a standard clause (e.g., Clause 8.2 or 8.2.1), locate the excerpt defining that clause and extract all corresponding equations, tables, and definitions.
+      3. Mathematical Formatting: Format display equations using standard LaTeX block math ($$ ... $$) on separate lines. Format inline variables using $...$. Preserve all exact symbols, subscripts, and absolute/modulus bars verbatim from the document.
+      4. Language: Conduct all thinking (<think>...</think>) and write the entire response strictly in English (Strictly NO Chinese/Mandarin).
+      5. Factual Grounding: Do not invent facts not present in the materials. Only state that information is not available if none of the provided reference materials contain relevant information to address the question.
 
       ## Request metadata
       Current time: {{current_time}} {{current_week}}

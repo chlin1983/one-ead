@@ -304,18 +304,227 @@ def delete_document(filename: str) -> bool:
     return False
 
 
+def _force_hwnd_to_top(hwnd: int, folder_name: str = "") -> None:
+    """Helper to bring Explorer window to absolute top of z-order over browser window."""
+    try:
+        import ctypes
+        import time
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        if not hwnd:
+            return
+
+        user32.IsWindow.argtypes = [wintypes.HWND]
+        user32.IsWindow.restype = wintypes.BOOL
+        user32.SetWindowPos.argtypes = [wintypes.HWND, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        user32.SetWindowPos.restype = wintypes.BOOL
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.ShowWindow.restype = wintypes.BOOL
+        user32.BringWindowToTop.argtypes = [wintypes.HWND]
+        user32.BringWindowToTop.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+        user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        user32.GetAncestor.restype = wintypes.HWND
+
+        # Switch to input desktop so user32 functions see interactive desktop windows
+        try:
+            hdesk = user32.OpenInputDesktop(0, False, 0x10000000)
+            if hdesk:
+                user32.SetThreadDesktop(hdesk)
+        except Exception:
+            pass
+
+        # Resolve to root window if child window/tab
+        root_hwnd = user32.GetAncestor(hwnd, 2) or hwnd
+        if not user32.IsWindow(root_hwnd):
+            root_hwnd = hwnd
+
+        if not user32.IsWindow(root_hwnd):
+            return
+
+        # Restore window if minimized
+        if user32.IsIconic(root_hwnd):
+            user32.ShowWindow(root_hwnd, 9)  # SW_RESTORE
+        else:
+            user32.ShowWindow(root_hwnd, 5)  # SW_SHOW
+
+        # Simulate Alt key down/up to bypass Windows ForegroundLockTimeout
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, 2, 0)
+
+        # AttachThreadInput
+        cur_thread = kernel32.GetCurrentThreadId()
+        fg_hwnd = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        target_thread = user32.GetWindowThreadProcessId(root_hwnd, None)
+
+        if fg_thread and fg_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, fg_thread, True)
+        if target_thread and target_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, target_thread, True)
+
+        SWP_FLAGS = 0x0001 | 0x0002 | 0x0040  # SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW
+        HWND_TOPMOST = ctypes.c_void_p(-1)
+        HWND_NOTOPMOST = ctypes.c_void_p(-2)
+
+        # Place window at HWND_TOPMOST so it rises above the browser immediately
+        user32.SetWindowPos(root_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_FLAGS)
+        user32.BringWindowToTop(root_hwnd)
+        user32.SetForegroundWindow(root_hwnd)
+        user32.SwitchToThisWindow(root_hwnd, True)
+
+        if fg_thread and fg_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, fg_thread, False)
+        if target_thread and target_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, target_thread, False)
+
+        # Release topmost status after a short delay so the window behaves normally
+        def _release():
+            time.sleep(0.8)
+            try:
+                user32.SetWindowPos(root_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+            except Exception:
+                pass
+
+        threading.Thread(target=_release, daemon=True).start()
+
+    except Exception:
+        pass
+
+
+def _activate_explorer_window(target_path_str: str) -> None:
+    """Helper running in background thread to locate and force Explorer window on top of browser."""
+    import time
+    target_norm = os.path.normpath(target_path_str).lower()
+    folder_name = os.path.basename(target_norm).lower()
+
+    for attempt in range(8):
+        time.sleep(0.3)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            user32.IsWindow.argtypes = [wintypes.HWND]
+            user32.IsWindow.restype = wintypes.BOOL
+
+            try:
+                hdesk = user32.OpenInputDesktop(0, False, 0x10000000)
+                if hdesk:
+                    user32.SetThreadDesktop(hdesk)
+            except Exception:
+                pass
+
+            matched_hwnds = []
+            try:
+                import pythoncom
+                import win32com.client
+                pythoncom.CoInitialize()
+                try:
+                    shell = win32com.client.Dispatch("Shell.Application")
+                    for w in shell.Windows():
+                        try:
+                            loc_url = str(getattr(w, "LocationURL", "") or "").lower()
+                            loc_name = str(getattr(w, "LocationName", "") or "").lower()
+                            h = getattr(w, "HWND", 0)
+                            if h and user32.IsWindow(h):
+                                if "pdfcraft/data/docs" in loc_url or (folder_name in loc_name and "pdfcraft" in loc_url):
+                                    matched_hwnds.append(h)
+                        except Exception:
+                            pass
+                finally:
+                    pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+            if not matched_hwnds:
+                EnumWindows = user32.EnumWindows
+                EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+                EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]
+                EnumWindows.restype = wintypes.BOOL
+
+                def enum_cb(hwnd, lparam):
+                    if user32.IsWindow(hwnd):
+                        cbuf = ctypes.create_unicode_buffer(256)
+                        user32.GetClassNameW(hwnd, cbuf, 256)
+                        if cbuf.value in ("CabinetWClass", "ExploreWClass"):
+                            tlen = user32.GetWindowTextLengthW(hwnd)
+                            tbuf = ctypes.create_unicode_buffer(tlen + 1)
+                            user32.GetWindowTextW(hwnd, tbuf, tlen + 1)
+                            title = tbuf.value.lower()
+                            if folder_name and folder_name in title:
+                                matched_hwnds.append(hwnd)
+                            elif any(k in title for k in ("docs", "pdfcraft")):
+                                matched_hwnds.append(hwnd)
+                    return True
+
+                EnumWindows(EnumWindowsProc(enum_cb), 0)
+
+            if matched_hwnds:
+                _force_hwnd_to_top(matched_hwnds[-1], folder_name)
+                break
+        except Exception:
+            pass
+
+
 def reveal_docs_dir() -> dict:
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     full_path = str(DOCS_DIR.resolve())
     target_file = next(DOCS_DIR.glob("*.pdf"), None)
     try:
-        import subprocess
         if os.name == "nt":
-            if target_file and target_file.is_file():
-                subprocess.Popen(["explorer.exe", f"/select,{str(target_file.resolve())}"])
-            else:
-                subprocess.Popen(["explorer.exe", f"/n,{full_path}"])
+            # 1. Check if an existing PdfCraft docs window is already open in COM
+            found_existing = False
+            try:
+                import pythoncom
+                import win32com.client
+                pythoncom.CoInitialize()
+                try:
+                    shell = win32com.client.Dispatch("Shell.Application")
+                    for w in shell.Windows():
+                        try:
+                            url = str(w.LocationURL or "").lower()
+                            name = str(w.LocationName or "").lower()
+                            if "pdfcraft/data/docs" in url or (name == "docs" and "pdfcraft" in url):
+                                _force_hwnd_to_top(w.HWND, DOCS_DIR.name)
+                                found_existing = True
+                                break
+                        except Exception:
+                            continue
+                finally:
+                    pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+            if not found_existing:
+                if target_file and target_file.is_file():
+                    args = f'/select,"{str(target_file.resolve())}"'
+                else:
+                    args = f'/n,"{full_path}"'
+
+                launched = False
+                try:
+                    import pythoncom
+                    import win32com.client
+                    pythoncom.CoInitialize()
+                    try:
+                        shell = win32com.client.Dispatch("Shell.Application")
+                        shell.ShellExecute("explorer.exe", args, "", "open", 1)
+                        launched = True
+                    finally:
+                        pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+                if not launched:
+                    import subprocess
+                    subprocess.Popen(f'explorer.exe {args}')
+
+                threading.Thread(target=_activate_explorer_window, args=(full_path,), daemon=True).start()
         else:
+            import subprocess
             subprocess.Popen(["xdg-open", full_path])
         return {"status": "ok", "path": full_path}
     except Exception as exc:
@@ -379,15 +588,6 @@ def check_latest(force: bool = False) -> dict:
             _latest["info"] = info
             _latest["checked_at"] = time.time()
             _latest["error"] = None
-
-        # If auto_update is enabled, seamlessly install new bug-fixed build in the background
-        if get_config().get("auto_update") and info.get("download_url"):
-            inst = get_installed()
-            if inst and inst.get("version") != info.get("version"):
-                _log_line(f"Auto-update: new version {info.get('version')} detected. Updating engine...")
-                start_install(force=True, target_info=info)
-
-        with _latest_lock:
             return dict(_latest)
     except Exception as exc:
         with _latest_lock:
@@ -488,10 +688,6 @@ def status() -> dict:
         latest_ver = latest_info.get("version") if latest_info else None
         last_checked = _latest.get("checked_at", 0.0)
 
-    # Automatically check official GitHub for bug fixes on launch in the background (TTL 30 min)
-    if (time.time() - last_checked > LATEST_TTL_S) and _job["state"] != "running":
-        threading.Thread(target=check_latest, kwargs={"force": False}, daemon=True).start()
-
     installed_ver = inst.get("version") if inst else None
     has_update = bool(installed_ver and latest_ver and installed_ver != latest_ver)
 
@@ -502,15 +698,21 @@ def status() -> dict:
     except Exception:
         source_info = None
 
+    last_checked_iso = datetime.fromtimestamp(last_checked, timezone.utc).isoformat() if last_checked > 0 else None
+
     return {
         "installed": inst is not None,
         "installed_version": installed_ver,
         "latest_version": latest_ver,
+        "update_available": has_update,
         "has_update": has_update,
         "latest_info": latest_info,
+        "latest": latest_info,
+        "last_checked": last_checked_iso,
         "source": source_info,
         "job": job_copy,
         "job_log": list(_job_log),
         "docs_count": len(list(DOCS_DIR.glob("*.pdf"))),
+        "docs_dir": str(DOCS_DIR.resolve()),
         "entry_url": ENTRY_URL,
     }

@@ -40,17 +40,21 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Chili3D generated build + all local data (works, store, recents, exports, build workspace)
-modules/chili3d/web/app/
-modules/chili3d/web/app.new/
-modules/chili3d/web/app.old/
-modules/chili3d/data/
-modules/chili3d/exports/
+# CAD 3D model interchange files (local PC only)
 *.step
 *.stp
 *.iges
 *.igs
 *.brep
+
+# SolidCraft generated WebAssembly bundle + user projects + local store + upstream source
+modules/solidcraft/web/app/
+modules/solidcraft/web/app.new/
+modules/solidcraft/web/app.old/
+modules/solidcraft/data/
+modules/solidcraft/upstream/
+*.solidcraft
+
 
 # PdfCraft generated WebAssembly bundle + user documents + upstream source
 modules/pdfcraft/web/app/

@@ -26,7 +26,18 @@ import urllib.request
 
 MODULE_DIR = Path(__file__).resolve().parent
 REPO_DIR = MODULE_DIR / "WeKnora"
-DATA_DIR = MODULE_DIR / "data"
+def get_data_dir() -> Path:
+    custom_vault = os.environ.get("ONEEAD_ARCHIVE_DIR")
+    if custom_vault:
+        p = Path(custom_vault) / "weknora_data"
+        if p.exists():
+            return p
+    default_vault = Path.home() / "Documents" / "OneEAD_Archive" / "weknora_data"
+    if default_vault.exists():
+        return default_vault
+    return MODULE_DIR / "data"
+
+DATA_DIR = get_data_dir()
 CONFIGS_DIR = MODULE_DIR / "configs"
 ENV_FILE = MODULE_DIR / ".env.lite"
 ENV_TEMPLATE = CONFIGS_DIR / ".env.lite.template"
@@ -49,8 +60,25 @@ _lite_setup_token: str = secrets.token_urlsafe(32)
 def get_setup_token() -> str:
     """Returns the internal high-entropy token used for authenticating auto-setup."""
     global _lite_setup_token
+    token_file = DATA_DIR / "setup_token.txt"
+    if token_file.exists():
+        try:
+            with open(token_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    _lite_setup_token = content
+                    return _lite_setup_token
+        except Exception:
+            pass
+
     if not _lite_setup_token:
         _lite_setup_token = secrets.token_urlsafe(32)
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with open(token_file, "w", encoding="utf-8") as f:
+                f.write(_lite_setup_token)
+        except Exception:
+            pass
     return _lite_setup_token
 
 
@@ -705,9 +733,11 @@ def start_service() -> Dict[str, Any]:
         env["WEKNORA_LITE_SETUP_TOKEN"] = get_setup_token()
         env["EDITION"] = "lite"
         env["DB_DRIVER"] = "sqlite"
+        env["DB_PATH"] = str((DATA_DIR / "weknora.db").resolve()).replace("\\", "/")
         env["RETRIEVE_DRIVER"] = "sqlite"
         env["STREAM_MANAGER_TYPE"] = "memory"
         env["STORAGE_TYPE"] = "local"
+        env["LOCAL_STORAGE_BASE_DIR"] = str((DATA_DIR / "files").resolve()).replace("\\", "/")
         env["DUCKDB_SKIP_EXTENSION_LOAD"] = "1"
         env["AUTO_MIGRATE"] = "true"
         env["WEKNORA_LANGUAGE"] = cfg.get("WEKNORA_LANGUAGE", "en-US")

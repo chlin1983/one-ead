@@ -229,7 +229,7 @@ Invoke-RestMethod http://127.0.0.1:8100/api/deep-tutor/status
 
 - Set a Task model (`qwen3:4b`) and compare `gemma4:e4b` with `qwen3:8b` on real tutoring questions.
 - Test a knowledge base end to end (upload a small PDF, ask about it) with `nomic-embed-text`.
-- Optional "track `main`" channel: needs a source install plus a Next.js build, as the Chili3D plugin does. Not built.
+- Optional "track `main`" channel: needs a source install plus a Next.js build. Not built.
 - Optional privacy hardening: set `"version_check_enabled": false` in `data/home/data/user/settings/system.json`
   and turn off Auto-update in the plugin menu to remove routine outbound requests.
 - Optional: back up `data/home` on a schedule; it holds all chats, knowledge bases and API keys.

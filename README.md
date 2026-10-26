@@ -75,7 +75,7 @@ All plugins (modules) run 100% locally and offline.
 | **Balance Armature Receiver Explorer** | `balance-armature-receiver-explorer` | Static (HTML + Web Audio)                               | Real-time receiver modeling and acoustic simulation                                  | Live   |
 | **Excalidraw Whiteboard**              | `excalidraw`                         | Standalone Web Bundle                                   | Offline hand-drawn diagramming, schematics, and brainstorming whiteboard             | Live   |
 | **PdfCraft**                           | `pdfcraft`                           | Pure Rust WebAssembly                                   | Open-source PDF workbench & editor with card page organizer, forms, combine & split | Live   |
-| **Chili3D CAD**                        | `chili3d`                            | WebAssembly + OpenCascade                               | Browser-native parametric 3D CAD modeling with dual local persistence                | Live   |
+| **SolidCraft CAD**                     | `solidcraft`                         | Rust + WebAssembly (WASM/WebGPU)                       | Modern parametric 3D CAD modeling with dual local persistence & 24h release checks   | Live   |
 | **DeepTutor**                          | `deep-tutor`                         | Upstream PyPI package (`deeptutor`) in a private venv | AI tutoring workspace that always tracks the newest upstream release                 | Live   |
 | **GPT Researcher**                     | `gpt-researcher`                     | `gpt-researcher` in private venv + local Ollama       | Offline-first engineering research assistant driven by local Ollama models           | Live   |
 | **WeKnora**                            | `weknora`                            | Standalone Lite Binary (Go/SQLite) + Local LLM          | Document understanding & RAG knowledge base optimized for 6GB VRAM / 16GB RAM       | Live   |
@@ -92,14 +92,15 @@ Powered by [Excalidraw](https://github.com/excalidraw/excalidraw):
 - **100% Offline Canvas**: Packaged with all fonts, assets, and local persistence.
 - **Clean Workspace**: Streamlined toolbar without redundant branding headers for maximum drawing canvas space.
 
-#### 2. Chili3D CAD (`modules/chili3d/`)
+#### 2. SolidCraft CAD (`modules/solidcraft/`)
 
-Powered by [Chili3D](https://github.com/xiangechen/chili3d):
+Powered by [SolidCraft](https://github.com/tangency-labs/solidcraft):
 
-- **Parametric 3D Solid Modeling**: Full CAD capabilities with sketches, extrusions, revolutions, fillets, and booleans in WebAssembly.
-- **Dual Persistence Mirror**: Saves instantaneously to browser IndexedDB and mirrors projects to server disk (`data/store/`) so models persist across cache clears and restarts.
-- **Document Switcher & Auto-save**: Multi-document tab bar with automatic background saving.
-- **Full Screen CAD Workflow**: Locks Escape key via Keyboard Lock API so pressing Esc deselects objects without exiting fullscreen.
+- **Modern Parametric 3D CAD**: Full solid modeling capabilities (sketches, extrusions, revolves, fillets, chamfers, shells, booleans) compiled to high-performance WebAssembly with WebGPU/WebGL2.
+- **Dual Persistence Mirror**: Continuous 4-second background mirror between browser OPFS and server disk (`data/store/projects/`) so models and preferences survive cache clears and restarts.
+- **5-Minute Auto-Save & Recovery**: Internal recovery snapshots guarantee unsaved progress is protected against crashes or accidental closures.
+- **True Edge-to-Edge Fullscreen**: Dedicated fullscreen toggle and F11 interceptor to focus entirely on CAD design without portal chrome.
+- **Corporate Firewall Ready**: Fully functional offline; all external telemetry and documentation links are stripped.
 
 #### 3. PdfCraft Workbench (`modules/pdfcraft/`)
 

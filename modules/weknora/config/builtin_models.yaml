@@ -8,6 +8,9 @@ builtin_models:
     is_default: true
     name: qwen2.5:7b
     description: "Qwen2.5 7B (Local Ollama)"
+    parameters:
+      context_window: 16384
+      max_output_tokens: 4096
 
   - id: builtin-ollama-deepseek-r1-7b
     type: KnowledgeQA
@@ -15,6 +18,9 @@ builtin_models:
     is_default: false
     name: deepseek-r1:7b
     description: "DeepSeek-R1 7B (Local Ollama)"
+    parameters:
+      context_window: 16384
+      max_output_tokens: 4096
 
   - id: builtin-ollama-nomic-embed
     type: Embedding

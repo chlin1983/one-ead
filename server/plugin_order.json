@@ -6,11 +6,12 @@
   "f1-ipp-filter-simulator",
   "mems-microphone-explorer",
   "balance-armature-receiver-explorer",
-  "deep-tutor",
-  "excalidraw",
   "pdfcraft",
-  "chili3d",
+  "excalidraw",
+  "solidcraft",
+  "paperless-ngx",
+  "weknora",
+  "deep-tutor",
   "gpt-researcher",
-  "artcraft",
-  "weknora"
+  "artcraft"
 ]

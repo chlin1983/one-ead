@@ -50,6 +50,14 @@ def install_single_app(app_id: str, payload: dict = Body(default={})) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/uninstall/{app_id}")
+def uninstall_single_app(app_id: str) -> dict:
+    try:
+        return artcraft.uninstall_app(app_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/install-all")
 def install_all_apps(payload: dict = Body(default={})) -> dict:
     force = bool(payload.get("force", False))

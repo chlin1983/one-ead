@@ -1,0 +1,3200 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documents — Paperless-ngx</title>
+  <link rel="stylesheet" href="/shared/module.css" />
+  <style>
+    :root {
+      --pngx-brand: #134e3a;
+      --pngx-brand-dark: #0d3829;
+      --pngx-brand-light: #1b634b;
+      --pngx-brand-soft: rgba(19, 78, 58, 0.08);
+      --pngx-sidebar-bg: #f8fafc;
+      --pngx-sidebar-border: #e2e8f0;
+      --pngx-content-bg: #f1f5f9;
+      --pngx-card-bg: #ffffff;
+      --pngx-card-border: #e2e8f0;
+      --pngx-text-main: #1e293b;
+      --pngx-text-muted: #64748b;
+      --pngx-text-subtle: #94a3b8;
+      --pngx-border: #cbd5e1;
+
+      /* Distinct Tag Colors */
+      --tag-acoustic: #0284c7;
+      --tag-standard: #16a34a;
+      --tag-datasheet: #ea580c;
+      --tag-guideline: #7c3aed;
+      --tag-ready: #059669;
+      --tag-warn: #d97706;
+      --tag-pending: #eab308;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100% !important;
+      max-height: 100vh !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+      background: var(--pngx-content-bg);
+      color: var(--pngx-text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    /* -------------------------------------------------------------
+       App Layout: Sidebar + Main Content (Zero Redundant Header)
+       ------------------------------------------------------------- */
+    .pngx-app-body {
+      display: flex;
+      height: 100vh;
+      max-height: 100vh;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    /* Left Sidebar: Fixed 100vh with independent vertical scrollbar */
+    .pngx-sidebar {
+      width: 240px;
+      height: 100vh;
+      max-height: 100vh;
+      background: var(--pngx-sidebar-bg);
+      border-right: 1px solid var(--pngx-sidebar-border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      padding: 16px 0 24px;
+      user-select: none;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      box-sizing: border-box;
+      overscroll-behavior: contain;
+    }
+
+    .pngx-sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .pngx-sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .pngx-sidebar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+    }
+
+    .pngx-sidebar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    .pngx-sidebar-brand {
+      padding: 4px 18px 18px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--pngx-sidebar-border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .pngx-logo-icon {
+      width: 24px;
+      height: 24px;
+      fill: none;
+      stroke: var(--pngx-brand);
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .pngx-logo-text {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--pngx-brand);
+    }
+
+    .pngx-logo-text span {
+      font-weight: 300;
+      opacity: 0.85;
+      font-size: 14px;
+      margin-left: 1px;
+    }
+
+    .pngx-menu-section {
+      margin-bottom: 18px;
+    }
+
+    .pngx-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--pngx-text-subtle);
+      padding: 6px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pngx-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 18px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--pngx-text-main);
+      cursor: pointer;
+      transition: none !important;
+      position: relative;
+    }
+
+    .pngx-menu-item:hover {
+      background: #e2e8f0 !important;
+      color: var(--pngx-brand) !important;
+      transition: none !important;
+    }
+
+    .pngx-menu-item.active {
+      background: #e8f5e9;
+      color: var(--pngx-brand);
+      font-weight: 700;
+    }
+
+    .pngx-menu-item.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--pngx-brand);
+    }
+
+    .pngx-menu-icon {
+      width: 17px;
+      height: 17px;
+      color: inherit;
+      flex-shrink: 0;
+    }
+
+    .pngx-badge-count {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: var(--pngx-text-muted);
+    }
+
+    .pngx-menu-item.active .pngx-badge-count {
+      background: #c8e6c9;
+      color: var(--pngx-brand-dark);
+    }
+
+    .pngx-sidebar-footer {
+      margin-top: auto;
+      padding: 16px 18px 0;
+      border-top: 1px solid var(--pngx-sidebar-border);
+      font-size: 11.5px;
+      color: var(--pngx-text-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* -------------------------------------------------------------
+       Main Canvas
+       ------------------------------------------------------------- */
+    .pngx-main-content {
+      flex: 1;
+      height: 100vh;
+      max-height: 100vh;
+      padding: 24px 30px 60px;
+      background: var(--pngx-content-bg);
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      box-sizing: border-box;
+      overscroll-behavior: contain;
+    }
+
+    .pngx-main-content::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .pngx-main-content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .pngx-main-content::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+    }
+
+    .pngx-main-content::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Consolidated Unified Toolbar (Row 1) */
+    .pngx-unified-toolbar {
+      background: #ffffff;
+      border: 1px solid var(--pngx-card-border);
+      border-radius: 8px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      position: relative;
+      z-index: 25;
+      min-height: 44px;
+      box-sizing: border-box;
+      flex-wrap: nowrap;
+    }
+
+    .pngx-toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .pngx-page-title {
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--pngx-text-main);
+      margin: 0;
+      line-height: 1;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .pngx-toolbar-sep {
+      width: 1px;
+      height: 18px;
+      background: #e2e8f0;
+      flex-shrink: 0;
+    }
+
+    .pngx-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+    }
+
+    .pngx-toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+
+    .pngx-btn-group {
+      display: inline-flex;
+      border: 1px solid var(--pngx-border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: #ffffff;
+      height: 31px;
+      flex-shrink: 0;
+    }
+
+    .pngx-tool-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 10px;
+      height: 100%;
+      font-size: 11.5px;
+      font-weight: 600;
+      background: #ffffff;
+      border: none;
+      border-right: 1px solid var(--pngx-border);
+      color: var(--pngx-text-main);
+      cursor: pointer;
+      transition: none !important;
+      white-space: nowrap;
+    }
+
+    .pngx-tool-btn:last-child {
+      border-right: none;
+    }
+
+    .pngx-tool-btn:hover {
+      background: #f1f5f9 !important;
+      color: var(--pngx-brand) !important;
+      transition: none !important;
+    }
+
+    .pngx-tool-btn.active {
+      background: #e2e8f0;
+      color: var(--pngx-brand);
+    }
+
+    .pngx-btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 12px;
+      height: 31px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      background: #059669;
+      color: #ffffff;
+      border: 1px solid #047857;
+      cursor: pointer;
+      transition: none !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .pngx-btn-primary:hover {
+      background: #047857 !important;
+      border-color: #065f46 !important;
+      transition: none !important;
+    }
+
+    .pngx-btn-vault {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 10px;
+      height: 31px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #0f172a;
+      border: 1px solid #cbd5e1;
+      cursor: pointer;
+      transition: none !important;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .pngx-btn-vault:hover {
+      background: #f1f5f9 !important;
+      border-color: #94a3b8 !important;
+      transition: none !important;
+    }
+
+    /* -------------------------------------------------------------
+       Selection Action Bar (appears when items are selected)
+       ------------------------------------------------------------- */
+    .pngx-selection-bar {
+      background: #1e293b;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 8px 16px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: slideDown 0.2s ease;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .pngx-selection-bar.active {
+      display: flex;
+    }
+
+    .pngx-sel-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pngx-sel-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 11px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .pngx-sel-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* -------------------------------------------------------------
+       Filter Controls & Dropdowns (Inside Unified Toolbar)
+       ------------------------------------------------------------- */
+    .pngx-filter-search-box {
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--pngx-border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: #ffffff;
+      height: 31px;
+      min-width: 170px;
+      max-width: 460px;
+      flex: 1 1 280px;
+      position: relative;
+      transition: none !important;
+    }
+
+    .pngx-filter-search-box:focus-within {
+      border-color: var(--pngx-brand);
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+    }
+
+    .pngx-filter-select {
+      background: #f8fafc;
+      border: none;
+      border-right: 1px solid var(--pngx-border);
+      padding: 0 6px;
+      height: 100%;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--pngx-text-muted);
+      cursor: pointer;
+      outline: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .pngx-filter-input {
+      border: none;
+      padding: 0 24px 0 10px;
+      height: 100%;
+      font-size: 12.5px;
+      color: var(--pngx-text-main);
+      width: 100%;
+      min-width: 140px;
+      flex: 1;
+      outline: none;
+      background: transparent;
+    }
+
+    .pngx-input-clear-btn {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      color: var(--pngx-text-subtle);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 4px;
+      display: none;
+      line-height: 1;
+    }
+
+    .pngx-input-clear-btn:hover {
+      color: #ef4444;
+    }
+
+    /* Dropdown Menus for Filter Chips */
+    .pngx-dropdown-wrap {
+      position: relative;
+      display: inline-block;
+    }
+
+    .pngx-filter-chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      height: 31px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid var(--pngx-border);
+      background: #f8fafc;
+      color: var(--pngx-text-main);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+      max-width: none;
+      transition: none !important;
+    }
+
+    .pngx-filter-chip-btn svg {
+      flex-shrink: 0;
+      width: 11px;
+      height: 11px;
+    }
+
+    .pngx-filter-chip-btn * {
+      pointer-events: none;
+    }
+
+    .pngx-filter-chip-btn:hover {
+      border-color: var(--pngx-brand) !important;
+      color: var(--pngx-brand) !important;
+      background: #ffffff !important;
+      transition: none !important;
+    }
+
+    .pngx-filter-chip-btn.active {
+      background: #ecfdf5 !important;
+      border-color: var(--pngx-brand) !important;
+      color: var(--pngx-brand) !important;
+      font-weight: 600 !important;
+    }
+
+    .pngx-filter-chip-btn.active:hover {
+      background: #d1fae5 !important;
+      border-color: var(--pngx-brand-dark) !important;
+      color: var(--pngx-brand-dark) !important;
+      transition: none !important;
+    }
+
+    .pngx-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      min-width: 260px;
+      max-height: 290px;
+      overflow-y: auto;
+      z-index: 150;
+      display: none;
+      padding: 6px 0;
+    }
+
+    .pngx-dropdown-menu.show {
+      display: block;
+    }
+
+    .pngx-dropdown-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--pngx-text-main);
+      cursor: pointer;
+      transition: none !important;
+      white-space: nowrap;
+    }
+
+    .pngx-dropdown-item:hover {
+      background: #f1f5f9;
+      color: var(--pngx-brand);
+    }
+
+    .pngx-dropdown-item.active {
+      background: #e8f5e9;
+      color: var(--pngx-brand);
+      font-weight: 700;
+    }
+
+    .pngx-dropdown-divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin: 4px 0;
+    }
+
+    .pngx-reset-btn {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: var(--pngx-text-muted);
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0 9px;
+      height: 31px;
+      line-height: 29px;
+      border-radius: 6px;
+      transition: none !important;
+      white-space: nowrap;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      opacity: 0.55;
+    }
+
+    .pngx-reset-btn:hover {
+      color: #ef4444 !important;
+      background: #fee2e2 !important;
+      border-color: #fca5a5 !important;
+      opacity: 1 !important;
+      transition: none !important;
+    }
+
+    .pngx-reset-btn.has-filters {
+      color: #b91c1c;
+      background: #fef2f2;
+      border-color: #fca5a5;
+      opacity: 1;
+      font-weight: 700;
+    }
+
+    .pngx-reset-btn.has-filters:hover {
+      color: #991b1b !important;
+      background: #fee2e2 !important;
+      border-color: #ef4444 !important;
+      transition: none !important;
+    }
+
+    @media (max-width: 1180px) {
+      .pngx-unified-toolbar {
+        flex-wrap: wrap;
+        height: auto;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       Dashboard Overview Grid
+       ------------------------------------------------------------- */
+    .pngx-dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .pngx-stat-card {
+      background: #ffffff;
+      border: 1px solid var(--pngx-card-border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pngx-stat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--pngx-text-muted);
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .pngx-stat-val {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--pngx-text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .pngx-stat-sub {
+      font-size: 12px;
+      color: var(--pngx-text-subtle);
+    }
+
+    /* -------------------------------------------------------------
+       Status Sub-bar (Row 3)
+       ------------------------------------------------------------- */
+    .pngx-sub-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      font-size: 13px;
+      color: var(--pngx-text-muted);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .pngx-doc-count {
+      font-weight: 700;
+      color: var(--pngx-text-main);
+      white-space: nowrap;
+    }
+
+    .pngx-category-breadcrumbs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .pngx-crumb-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #ffffff;
+      border: 1px solid var(--pngx-border);
+      color: var(--pngx-text-muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: none !important;
+    }
+
+    .pngx-crumb-chip:hover {
+      border-color: var(--pngx-brand) !important;
+      color: var(--pngx-brand) !important;
+      background: #f1f5f9 !important;
+      transition: none !important;
+    }
+
+    .pngx-crumb-chip.active {
+      background: #e8f5e9 !important;
+      border-color: var(--pngx-brand) !important;
+      color: var(--pngx-brand) !important;
+      font-weight: 600 !important;
+    }
+
+    .pngx-crumb-chip.active:hover {
+      background: #dcfce7 !important;
+      border-color: var(--pngx-brand-dark) !important;
+      color: var(--pngx-brand-dark) !important;
+      transition: none !important;
+    }
+
+    .pngx-pagination {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pngx-page-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 4px;
+      border: 1px solid var(--pngx-border);
+      background: #ffffff;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--pngx-text-main);
+      transition: none !important;
+    }
+
+    .pngx-page-btn.active {
+      background: var(--pngx-brand);
+      color: #ffffff;
+      border-color: var(--pngx-brand);
+    }
+
+    /* -------------------------------------------------------------
+       Document Cards Grid View (100% Static Highlight, No Flashing)
+       ------------------------------------------------------------- */
+    .pngx-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .pngx-doc-card {
+      background: #ffffff;
+      border: 1px solid var(--pngx-card-border);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      position: relative;
+      transform: none !important;
+      transition: none !important;
+    }
+
+    .pngx-doc-card:hover {
+      border-color: #10b981 !important;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+      transform: none !important;
+      transition: none !important;
+    }
+
+    .pngx-doc-card.selected {
+      border-color: var(--pngx-brand) !important;
+      box-shadow: 0 0 0 2px rgba(19, 78, 58, 0.4) !important;
+    }
+
+    /* Checkbox on Card */
+    .pngx-card-select-checkbox {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 5;
+      width: 17px;
+      height: 17px;
+      cursor: pointer;
+      accent-color: var(--pngx-brand);
+    }
+
+    /* Thumbnail Area */
+    .pngx-card-thumb-wrap {
+      height: 200px;
+      background: #f8fafc;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-bottom: 1px solid #f1f5f9;
+      overflow: hidden;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .pngx-card-thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 6px;
+    }
+
+    /* Fallback Page Preview Illustration */
+    .pngx-fallback-preview {
+      width: 120px;
+      height: 160px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      display: flex;
+      flex-direction: column;
+      padding: 12px 10px;
+      gap: 7px;
+    }
+
+    .pngx-preview-line {
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 2px;
+    }
+
+    .pngx-preview-line.title {
+      height: 6px;
+      width: 70%;
+      background: #cbd5e1;
+      margin-bottom: 4px;
+    }
+
+    /* Top Right Floating Badges */
+    .pngx-thumb-badges {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .pngx-tag-pill {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      color: #ffffff;
+      text-transform: capitalize;
+      letter-spacing: 0.02em;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18);
+      white-space: nowrap;
+    }
+
+    .pngx-tag-category {
+      background: #1e3a8a;
+    }
+
+    .pngx-tag-ocr-done {
+      background: #15803d;
+    }
+
+    .pngx-tag-digital {
+      background: #0284c7;
+    }
+
+    .pngx-tag-pending {
+      background: #b45309;
+    }
+
+    /* Card Details Area */
+    .pngx-card-body {
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      position: relative;
+      z-index: 2;
+    }
+
+    .pngx-card-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--pngx-text-main);
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      cursor: pointer;
+      word-break: break-word;
+      user-select: none;
+    }
+
+    .pngx-card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 11.5px;
+      color: var(--pngx-text-muted);
+      margin-top: 2px;
+    }
+
+    .pngx-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pngx-meta-icon {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+      color: var(--pngx-text-subtle);
+    }
+
+    /* Card Bottom Action Bar (4 Icons) */
+    .pngx-card-footer {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid #f1f5f9;
+      background: #f8fafc;
+      position: relative;
+      z-index: 2;
+    }
+
+    .pngx-card-btn {
+      padding: 8px 0;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      border: none;
+      border-right: 1px solid #f1f5f9;
+      color: var(--pngx-text-muted);
+      cursor: pointer;
+      transition: none !important;
+    }
+
+    .pngx-card-btn:last-child {
+      border-right: none;
+    }
+
+    .pngx-card-btn:hover {
+      background: #e2e8f0 !important;
+      color: var(--pngx-brand) !important;
+      transition: none !important;
+    }
+
+    .pngx-card-btn svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    /* -------------------------------------------------------------
+       List View (Table Alternate - Compact High-Density Design)
+       ------------------------------------------------------------- */
+    .pngx-list-view {
+      background: #ffffff;
+      border: 1px solid var(--pngx-card-border);
+      border-radius: 8px;
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      margin-bottom: 40px;
+    }
+
+    .pngx-list-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+      min-width: 860px;
+    }
+
+    .pngx-list-table th {
+      background: #f8fafc;
+      padding: 7px 10px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pngx-text-muted);
+      border-bottom: 1px solid var(--pngx-card-border);
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .pngx-list-table td {
+      padding: 4px 10px;
+      height: 34px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: middle;
+      box-sizing: border-box;
+      line-height: 1.25;
+    }
+
+    .pngx-list-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .pngx-list-table tbody tr {
+      transition: background 0.1s ease;
+    }
+
+    .pngx-list-table tbody tr:hover td {
+      background: #f8fafc;
+    }
+
+    .pngx-list-table tbody tr.selected td {
+      background: #eff6ff !important;
+    }
+
+    /* Compact Table Inner Elements */
+    .pngx-table-doc-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      color: #0f172a;
+      cursor: pointer;
+      max-width: 460px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color 0.12s ease;
+      vertical-align: middle;
+    }
+
+    .pngx-table-doc-cell:hover {
+      color: var(--pngx-brand);
+      text-decoration: underline;
+    }
+
+    .pngx-table-file-icon {
+      color: #ef4444;
+      flex-shrink: 0;
+    }
+
+    .pngx-table-doc-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pngx-table-tag {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      color: #ffffff;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      line-height: 1.2;
+    }
+
+    .pngx-table-meta-text {
+      font-size: 11.5px;
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    .pngx-table-date-text {
+      font-size: 11.5px;
+      color: #475569;
+      white-space: nowrap;
+    }
+
+    .pngx-table-actions {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .pngx-tbl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 7px;
+      height: 24px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 4px;
+      background: #ffffff;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .pngx-tbl-btn:hover {
+      background: #f1f5f9;
+      color: var(--pngx-brand);
+      border-color: #94a3b8;
+    }
+
+    /* -------------------------------------------------------------
+       Modals: Details, Upload, Status
+       ------------------------------------------------------------- */
+    .pngx-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(4px);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .pngx-modal-backdrop.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .pngx-modal-card {
+      width: 100%;
+      max-width: 820px;
+      max-height: 88vh;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .pngx-modal-header {
+      padding: 16px 20px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--pngx-card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pngx-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--pngx-text-main);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 600px;
+    }
+
+    .pngx-modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .pngx-modal-footer {
+      padding: 12px 20px;
+      background: #f8fafc;
+      border-top: 1px solid var(--pngx-card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .pngx-markdown-preview {
+      background: #0f172a;
+      color: #f1f5f9;
+      padding: 16px;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+
+    /* Toast Notification (Disabled per user preference) */
+    .pngx-toast {
+      display: none !important;
+    }
+
+    /* Drag & Drop Upload Zone */
+    .pngx-dropzone {
+      border: 2px dashed var(--pngx-border);
+      border-radius: 8px;
+      padding: 28px;
+      text-align: center;
+      background: #f8fafc;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .pngx-dropzone input[type="file"] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- =============================================================
+       App Body: Sidebar + Main Workspace (No Redundant Green Header)
+       ============================================================= -->
+  <div class="pngx-app-body">
+
+    <!-- Left Sidebar -->
+    <aside class="pngx-sidebar">
+
+      <!-- Brand Logo in Sidebar Header -->
+      <div class="pngx-sidebar-brand" onclick="resetAllFilters()">
+        <svg class="pngx-logo-icon" viewBox="0 0 24 24">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
+        </svg>
+        <div class="pngx-logo-text">
+          Paperless<span>-ngx</span>
+        </div>
+      </div>
+
+      <!-- Primary Navigation -->
+      <div class="pngx-menu-section">
+        <div class="pngx-menu-item" id="sidebarDashboardItem" onclick="showDashboardView()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="9" />
+            <rect x="14" y="3" width="7" height="5" />
+            <rect x="14" y="12" width="7" height="9" />
+            <rect x="3" y="16" width="7" height="5" />
+          </svg>
+          <span>Dashboard</span>
+        </div>
+        <div class="pngx-menu-item active" id="menuItemDocuments" onclick="showDocumentsView()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          <span>Documents</span>
+          <span class="pngx-badge-count" id="totalBadgeCount">30</span>
+        </div>
+      </div>
+
+      <!-- SAVED VIEWS -->
+      <div class="pngx-menu-section">
+        <div class="pngx-section-title">
+          <span>SAVED VIEWS</span>
+        </div>
+        <div class="pngx-menu-item" id="sidebarRecentItem" onclick="showRecentlyAddedView()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span>Recently Added</span>
+          <span class="pngx-badge-count" id="recentBadgeCount">30</span>
+        </div>
+        <!-- Dynamic Category Views rendered by JS -->
+        <div id="sidebarCategoriesContainer"></div>
+      </div>
+
+      <!-- MANAGE (Attributes) -->
+      <div class="pngx-menu-section">
+        <div class="pngx-section-title">
+          <span>MANAGE</span>
+        </div>
+        <div class="pngx-menu-item" onclick="openTagsModal()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+            <line x1="7" y1="7" x2="7.01" y2="7" />
+          </svg>
+          <span>Tags</span>
+        </div>
+        <div class="pngx-menu-item" onclick="openStoragePathsModal()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span>Storage paths</span>
+        </div>
+      </div>
+
+      <!-- ADMINISTRATION -->
+      <div class="pngx-menu-section">
+        <div class="pngx-section-title">
+          <span>ADMINISTRATION</span>
+        </div>
+        <div class="pngx-menu-item" onclick="openUploadModal()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span>Upload Document</span>
+        </div>
+        <div class="pngx-menu-item" onclick="showSettingsModal()">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          <span>OCR & Vault Status</span>
+        </div>
+      </div>
+
+      <div class="pngx-sidebar-footer">
+        <div><strong>Documentation</strong></div>
+        <div>Paperless-ngx v3.1.1 (Lite)</div>
+        <div style="margin-top: 4px; font-size: 10px; color: var(--pngx-text-subtle);">100% Offline Vault</div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="pngx-main-content">
+
+      <!-- Unified Compact Toolbar (Consolidated Filters + Actions in One Row) -->
+      <div class="pngx-unified-toolbar" id="pngxUnifiedToolbar">
+
+        <!-- Hidden title for script compatibility -->
+        <span class="pngx-page-title" style="display: none;">Documents</span>
+
+        <!-- Left Section: Search Box & Filter Chips -->
+        <div class="pngx-toolbar-left">
+          <!-- Search Box with Scope Selector & Clear Button -->
+          <div class="pngx-filter-search-box">
+            <select class="pngx-filter-select" id="pngxScopeSelect" onchange="onScopeChange(this.value)"
+              title="Search Scope: Title vs OCR Text">
+              <option value="all" selected>Title + OCR</option>
+              <option value="title">Title Only</option>
+            </select>
+            <input type="text" id="pngxFilterInput" class="pngx-filter-input"
+              placeholder="Search document text & OCR content..." oninput="onFilterInput(this.value)"
+              onkeydown="if(event.key==='Enter') { clearTimeout(ftsDebounceTimer); executeFtsSearch(); }" />
+            <button class="pngx-input-clear-btn" id="btnClearSearch" title="Clear search"
+              onclick="clearSearchInput()">✕</button>
+          </div>
+
+          <!-- Interactive Filters Group -->
+          <div class="pngx-filter-group" id="pngxFilterGroup">
+            <!-- 🏷 Tags Dropdown Button -->
+            <div class="pngx-dropdown-wrap">
+              <button class="pngx-filter-chip-btn" id="filterTagBtn" onclick="toggleDropdown('tagsDropdown')">
+                <span id="filterTagLabel">🏷 Tags</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="pngx-dropdown-menu" id="tagsDropdown">
+                <div class="pngx-dropdown-item" onclick="setCategoryFilter('')">
+                  <span>All Tags / Categories</span>
+                  <span class="pngx-badge-count" id="ddTotalTagsCount">30</span>
+                </div>
+                <div class="pngx-dropdown-divider"></div>
+                <div id="ddTagsListContainer"></div>
+              </div>
+            </div>
+
+
+            <!-- ⚡ OCR Status Dropdown Button -->
+            <div class="pngx-dropdown-wrap">
+              <button class="pngx-filter-chip-btn" id="filterStatusBtn" onclick="toggleDropdown('statusDropdown')">
+                <span id="filterStatusLabel">⚡ Status</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="pngx-dropdown-menu" id="statusDropdown">
+                <div class="pngx-dropdown-item" onclick="setOcrStatusFilter('')">
+                  <span>All OCR Statuses</span>
+                </div>
+                <div class="pngx-dropdown-divider"></div>
+                <div class="pngx-dropdown-item" onclick="setOcrStatusFilter('completed')">
+                  <span>🟢 OCR Ready (completed)</span>
+                </div>
+                <div class="pngx-dropdown-item" onclick="setOcrStatusFilter('digital_only')">
+                  <span>🔵 Digital Text Only</span>
+                </div>
+                <div class="pngx-dropdown-item" onclick="setOcrStatusFilter('pending')">
+                  <span>🟡 Pending OCR</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ✕ Reset All Filters Button -->
+            <button class="pngx-reset-btn" id="btnResetFilters" onclick="resetAllFilters()"
+              title="Reset all active filters">✕ Reset</button>
+          </div>
+        </div>
+
+        <!-- Right Section: Action Tools -->
+        <div class="pngx-toolbar-right">
+          <!-- Selection Controls -->
+          <div class="pngx-btn-group" id="btnGroupSelect">
+            <button class="pngx-tool-btn" id="btnSelectPage" onclick="toggleSelectAll(false)">Select: Page</button>
+            <button class="pngx-tool-btn" id="btnSelectAll" onclick="toggleSelectAll(true)">All</button>
+          </div>
+
+          <!-- View Switcher Toggle (Grid vs List) -->
+          <div class="pngx-btn-group" id="btnGroupView">
+            <button class="pngx-tool-btn" id="btnListView" title="List View" onclick="setViewMode('list')">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+              </svg>
+            </button>
+            <button class="pngx-tool-btn active" id="btnGridView" title="Grid View" onclick="setViewMode('grid')">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Open in Windows Explorer Button -->
+          <button class="pngx-btn-vault" id="btnOpenExplorer" title="Open archive in Windows File Explorer"
+            onclick="openArchiveRootExplorer()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>Explorer</span>
+          </button>
+
+          <!-- Upload Modal Button -->
+          <button class="pngx-btn-primary" onclick="openUploadModal()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <span>Upload</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Selection Action Bar (Appears when 1 or more documents selected) -->
+      <div class="pngx-selection-bar" id="selectionBar">
+        <div style="font-weight: 600; font-size: 13px;">
+          <span id="selectedCountText">0</span> document(s) selected
+        </div>
+        <div class="pngx-sel-actions">
+          <button class="pngx-sel-btn" onclick="openExplorer(filterState.category)">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>Open in Explorer</span>
+          </button>
+          <button class="pngx-sel-btn" onclick="batchRunOcr()" title="Run local OCR and auto-sync to WeKnora for selected documents">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span>Run OCR & Auto-Sync</span>
+          </button>
+          <button class="pngx-sel-btn" onclick="batchSyncWeKnora()" title="Sync selected documents to WeKnora">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span>Sync to WeKnora</span>
+          </button>
+          <button class="pngx-sel-btn" style="background: rgba(239, 68, 68, 0.3); border-color: rgba(239, 68, 68, 0.5);"
+            onclick="clearSelection()">
+            <span>Clear Selection</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- =============================================================
+           Dashboard Overview Section (Activated from Sidebar Dashboard)
+           ============================================================= -->
+      <div id="pngxDashboardSection" style="display: none; margin-bottom: 30px;">
+        <div style="margin-bottom: 20px;">
+          <h2 style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 4px;">Vault & Ingestion Overview
+          </h2>
+          <p style="font-size: 13px; color: #64748b;">Private offline document vault with full-text search and local OCR
+          </p>
+        </div>
+
+        <div class="pngx-dashboard-grid">
+          <!-- Card 1: Documents & Storage -->
+          <div class="pngx-stat-card">
+            <div class="pngx-stat-header">
+              <span>STORAGE VAULT</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <div class="pngx-stat-val" id="dbTotalDocs">30</div>
+            <div class="pngx-stat-sub" id="dbVaultSize">Offline private vault</div>
+            <div style="margin-top: 8px;">
+              <button class="pngx-btn-vault" style="width: 100%; justify-content: center; font-size: 12px;"
+                onclick="openExplorer('')">
+                <span>🖥 Open Archive in Explorer</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 2: OCR Status -->
+          <div class="pngx-stat-card">
+            <div class="pngx-stat-header">
+              <span>OCR PIPELINE</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+            </div>
+            <div class="pngx-stat-val" style="color: #059669;" id="dbOcrReady">30</div>
+            <div class="pngx-stat-sub" id="dbOcrSub">Tesseract OCR engine ready</div>
+            <div style="margin-top: 8px;">
+              <button class="pngx-btn-vault" style="width: 100%; justify-content: center; font-size: 12px;"
+                onclick="showSettingsModal()">
+                <span>⚡ View OCR Engine Details</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 3: Ingestion Shortcut -->
+          <div class="pngx-stat-card">
+            <div class="pngx-stat-header">
+              <span>FAST INGESTION</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
+            <div class="pngx-stat-val" style="font-size: 19px; font-weight: 700; color: #134e3a;">Ready to archive</div>
+            <div class="pngx-stat-sub">PDFs, technical datasheets & specs</div>
+            <div style="margin-top: 8px;">
+              <button class="pngx-btn-primary" style="width: 100%; justify-content: center; font-size: 12px;"
+                onclick="openUploadModal()">
+                <span>+ Upload New Document</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Categories Grid -->
+        <div
+          style="background: #ffffff; border: 1px solid var(--pngx-card-border); border-radius: 8px; padding: 18px 20px; margin-bottom: 24px;">
+          <div style="font-weight: 700; font-size: 14px; margin-bottom: 12px; color: #1e293b;">Vault Categories &
+            Storage Paths</div>
+          <div id="dbCategoriesGrid" style="display: flex; gap: 10px; flex-wrap: wrap;"></div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+          <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">Recently Added Documents</h3>
+          <button class="pngx-btn-vault" style="font-size: 12px;" onclick="showDocumentsView()">View All Documents
+            →</button>
+        </div>
+        <div id="dbRecentGrid" class="pngx-cards-grid"></div>
+      </div>
+
+
+
+      <!-- =============================================================
+           Row 3: Status Sub-bar & Category Breadcrumb Pills
+           ============================================================= -->
+      <div class="pngx-sub-bar">
+        <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+          <span class="pngx-doc-count" id="docCountDisplay">30 documents</span>
+          <!-- Dynamic Category Pills -->
+          <div class="pngx-category-breadcrumbs" id="categoryBreadcrumbs"></div>
+        </div>
+
+        <div class="pngx-pagination">
+          <button class="pngx-page-btn" title="Previous page" onclick="showToast('Page 1 of 1')">‹</button>
+          <button class="pngx-page-btn active">1</button>
+          <button class="pngx-page-btn" title="Next page" onclick="showToast('Page 1 of 1')">›</button>
+        </div>
+      </div>
+
+      <!-- =============================================================
+           Documents Container: Cards Grid or Flat List
+           ============================================================= -->
+      <div id="pngxCardsGrid" class="pngx-cards-grid"></div>
+
+      <div id="pngxListView" class="pngx-list-view" style="display: none;">
+        <table class="pngx-list-table">
+          <thead>
+            <tr>
+              <th style="width: 36px; text-align: center;"><input type="checkbox" id="listSelectAllCheckbox"
+                  onchange="toggleSelectAll(this.checked)" /></th>
+              <th>Document</th>
+              <th style="width: 170px;">Category / Path</th>
+              <th style="width: 110px;">Date</th>
+              <th style="width: 130px;">Pages & Size</th>
+              <th style="width: 115px;">OCR Status</th>
+              <th style="width: 195px; text-align: right; padding-right: 12px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pngxTableBody"></tbody>
+        </table>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- =============================================================
+       Modal: Document Detail & OCR Markdown Preview
+       ============================================================= -->
+  <!-- =============================================================
+       Modal: Document Detail & OCR Markdown Preview
+       ============================================================= -->
+  <div class="pngx-modal-backdrop" id="docDetailModal" onclick="if(event.target === this) closeModal(this.id)">
+    <div class="pngx-modal-card">
+      <div class="pngx-modal-header">
+        <h3 class="pngx-modal-title" id="modalDocTitle">Document Details</h3>
+        <button class="pngx-nav-icon-btn" style="color: #64748b; background: none; border: none; cursor: pointer;"
+          onclick="closeModal('docDetailModal')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="pngx-modal-body">
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px;">
+          <div><strong>Category:</strong> <span id="modalCategory"
+              style="color: var(--pngx-brand); font-weight: 600;">General</span></div>
+          <div><strong>Pages:</strong> <span id="modalPages">0</span></div>
+          <div><strong>OCR Status:</strong> <span id="modalOcrStatus">pending</span></div>
+          <div><strong>Vault Path:</strong> <span id="modalPath"
+              style="font-family: monospace; color: #64748b;">documents/...</span></div>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="pngx-btn-primary" id="btnRunOcr" onclick="runOcrForCurrentDoc()" title="Runs local OCR and automatically synchronizes to WeKnora in 1 click">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span>Re-run OCR & Auto-Sync</span>
+          </button>
+          <button class="pngx-btn-vault" onclick="syncCurrentDocToWeKnora()" title="Manually export OCR Markdown to WeKnora">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span>Sync to WeKnora</span>
+          </button>
+          <button class="pngx-btn-vault" onclick="openCurrentDocInExplorer()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>Open in Explorer</span>
+          </button>
+          <button class="pngx-btn-vault" onclick="viewCurrentDocInline()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>View PDF</span>
+          </button>
+          <button class="pngx-btn-vault" onclick="downloadCurrentDoc()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Download</span>
+          </button>
+        </div>
+
+        <div style="font-weight: 700; font-size: 13px; color: #475569; margin-top: 6px;">OCR Extracted Text / Markdown:
+        </div>
+        <div class="pngx-markdown-preview" id="modalMarkdownContent">Loading OCR text...</div>
+      </div>
+      <div class="pngx-modal-footer">
+        <span style="font-size: 12px; color: var(--pngx-text-subtle);">Stored in local private vault outside version
+          control</span>
+        <button class="pngx-btn-vault" onclick="closeModal('docDetailModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       Modal: Upload Document
+       ============================================================= -->
+  <div class="pngx-modal-backdrop" id="uploadModal" onclick="if(event.target === this) closeModal(this.id)">
+    <div class="pngx-modal-card" style="max-width: 540px;">
+      <div class="pngx-modal-header">
+        <h3 class="pngx-modal-title">Upload Documents to Vault</h3>
+        <button class="pngx-nav-icon-btn" style="color: #64748b; background: none; border: none; cursor: pointer;"
+          onclick="closeModal('uploadModal')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="pngx-modal-body">
+        <div class="pngx-dropzone">
+          <input type="file" id="fileUploadInput" accept=".pdf,.png,.jpg,.jpeg" onchange="handleFileSelected(this)" />
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="var(--pngx-brand)" stroke-width="2"
+            style="margin-bottom: 8px;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <div style="font-weight: 600; font-size: 14px; color: #1e293b;" id="uploadDropHint">Click or drag & drop files
+            here</div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Supports PDF, Scanned Images</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 12.5px; font-weight: 600;">Destination Category / Folder:</label>
+          <select id="uploadCategorySelect"
+            style="padding: 8px 10px; border-radius: 6px; border: 1px solid var(--pngx-border); font-size: 13px;">
+            <option value="General Acoustic Knowledge">General Acoustic Knowledge</option>
+            <option value="Component Datasheet">Component Datasheet</option>
+            <option value="Standard">Standard</option>
+            <option value="Acoustic Standard">Acoustic Standard</option>
+            <option value="Design Guideline">Design Guideline</option>
+            <option value="General">General / Other</option>
+          </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="autoOcrCheck" checked />
+          <label for="autoOcrCheck" style="font-size: 13px; font-weight: 500;">Run Tesseract OCR automatically on
+            upload</label>
+        </div>
+      </div>
+      <div class="pngx-modal-footer">
+        <button class="pngx-btn-vault" onclick="closeModal('uploadModal')">Cancel</button>
+        <button class="pngx-btn-primary" id="btnSubmitUpload" onclick="submitUpload()">Upload to Archive</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       Modal: Tags & Categories Manager
+       ============================================================= -->
+  <div class="pngx-modal-backdrop" id="tagsModal" onclick="if(event.target === this) closeModal(this.id)">
+    <div class="pngx-modal-card" style="max-width: 620px;">
+      <div class="pngx-modal-header">
+        <h3 class="pngx-modal-title">Tags & Document Categories</h3>
+        <button class="pngx-nav-icon-btn" style="color: #64748b; background: none; border: none; cursor: pointer;"
+          onclick="closeModal('tagsModal')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="pngx-modal-body" id="tagsModalContent">
+        <div>Loading tags...</div>
+      </div>
+      <div class="pngx-modal-footer">
+        <span style="font-size: 12px; color: var(--pngx-text-subtle);">Organized by private vault folders</span>
+        <button class="pngx-btn-vault" onclick="closeModal('tagsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       Modal: Storage Paths Manager
+       ============================================================= -->
+  <div class="pngx-modal-backdrop" id="pathsModal" onclick="if(event.target === this) closeModal(this.id)">
+    <div class="pngx-modal-card" style="max-width: 680px;">
+      <div class="pngx-modal-header">
+        <h3 class="pngx-modal-title">Vault Storage Folders</h3>
+        <button class="pngx-nav-icon-btn" style="color: #64748b; background: none; border: none; cursor: pointer;"
+          onclick="closeModal('pathsModal')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="pngx-modal-body" id="pathsModalContent">
+        <div>Loading storage paths...</div>
+      </div>
+      <div class="pngx-modal-footer">
+        <button class="pngx-btn-vault" onclick="openExplorer('')">🖥 Open Vault Root in Explorer</button>
+        <button class="pngx-btn-primary" onclick="closeModal('pathsModal')">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       Modal: OCR & Vault Status Modal
+       ============================================================= -->
+  <div class="pngx-modal-backdrop" id="statusModal" onclick="if(event.target === this) closeModal(this.id)">
+    <div class="pngx-modal-card" style="max-width: 600px;">
+      <div class="pngx-modal-header">
+        <h3 class="pngx-modal-title">Vault & OCR Engine Status</h3>
+        <button class="pngx-nav-icon-btn" style="color: #64748b; background: none; border: none; cursor: pointer;"
+          onclick="closeModal('statusModal')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="pngx-modal-body" id="statusModalContent">
+        <div>Loading status...</div>
+      </div>
+      <div class="pngx-modal-footer">
+        <button class="pngx-btn-vault" onclick="openExplorer('')">Open Vault in Explorer</button>
+        <button class="pngx-btn-primary" onclick="closeModal('statusModal')">Done</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    // Master data
+    let masterDocuments = [];
+    let categoriesList = [];
+    let currentViewMode = "grid";
+    let currentMainTab = "documents"; // "documents" | "dashboard"
+    let currentSidebarTab = "all_documents"; // "all_documents" | "recently_added" | "category"
+    let activeDocId = null;
+    let selectedDocIds = new Set();
+    let statsDataCache = null;
+
+    // Filter state
+    let filterState = {
+      scope: "all",          // "all" (Title + OCR default) | "title"
+      query: "",             // search query string
+      category: "",          // category name
+      storagePath: "",       // subfolder
+      ocrStatus: ""          // "completed" | "digital_only" | "pending"
+    };
+
+    const CATEGORY_COLORS = {
+      "General Acoustic Knowledge": "#0284c7",
+      "Component Datasheet": "#ea580c",
+      "Standard": "#16a34a",
+      "Acoustic Standard": "#7c3aed",
+      "Design Guideline": "#b45309",
+      "General": "#475569"
+    };
+
+    function getCategoryColor(cat) {
+      for (const [key, val] of Object.entries(CATEGORY_COLORS)) {
+        if (cat && cat.toLowerCase().includes(key.toLowerCase())) return val;
+      }
+      return "#0284c7";
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B", "KB", "MB", "GB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(1) + " " + sizes[i];
+    }
+
+    function formatDate(isoStr) {
+      if (!isoStr) return "Recent";
+      try {
+        const d = new Date(isoStr);
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      } catch {
+        return isoStr;
+      }
+    }
+
+    function showToast(msg) {
+      // Toast notifications disabled per user preference
+    }
+
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      document.getElementById("btnGridView").classList.toggle("active", mode === "grid");
+      document.getElementById("btnListView").classList.toggle("active", mode === "list");
+      document.getElementById("pngxCardsGrid").style.display = mode === "grid" ? "grid" : "none";
+      document.getElementById("pngxListView").style.display = mode === "list" ? "block" : "none";
+      applyFilters();
+    }
+
+    // Toggle Dropdown menus
+    function toggleDropdown(id) {
+      const target = document.getElementById(id);
+      const isShown = target.classList.contains("show");
+      document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      if (!isShown) {
+        target.classList.add("show");
+      }
+    }
+
+    // Close dropdowns on outside click
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".pngx-dropdown-wrap") && !e.target.closest(".pngx-menu-item")) {
+        document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      }
+    });
+
+    // -------------------------------------------------------------
+    // Reactive Filtering Core
+    // -------------------------------------------------------------
+    function applyFilters() {
+      if (filterState.scope === "all" && filterState.query.trim()) {
+        executeFtsSearch();
+        return;
+      }
+      let filtered = [...masterDocuments];
+
+      // 1. Category / Tag Filter
+      if (filterState.category) {
+        const catTarget = filterState.category.toLowerCase().trim();
+        filtered = filtered.filter(d => (d.tags || "").toLowerCase().includes(catTarget));
+      }
+
+      // 2. Storage Path Filter
+      if (filterState.storagePath) {
+        const pathTarget = filterState.storagePath.toLowerCase().trim();
+        filtered = filtered.filter(d => (d.filename || "").toLowerCase().includes(pathTarget));
+      }
+
+      // 3. OCR Status Filter
+      if (filterState.ocrStatus) {
+        filtered = filtered.filter(d => (d.ocr_status || "") === filterState.ocrStatus);
+      }
+
+      // 4. Query Filter
+      if (filterState.query) {
+        const q = filterState.query.toLowerCase().trim();
+        if (filterState.scope === "title") {
+          filtered = filtered.filter(d => (d.original_name || "").toLowerCase().includes(q));
+        } else {
+          filtered = filtered.filter(d =>
+            (d.original_name || "").toLowerCase().includes(q) ||
+            (d.tags || "").toLowerCase().includes(q) ||
+            (d.filename || "").toLowerCase().includes(q)
+          );
+        }
+      }
+
+      // Sort: if recently_added, sort newest first
+      if (currentSidebarTab === "recently_added") {
+        filtered.sort((a, b) => {
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          if (tB !== tA) return tB - tA;
+          return (b.id || "").localeCompare(a.id || "");
+        });
+      }
+
+      // Render updated list
+      if (currentViewMode === "grid") {
+        renderCards(filtered);
+      } else {
+        renderTable(filtered);
+      }
+
+      // Update document count display
+      document.getElementById("docCountDisplay").innerText = `${filtered.length} document${filtered.length === 1 ? '' : 's'}`;
+
+      // Update clear search button visibility
+      const clearBtn = document.getElementById("btnClearSearch");
+      if (clearBtn) {
+        clearBtn.style.display = filterState.query ? "block" : "none";
+      }
+
+      // Update visual indicators
+      updateUIIndicators();
+      updateSelectionUI();
+    }
+
+    function updateUIIndicators() {
+      const isDashboard = (currentMainTab === "dashboard");
+      const isRecent = !isDashboard && (currentSidebarTab === "recently_added");
+      const isCategory = !isDashboard && (currentSidebarTab === "category" && Boolean(filterState.category));
+      const isAllDocs = !isDashboard && (currentSidebarTab === "all_documents" || (!isRecent && !isCategory));
+
+      // 1. Sidebar Dashboard
+      const dashItem = document.getElementById("sidebarDashboardItem");
+      if (dashItem) dashItem.classList.toggle("active", isDashboard);
+
+      // 2. Sidebar Documents
+      const docItem = document.getElementById("menuItemDocuments");
+      if (docItem) docItem.classList.toggle("active", isAllDocs);
+
+      // 3. Sidebar Recently Added
+      const recentItem = document.getElementById("sidebarRecentItem");
+      if (recentItem) recentItem.classList.toggle("active", isRecent);
+
+      // 4. Sidebar Dynamic Categories
+      document.querySelectorAll("#sidebarCategoriesContainer .pngx-menu-item").forEach(el => {
+        const elCat = el.dataset.category || "";
+        el.classList.toggle("active", isCategory && elCat === filterState.category);
+      });
+
+      // 5. Breadcrumbs: Chips
+      document.querySelectorAll(".pngx-crumb-chip").forEach(el => {
+        const chipCat = el.dataset.category || "";
+        if (chipCat === "") {
+          el.classList.toggle("active", filterState.category === "");
+        } else {
+          el.classList.toggle("active", filterState.category === chipCat);
+        }
+      });
+
+      // Tag Button label & active state
+      const tagBtn = document.getElementById("filterTagBtn");
+      const tagLabel = document.getElementById("filterTagLabel");
+      if (tagBtn && tagLabel) {
+        if (filterState.category) {
+          tagBtn.classList.add("active");
+          tagLabel.innerText = `🏷 ${filterState.category}`;
+        } else {
+          tagBtn.classList.remove("active");
+          tagLabel.innerText = "🏷 Tags";
+        }
+      }
+
+      // Status Button label & active state
+      const statusBtn = document.getElementById("filterStatusBtn");
+      const statusLabel = document.getElementById("filterStatusLabel");
+      if (statusBtn && statusLabel) {
+        if (filterState.ocrStatus) {
+          statusBtn.classList.add("active");
+          const nameMap = { "completed": "OCR Ready", "digital_only": "Digital", "pending": "Pending" };
+          statusLabel.innerText = `⚡ ${nameMap[filterState.ocrStatus] || filterState.ocrStatus}`;
+        } else {
+          statusBtn.classList.remove("active");
+          statusLabel.innerText = "⚡ Status";
+        }
+      }
+
+      // Reset Button reactive state
+      const resetBtn = document.getElementById("btnResetFilters");
+      if (resetBtn) {
+        const hasFilters = Boolean(filterState.query.trim() || filterState.category || filterState.ocrStatus || filterState.storagePath);
+        if (hasFilters) {
+          resetBtn.classList.add("has-filters");
+          resetBtn.title = "Click to clear active filters and view all documents";
+        } else {
+          resetBtn.classList.remove("has-filters");
+          resetBtn.title = "No active filters";
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Filter Actions
+    // -------------------------------------------------------------
+    function setCategoryFilter(cat) {
+      currentMainTab = "documents";
+      currentSidebarTab = cat ? "category" : "all_documents";
+      filterState.category = cat;
+
+      const titleEl = document.querySelector(".pngx-page-title");
+      if (titleEl) {
+        titleEl.innerText = cat ? `Documents · ${cat}` : "Documents";
+      }
+
+      document.getElementById("pngxDashboardSection").style.display = "none";
+      const filterGroup = document.getElementById("pngxFilterGroup");
+      if (filterGroup) filterGroup.style.display = "flex";
+      const btnSel = document.getElementById("btnGroupSelect");
+      if (btnSel) btnSel.style.display = "inline-flex";
+      const btnView = document.getElementById("btnGroupView");
+      if (btnView) btnView.style.display = "inline-flex";
+      const sep = document.querySelector(".pngx-toolbar-sep");
+      if (sep) sep.style.display = "block";
+      const subBar = document.querySelector(".pngx-sub-bar");
+      if (subBar) subBar.style.display = "flex";
+
+      document.getElementById("btnGridView").classList.toggle("active", currentViewMode === "grid");
+      document.getElementById("btnListView").classList.toggle("active", currentViewMode === "list");
+      document.getElementById("pngxCardsGrid").style.display = currentViewMode === "grid" ? "grid" : "none";
+      document.getElementById("pngxListView").style.display = currentViewMode === "list" ? "block" : "none";
+
+      document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      applyFilters();
+    }
+
+    function setStoragePathFilter(path) {
+      filterState.storagePath = path;
+      document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      applyFilters();
+    }
+
+    function setOcrStatusFilter(status) {
+      filterState.ocrStatus = status;
+      document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      applyFilters();
+    }
+
+    let ftsDebounceTimer = null;
+
+    function onFilterInput(val) {
+      filterState.query = val;
+      if (filterState.scope === "all") {
+        clearTimeout(ftsDebounceTimer);
+        ftsDebounceTimer = setTimeout(() => {
+          if (filterState.query.trim()) {
+            executeFtsSearch();
+          } else {
+            applyFilters();
+          }
+        }, 280);
+      } else {
+        applyFilters();
+      }
+    }
+
+    function clearSearchInput() {
+      filterState.query = "";
+      document.getElementById("pngxFilterInput").value = "";
+      applyFilters();
+    }
+
+    function onScopeChange(val) {
+      filterState.scope = val;
+      const input = document.getElementById("pngxFilterInput");
+      if (input) {
+        if (val === "all") {
+          input.placeholder = "Search document text & OCR content...";
+        } else {
+          input.placeholder = "Search or filter documents...";
+        }
+        input.focus();
+      }
+
+      if (filterState.query.trim()) {
+        if (val === "all") {
+          executeFtsSearch();
+        } else {
+          applyFilters();
+        }
+      } else {
+        showToast(val === "all" ? "Scope: Full Document Text & OCR" : "Scope: Document Title");
+        applyFilters();
+      }
+    }
+
+    async function executeFtsSearch() {
+      const q = filterState.query.trim();
+      if (!q) {
+        applyFilters();
+        return;
+      }
+      if (filterState.scope === "all") {
+        showToast(`Searching full-text for "${q}"...`);
+        try {
+          let url = `/api/paperless-ngx/documents?q=${encodeURIComponent(q)}&`;
+          if (filterState.category) url += `tag=${encodeURIComponent(filterState.category)}&`;
+          if (filterState.ocrStatus) url += `status=${encodeURIComponent(filterState.ocrStatus)}&`;
+
+          const res = await fetch(url);
+          const data = await res.json();
+          const results = data.documents || [];
+
+          if (currentViewMode === "grid") {
+            renderCards(results);
+          } else {
+            renderTable(results);
+          }
+          document.getElementById("docCountDisplay").innerText = `${results.length} result${results.length === 1 ? '' : 's'}`;
+          showToast(`Found ${results.length} document(s) with text "${q}"`);
+          const clearBtn = document.getElementById("btnClearSearch");
+          if (clearBtn) clearBtn.style.display = filterState.query ? "block" : "none";
+          updateUIIndicators();
+          updateSelectionUI();
+          return;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      applyFilters();
+    }
+
+    function resetAllFilters() {
+      currentSidebarTab = "all_documents";
+      filterState = {
+        scope: "all",
+        query: "",
+        category: "",
+        storagePath: "",
+        ocrStatus: ""
+      };
+      const titleEl = document.querySelector(".pngx-page-title");
+      if (titleEl) titleEl.innerText = "Documents";
+      const scopeSel = document.getElementById("pngxScopeSelect");
+      if (scopeSel) scopeSel.value = "all";
+      const input = document.getElementById("pngxFilterInput");
+      if (input) {
+        input.value = "";
+        input.placeholder = "Search document text & OCR content...";
+      }
+      document.querySelectorAll(".pngx-dropdown-menu").forEach(el => el.classList.remove("show"));
+      clearSelection();
+      applyFilters();
+    }
+
+    // -------------------------------------------------------------
+    // Selection Handling
+    // -------------------------------------------------------------
+    function toggleSelectDoc(docId, event) {
+      if (event) event.stopPropagation();
+      if (selectedDocIds.has(docId)) {
+        selectedDocIds.delete(docId);
+      } else {
+        selectedDocIds.add(docId);
+      }
+      updateSelectionUI();
+    }
+
+    function toggleSelectAll(selectAll) {
+      if (selectAll) {
+        masterDocuments.forEach(d => selectedDocIds.add(d.id));
+        showToast(`All ${masterDocuments.length} documents selected`);
+      } else {
+        // Toggle current visible
+        const visibleCheckboxes = document.querySelectorAll(".pngx-card-select-checkbox, #pngxTableBody input[type='checkbox']");
+        let allVisibleSelected = true;
+        visibleCheckboxes.forEach(cb => {
+          if (!cb.checked) allVisibleSelected = false;
+        });
+        visibleCheckboxes.forEach(cb => {
+          const id = cb.dataset.docId;
+          if (id) {
+            if (allVisibleSelected) selectedDocIds.delete(id);
+            else selectedDocIds.add(id);
+          }
+        });
+      }
+      updateSelectionUI();
+    }
+
+    function clearSelection() {
+      selectedDocIds.clear();
+      updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+      const count = selectedDocIds.size;
+      const bar = document.getElementById("selectionBar");
+      const countText = document.getElementById("selectedCountText");
+      if (countText) countText.innerText = count;
+
+      if (count > 0) {
+        bar.classList.add("active");
+      } else {
+        bar.classList.remove("active");
+      }
+
+      // Update card visual borders & checkboxes
+      document.querySelectorAll(".pngx-doc-card").forEach(card => {
+        const id = card.dataset.docId;
+        if (id) {
+          card.classList.toggle("selected", selectedDocIds.has(id));
+          const cb = card.querySelector(".pngx-card-select-checkbox");
+          if (cb) cb.checked = selectedDocIds.has(id);
+        }
+      });
+
+      // Update table checkboxes & row selected styling
+      const tableRows = document.querySelectorAll("#pngxTableBody tr");
+      tableRows.forEach(tr => {
+        const cb = tr.querySelector("input[type='checkbox']");
+        if (cb && cb.dataset.docId) {
+          const isSel = selectedDocIds.has(cb.dataset.docId);
+          cb.checked = isSel;
+          tr.classList.toggle("selected", isSel);
+        }
+      });
+
+      // Update list select all checkbox in table header
+      const listSelectAll = document.getElementById("listSelectAllCheckbox");
+      if (listSelectAll && tableCheckboxes.length > 0) {
+        const allChecked = Array.from(tableCheckboxes).every(cb => cb.checked);
+        const someChecked = Array.from(tableCheckboxes).some(cb => cb.checked);
+        listSelectAll.checked = allChecked;
+        listSelectAll.indeterminate = someChecked && !allChecked;
+      }
+    }
+
+    async function batchRunOcr() {
+      if (selectedDocIds.size === 0) return;
+      const ids = Array.from(selectedDocIds);
+      showToast(`Running OCR & auto-syncing ${ids.length} selected document(s) to WeKnora...`);
+      let successCount = 0;
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        try {
+          const res = await fetch(`/api/paperless-ngx/documents/${id}/ocr`, { method: "POST" });
+          if (res.ok) successCount++;
+        } catch { }
+      }
+      showToast(`OCR complete & auto-synced ${successCount} document(s) to WeKnora!`);
+      clearSelection();
+      await loadMasterData();
+    }
+
+    async function batchSyncWeKnora() {
+      if (selectedDocIds.size === 0) return;
+      showToast(`Exporting ${selectedDocIds.size} document(s) to WeKnora...`);
+      let successCount = 0;
+      for (const id of Array.from(selectedDocIds)) {
+        try {
+          const res = await fetch(`/api/paperless-ngx/documents/${id}/sync-weknora`, { method: "POST" });
+          if (res.ok) successCount++;
+        } catch { }
+      }
+      showToast(`Synced ${successCount} document(s) to WeKnora!`);
+      clearSelection();
+    }
+
+    // -------------------------------------------------------------
+    // Data Loading & Rendering
+    // -------------------------------------------------------------
+    async function loadMasterData() {
+      try {
+        const [docsRes, statsRes] = await Promise.all([
+          fetch("/api/paperless-ngx/documents"),
+          fetch("/api/paperless-ngx/stats")
+        ]);
+
+        const docsData = await docsRes.json();
+        const statsData = await statsRes.json();
+
+        masterDocuments = deduplicateDocs(docsData.documents || []);
+        statsDataCache = statsData;
+        categoriesList = statsData.categories || [];
+
+        document.getElementById("totalBadgeCount").innerText = masterDocuments.length;
+        document.getElementById("recentBadgeCount").innerText = masterDocuments.length;
+
+        const ddTagCount = document.getElementById("ddTotalTagsCount");
+        if (ddTagCount) ddTagCount.innerText = masterDocuments.length;
+
+        const scopeSel = document.getElementById("pngxScopeSelect");
+        if (scopeSel) scopeSel.value = filterState.scope || "all";
+
+        renderCategoryBreadcrumbs();
+        renderSidebarCategories();
+        renderDropdownLists();
+        renderUploadCategories();
+        if (currentMainTab === "dashboard") {
+          renderDashboard();
+        } else {
+          applyFilters();
+        }
+      } catch (err) {
+        console.error("Failed to load master documents:", err);
+      }
+    }
+
+    function renderCategoryBreadcrumbs() {
+      const container = document.getElementById("categoryBreadcrumbs");
+      if (!container) return;
+
+      let html = `
+        <div class="pngx-crumb-chip ${filterState.category === '' ? 'active' : ''}" data-category="" onclick="setCategoryFilter('')">
+          All (${masterDocuments.length})
+        </div>
+      `;
+
+      html += categoriesList.map(c => `
+        <div class="pngx-crumb-chip ${filterState.category === c.name ? 'active' : ''}" data-category="${c.name}" onclick="setCategoryFilter('${c.name.replace(/'/g, "\\'")}')">
+          ${c.name} (${c.count})
+        </div>
+      `).join("");
+
+      container.innerHTML = html;
+    }
+
+    function renderSidebarCategories() {
+      const container = document.getElementById("sidebarCategoriesContainer");
+      if (!container) return;
+
+      container.innerHTML = categoriesList.map(c => `
+        <div class="pngx-menu-item ${filterState.category === c.name ? 'active' : ''}" data-category="${c.name}" onclick="setCategoryFilter('${c.name.replace(/'/g, "\\'")}')">
+          <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${c.name}">${c.name}</span>
+          <span class="pngx-badge-count">${c.count}</span>
+        </div>
+      `).join("");
+
+      updateUIIndicators();
+    }
+
+    function renderDropdownLists() {
+      // Tags Dropdown items
+      const tagsContainer = document.getElementById("ddTagsListContainer");
+      if (tagsContainer) {
+        tagsContainer.innerHTML = categoriesList.map(c => `
+          <div class="pngx-dropdown-item ${filterState.category === c.name ? 'active' : ''}" onclick="setCategoryFilter('${c.name.replace(/'/g, "\\'")}')">
+            <span>🏷 ${c.name}</span>
+            <span class="pngx-badge-count">${c.count}</span>
+          </div>
+        `).join("");
+      }
+    }
+
+    function deduplicateDocs(docs) {
+      const seen = new Set();
+      const unique = [];
+      for (const d of docs) {
+        const key = d.original_name || d.id;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(d);
+        }
+      }
+      return unique;
+    }
+
+    // Render Grid Cards
+    function renderCards(docs) {
+      const grid = document.getElementById("pngxCardsGrid");
+      if (!grid) return;
+      docs = deduplicateDocs(docs);
+
+      if (docs.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1 / -1; padding: 48px; text-align: center; color: var(--pngx-text-muted);">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px; color: var(--pngx-text-subtle);">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <div style="font-weight: 600; font-size: 15px;">No documents match current filters</div>
+            <div style="font-size: 12px; margin-top: 4px; color: var(--pngx-brand); cursor: pointer;" onclick="resetAllFilters()">Click here to reset filters</div>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = docs.map(doc => {
+        const cat = doc.tags || "General";
+        const catColor = getCategoryColor(cat);
+        const isCompleted = doc.ocr_status === "completed";
+        const statusLabel = isCompleted ? "OCR Ready" : (doc.ocr_status === "digital_only" ? "Digital" : "Pending");
+        const statusClass = isCompleted ? "pngx-tag-ocr-done" : (doc.ocr_status === "digital_only" ? "pngx-tag-digital" : "pngx-tag-pending");
+        const isSelected = selectedDocIds.has(doc.id);
+
+        return `
+          <div class="pngx-doc-card ${isSelected ? 'selected' : ''}" data-doc-id="${doc.id}">
+            
+            <!-- Checkbox for Selection -->
+            <input 
+              type="checkbox" 
+              class="pngx-card-select-checkbox" 
+              data-doc-id="${doc.id}" 
+              ${isSelected ? 'checked' : ''} 
+              onclick="toggleSelectDoc('${doc.id}', event)" 
+              title="Select document"
+            />
+
+            <!-- Thumbnail Area with Authentic Tag Pills -->
+            <div class="pngx-card-thumb-wrap" onclick="openDocDetail('${doc.id}')">
+              <img 
+                class="pngx-card-thumb-img" 
+                src="/api/paperless-ngx/documents/${doc.id}/thumbnail" 
+                loading="lazy" 
+                alt="${doc.original_name}"
+                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+              />
+              <div class="pngx-fallback-preview" style="display: none;">
+                <div class="pngx-preview-line title"></div>
+                <div class="pngx-preview-line" style="width: 90%;"></div>
+                <div class="pngx-preview-line" style="width: 75%;"></div>
+                <div class="pngx-preview-line" style="width: 85%;"></div>
+                <div class="pngx-preview-line" style="width: 60%;"></div>
+              </div>
+
+              <!-- Top-Right Tag Pills -->
+              <div class="pngx-thumb-badges">
+                <span class="pngx-tag-pill pngx-tag-category" style="background: ${catColor};">${cat}</span>
+                <span class="pngx-tag-pill ${statusClass}">${statusLabel}</span>
+              </div>
+            </div>
+
+            <!-- Card Body -->
+            <div class="pngx-card-body">
+              <div class="pngx-card-title" title="${doc.original_name}" onclick="openDocDetail('${doc.id}')">
+                ${doc.original_name}
+              </div>
+
+              ${doc.snippet ? `
+                <div class="pngx-card-snippet" style="font-size: 11px; color: #1e293b; background: #fef9c3; border-left: 3px solid #eab308; padding: 4px 6px; border-radius: 4px; margin-top: 4px; line-height: 1.35; max-height: 48px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+                  ${doc.snippet}
+                </div>` : ''}
+
+              <div class="pngx-card-meta">
+                <div class="pngx-meta-row" title="Category / Storage folder" style="cursor: pointer;" onclick="setCategoryFilter('${cat.replace(/'/g, "\\'")}')">
+                  <svg class="pngx-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  <span>${cat}</span>
+                </div>
+                <div class="pngx-meta-row">
+                  <svg class="pngx-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  <span>${formatDate(doc.created_at)}</span>
+                </div>
+                <div class="pngx-meta-row">
+                  <svg class="pngx-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  </svg>
+                  <span>${doc.page_count || 1} page${(doc.page_count || 1) > 1 ? 's' : ''} · ${formatBytes(doc.file_size)}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom 4 Icon Action Bar -->
+            <div class="pngx-card-footer">
+              <button class="pngx-card-btn" title="View OCR Text & Details" onclick="openDocDetail('${doc.id}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+              </button>
+              <button class="pngx-card-btn" title="Open Document View (inline PDF)" onclick="viewDocInline('${doc.id}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+              <button class="pngx-card-btn" title="Open in Windows Explorer" onclick="openExplorer('${cat.replace(/'/g, "\\'")}', '${doc.id}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+              </button>
+              <button class="pngx-card-btn" title="Download Document" onclick="downloadDocFile('${doc.id}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
+            </div>
+
+          </div>
+        `;
+      }).join("");
+    }
+
+    // Render Table View (Compact High-Density Design)
+    function renderTable(docs) {
+      const tbody = document.getElementById("pngxTableBody");
+      if (!tbody) return;
+      docs = deduplicateDocs(docs);
+
+      if (docs.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" style="padding: 32px; text-align: center; color: var(--pngx-text-muted);">
+              No documents match current filters
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = docs.map(doc => {
+        const cat = doc.tags || "General";
+        const catColor = getCategoryColor(cat);
+        const isCompleted = doc.ocr_status === "completed";
+        const statusLabel = isCompleted ? "OCR Ready" : (doc.ocr_status === "digital_only" ? "Digital" : "Pending");
+        const statusClass = isCompleted ? "pngx-tag-ocr-done" : (doc.ocr_status === "digital_only" ? "pngx-tag-digital" : "pngx-tag-pending");
+        const isSelected = selectedDocIds.has(doc.id);
+
+        return `
+          <tr class="${isSelected ? 'selected' : ''}">
+            <td style="text-align: center;">
+              <input 
+                type="checkbox" 
+                data-doc-id="${doc.id}" 
+                ${isSelected ? 'checked' : ''} 
+                onclick="toggleSelectDoc('${doc.id}', event)" 
+              />
+            </td>
+            <td>
+              <div class="pngx-table-doc-cell" title="${doc.original_name}" onclick="openDocDetail('${doc.id}')">
+                <svg class="pngx-table-file-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span class="pngx-table-doc-name">${doc.original_name}</span>
+              </div>
+              ${doc.snippet ? `
+                <div style="font-size: 10.5px; color: #475569; background: #fef9c3; border-left: 2px solid #eab308; padding: 1px 6px; border-radius: 3px; margin-top: 2px; line-height: 1.25; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  ${doc.snippet}
+                </div>` : ''}
+            </td>
+            <td>
+              <span class="pngx-table-tag" style="background: ${catColor}; cursor: pointer;" onclick="setCategoryFilter('${cat.replace(/'/g, "\\'")}')" title="Filter by ${cat}">${cat}</span>
+            </td>
+            <td>
+              <span class="pngx-table-date-text">${formatDate(doc.created_at)}</span>
+            </td>
+            <td>
+              <span class="pngx-table-meta-text">${doc.page_count || 1} pg · ${formatBytes(doc.file_size)}</span>
+            </td>
+            <td>
+              <span class="pngx-table-tag ${statusClass}">${statusLabel}</span>
+            </td>
+            <td style="text-align: right; padding-right: 12px;">
+              <div class="pngx-table-actions">
+                <button class="pngx-tbl-btn" title="View document inline" onclick="viewDocInline('${doc.id}')">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <span>View</span>
+                </button>
+                <button class="pngx-tbl-btn" title="View details and OCR text" onclick="openDocDetail('${doc.id}')">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <span>Details</span>
+                </button>
+                <button class="pngx-tbl-btn" title="Open containing folder in Explorer" onclick="openExplorer('${cat.replace(/'/g, "\\'")}', '${doc.id}')">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  <span>Explorer</span>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // -------------------------------------------------------------
+    // Open Explorer in Native Windows Shell
+    // -------------------------------------------------------------
+    async function openExplorer(subfolder = "", docId = "") {
+      showToast("Opening Windows File Explorer...");
+      try {
+        let url = `/api/paperless-ngx/open-explorer?subfolder=${encodeURIComponent(subfolder || "")}`;
+        if (docId) {
+          url += `&doc_id=${encodeURIComponent(docId)}`;
+        }
+        const res = await fetch(url, {
+          method: "POST"
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Opened in Windows Explorer");
+        } else {
+          showToast("Explorer note: " + (d.error || "opened"));
+        }
+      } catch (err) {
+        showToast("Error opening Explorer: " + err);
+      }
+    }
+
+    function openActiveCategoryExplorer() {
+      openExplorer(filterState.category || "documents");
+    }
+
+    function openArchiveRootExplorer() {
+      openExplorer(filterState.category || "documents");
+    }
+
+    // Modal Details with Fast Instant Preview (prevents 6MB text lag freeze)
+    async function openDocDetail(docId, loadFull = false) {
+      activeDocId = docId;
+      const doc = masterDocuments.find(d => d.id === docId);
+      if (!doc) return;
+
+      document.getElementById("modalDocTitle").innerText = doc.original_name;
+      document.getElementById("modalCategory").innerText = doc.tags || "General";
+      document.getElementById("modalPages").innerText = `${doc.page_count || 1} pages (${formatBytes(doc.file_size)})`;
+      document.getElementById("modalOcrStatus").innerText = doc.ocr_status || "pending";
+      document.getElementById("modalPath").innerText = doc.filename;
+
+      const previewBox = document.getElementById("modalMarkdownContent");
+      previewBox.innerText = "Loading preview text...";
+      document.getElementById("docDetailModal").classList.add("active");
+
+      try {
+        const url = `/api/paperless-ngx/documents/${docId}/markdown` + (loadFull ? "" : "?limit=40000");
+        const res = await fetch(url);
+        if (res.ok) {
+          const txt = await res.text();
+          previewBox.innerText = txt.trim() || "[No text extracted or document has not been OCR processed yet.]";
+          if (!loadFull && txt.includes("[Showing fast preview")) {
+            const btnWrap = document.createElement("div");
+            btnWrap.style.cssText = "margin-top: 14px; text-align: center;";
+            btnWrap.innerHTML = `
+              <button class="pngx-btn-vault" style="font-size: 12px; padding: 6px 14px; margin: 0 auto;" onclick="openDocDetail('${docId}', true)">
+                📄 Load Complete Full Text
+              </button>
+            `;
+            previewBox.appendChild(btnWrap);
+          }
+        } else {
+          previewBox.innerText = "[No OCR text found. Click 'Run OCR' above.]";
+        }
+      } catch (e) {
+        previewBox.innerText = "[Error loading OCR text: " + e + "]";
+      }
+    }
+
+    async function runOcrForCurrentDoc() {
+      if (!activeDocId) return;
+      showToast("Running local OCR & syncing to WeKnora...");
+      try {
+        const res = await fetch(`/api/paperless-ngx/documents/${activeDocId}/ocr`, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          if (data.weknora_synced) {
+            showToast("OCR complete & automatically synced to WeKnora!");
+          } else {
+            showToast("OCR extraction completed!");
+          }
+          openDocDetail(activeDocId);
+          loadMasterData();
+        } else {
+          showToast("OCR failed: " + (data.error || "Unknown error"));
+        }
+      } catch (err) {
+        showToast("OCR Error: " + err);
+      }
+    }
+
+    async function syncCurrentDocToWeKnora() {
+      if (!activeDocId) return;
+      showToast("Exporting OCR text to WeKnora ingestion storage...");
+      try {
+        const res = await fetch(`/api/paperless-ngx/documents/${activeDocId}/sync-weknora`, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          showToast(data.message || "Successfully synced to WeKnora!");
+        }
+      } catch (err) {
+        showToast("Sync Error: " + err);
+      }
+    }
+
+    function openCurrentDocInExplorer() {
+      const doc = masterDocuments.find(d => d.id === activeDocId);
+      if (doc) {
+        openExplorer(doc.tags || "documents", activeDocId);
+      } else {
+        openExplorer("documents");
+      }
+    }
+
+    function downloadCurrentDoc() {
+      if (!activeDocId) return;
+      downloadDocFile(activeDocId);
+    }
+
+    function viewCurrentDocInline() {
+      if (!activeDocId) return;
+      viewDocInline(activeDocId);
+    }
+
+    function downloadDocFile(docId) {
+      window.open(`/api/paperless-ngx/documents/${docId}/download`, "_blank");
+    }
+
+    function viewDocInline(docId) {
+      window.open(`/api/paperless-ngx/documents/${docId}/view`, "_blank");
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove("active");
+    }
+
+    // Upload Modal
+    function openUploadModal() {
+      document.getElementById("uploadModal").classList.add("active");
+    }
+
+    function handleFileSelected(input) {
+      if (input.files && input.files[0]) {
+        document.getElementById("uploadDropHint").innerText = `Selected: ${input.files[0].name}`;
+      }
+    }
+
+    async function submitUpload() {
+      const input = document.getElementById("fileUploadInput");
+      if (!input.files || !input.files[0]) {
+        showToast("Please choose a file to upload.");
+        return;
+      }
+      const file = input.files[0];
+      const cat = document.getElementById("uploadCategorySelect").value;
+      const autoOcr = document.getElementById("autoOcrCheck").checked;
+
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("category", cat);
+      fd.append("tags", cat);
+      fd.append("auto_ocr", autoOcr);
+
+      showToast("Uploading document to private vault...");
+      try {
+        const res = await fetch("/api/paperless-ngx/upload", {
+          method: "POST",
+          body: fd
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast("Document saved to vault!");
+          closeModal("uploadModal");
+          await loadMasterData();
+          setCategoryFilter(cat);
+        } else {
+          showToast("Upload failed");
+        }
+      } catch (err) {
+        showToast("Upload error: " + err);
+      }
+    }
+
+    // Status Modal (OCR & Vault Status)
+    function showSettingsModal() {
+      const modal = document.getElementById("statusModal");
+      const content = document.getElementById("statusModalContent");
+
+      const tess = (statsDataCache && statsDataCache.tesseract) ? statsDataCache.tesseract : {};
+      const tessInstalled = tess.installed ? `Installed (${tess.version || 'v5.x'})` : "Not detected";
+
+      content.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 14px; font-size: 13px;">
+          <div style="background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+            <div><strong>External Vault Location:</strong> <span style="font-family: monospace; color: #475569;">${statsDataCache ? statsDataCache.documents_path : '~/Documents/OneEAD_Archive/documents'}</span></div>
+            <div><strong>Data Privacy Guarantee:</strong> <span style="color: #059669; font-weight: 600;">100% Offline (Zero Cloud, Zero Docker)</span></div>
+            <div><strong>Total Documents:</strong> <span>${masterDocuments.length} files (${statsDataCache ? formatBytes(statsDataCache.total_size_bytes) : '0 B'})</span></div>
+            <div><strong>Total Pages Indexed:</strong> <span>${statsDataCache ? statsDataCache.total_pages : 0} pages</span></div>
+            <div><strong>OCR Completed:</strong> <span>${statsDataCache ? statsDataCache.ocr_completed_count : 0} documents</span></div>
+          </div>
+
+          <div style="background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+            <div><strong>Tesseract OCR Engine:</strong> <span style="font-weight: 600; color: ${tess.installed ? '#059669' : '#d97706'};">${tessInstalled}</span></div>
+            <div><strong>OCR Binary Path:</strong> <span style="font-family: monospace; font-size: 11.5px; color: #64748b;">${tess.path || 'Auto-detected'}</span></div>
+            <div><strong>Supported Languages:</strong> <span style="font-family: monospace;">${(tess.languages || ['eng', 'osd']).join(', ')}</span></div>
+          </div>
+        </div>
+      `;
+      modal.classList.add("active");
+    }
+
+    // Dashboard View Controls
+    function showDashboardView() {
+      currentMainTab = "dashboard";
+      currentSidebarTab = "dashboard";
+      document.getElementById("pngxDashboardSection").style.display = "block";
+      const filterGroup = document.getElementById("pngxFilterGroup");
+      if (filterGroup) filterGroup.style.display = "none";
+      const btnSel = document.getElementById("btnGroupSelect");
+      if (btnSel) btnSel.style.display = "none";
+      const btnView = document.getElementById("btnGroupView");
+      if (btnView) btnView.style.display = "none";
+      const sep = document.querySelector(".pngx-toolbar-sep");
+      if (sep) sep.style.display = "none";
+      const subBar = document.querySelector(".pngx-sub-bar");
+      if (subBar) subBar.style.display = "none";
+      document.getElementById("pngxCardsGrid").style.display = "none";
+      document.getElementById("pngxListView").style.display = "none";
+      document.querySelector(".pngx-page-title").innerText = "Dashboard";
+      updateUIIndicators();
+      renderDashboard();
+    }
+
+    function showDocumentsView() {
+      currentMainTab = "documents";
+      currentSidebarTab = "all_documents";
+      filterState.category = "";
+      filterState.storagePath = "";
+      filterState.query = "";
+      const input = document.getElementById("pngxFilterInput");
+      if (input) input.value = "";
+      const clearBtn = document.getElementById("btnClearSearch");
+      if (clearBtn) clearBtn.style.display = "none";
+
+      document.getElementById("pngxDashboardSection").style.display = "none";
+      const filterGroup = document.getElementById("pngxFilterGroup");
+      if (filterGroup) filterGroup.style.display = "flex";
+      const btnSel = document.getElementById("btnGroupSelect");
+      if (btnSel) btnSel.style.display = "inline-flex";
+      const btnView = document.getElementById("btnGroupView");
+      if (btnView) btnView.style.display = "inline-flex";
+      const sep = document.querySelector(".pngx-toolbar-sep");
+      if (sep) sep.style.display = "block";
+      const subBar = document.querySelector(".pngx-sub-bar");
+      if (subBar) subBar.style.display = "flex";
+      document.querySelector(".pngx-page-title").innerText = "Documents";
+
+      document.getElementById("btnGridView").classList.toggle("active", currentViewMode === "grid");
+      document.getElementById("btnListView").classList.toggle("active", currentViewMode === "list");
+      document.getElementById("pngxCardsGrid").style.display = currentViewMode === "grid" ? "grid" : "none";
+      document.getElementById("pngxListView").style.display = currentViewMode === "list" ? "block" : "none";
+
+      applyFilters();
+    }
+
+    function showRecentlyAddedView() {
+      currentMainTab = "documents";
+      currentSidebarTab = "recently_added";
+      filterState.category = "";
+      filterState.storagePath = "";
+      filterState.query = "";
+      const input = document.getElementById("pngxFilterInput");
+      if (input) input.value = "";
+      const clearBtn = document.getElementById("btnClearSearch");
+      if (clearBtn) clearBtn.style.display = "none";
+
+      document.getElementById("pngxDashboardSection").style.display = "none";
+      const filterGroup = document.getElementById("pngxFilterGroup");
+      if (filterGroup) filterGroup.style.display = "flex";
+      const btnSel = document.getElementById("btnGroupSelect");
+      if (btnSel) btnSel.style.display = "inline-flex";
+      const btnView = document.getElementById("btnGroupView");
+      if (btnView) btnView.style.display = "inline-flex";
+      const sep = document.querySelector(".pngx-toolbar-sep");
+      if (sep) sep.style.display = "block";
+      const subBar = document.querySelector(".pngx-sub-bar");
+      if (subBar) subBar.style.display = "flex";
+      document.querySelector(".pngx-page-title").innerText = "Recently Added";
+
+      document.getElementById("btnGridView").classList.toggle("active", currentViewMode === "grid");
+      document.getElementById("btnListView").classList.toggle("active", currentViewMode === "list");
+      document.getElementById("pngxCardsGrid").style.display = currentViewMode === "grid" ? "grid" : "none";
+      document.getElementById("pngxListView").style.display = currentViewMode === "list" ? "block" : "none";
+
+      applyFilters();
+    }
+
+    function renderDashboard() {
+      const totalDocsEl = document.getElementById("dbTotalDocs");
+      const vaultSizeEl = document.getElementById("dbVaultSize");
+      const ocrReadyEl = document.getElementById("dbOcrReady");
+      const ocrSubEl = document.getElementById("dbOcrSub");
+      const catsGrid = document.getElementById("dbCategoriesGrid");
+      const recentGrid = document.getElementById("dbRecentGrid");
+
+      if (totalDocsEl) totalDocsEl.innerText = masterDocuments.length;
+      if (vaultSizeEl && statsDataCache) {
+        vaultSizeEl.innerText = `${formatBytes(statsDataCache.total_size_bytes)} · ${statsDataCache.total_pages || 0} pages indexed`;
+      }
+      if (ocrReadyEl && statsDataCache) {
+        ocrReadyEl.innerText = `${statsDataCache.ocr_completed_count || 0} / ${masterDocuments.length}`;
+      }
+      if (ocrSubEl && statsDataCache) {
+        const tess = statsDataCache.tesseract || {};
+        ocrSubEl.innerText = tess.installed ? `Tesseract OCR (${tess.version || 'v5.x'}) active` : "OCR ready";
+      }
+
+      // Categories in dashboard
+      if (catsGrid) {
+        catsGrid.innerHTML = categoriesList.map(c => {
+          const color = getCategoryColor(c.name);
+          return `
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; flex: 1; min-width: 220px;" onclick="showDocumentsView(); setCategoryFilter('${c.name.replace(/'/g, "\\'")}');">
+              <span style="font-weight: 600; font-size: 13px; color: ${color};">📁 ${c.name}</span>
+              <span class="pngx-badge-count">${c.count} files</span>
+            </div>
+          `;
+        }).join("");
+      }
+
+      // Top 8 recent documents
+      if (recentGrid) {
+        const recents = masterDocuments.slice(0, 8);
+        recentGrid.innerHTML = recents.map(doc => {
+          const cat = doc.tags || "General";
+          const catColor = getCategoryColor(cat);
+          const isCompleted = doc.ocr_status === "completed";
+          const statusClass = isCompleted ? "pngx-tag-ocr-done" : (doc.ocr_status === "digital_only" ? "pngx-tag-digital" : "pngx-tag-pending");
+          const statusLabel = isCompleted ? "OCR Ready" : (doc.ocr_status === "digital_only" ? "Digital" : "Pending");
+          return `
+            <div class="pngx-doc-card" style="cursor: pointer;" onclick="openDocDetail('${doc.id}')">
+              <div class="pngx-card-thumb-wrap">
+                <img 
+                  class="pngx-card-thumb-img" 
+                  src="/api/paperless-ngx/documents/${doc.id}/thumbnail" 
+                  loading="lazy" 
+                  alt="${doc.original_name}"
+                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                />
+                <div class="pngx-fallback-preview" style="display: none;">
+                  <div class="pngx-preview-line title"></div>
+                  <div class="pngx-preview-line" style="width: 90%;"></div>
+                  <div class="pngx-preview-line" style="width: 75%;"></div>
+                </div>
+                <div class="pngx-thumb-badges">
+                  <span class="pngx-tag-pill pngx-tag-category" style="background: ${catColor};">${cat}</span>
+                  <span class="pngx-tag-pill ${statusClass}">${statusLabel}</span>
+                </div>
+              </div>
+              <div class="pngx-card-body">
+                <div class="pngx-card-title">${doc.original_name}</div>
+                <div class="pngx-card-meta">
+                  <div class="pngx-meta-row"><span>${formatDate(doc.created_at)} · ${formatBytes(doc.file_size)}</span></div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+
+    // Tags Modal
+    function openTagsModal() {
+      const modal = document.getElementById("tagsModal");
+      const content = document.getElementById("tagsModalContent");
+      if (!modal || !content) return;
+
+      content.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 4px;">Click any tag to view matching documents in the archive:</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${categoriesList.map(c => {
+        const color = getCategoryColor(c.name);
+        return `
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="pngx-tag-pill" style="background: ${color}; font-size: 12px; padding: 4px 10px;">🏷 ${c.name}</span>
+                    <span style="font-size: 13px; font-weight: 600; color: #475569;">${c.count} document${c.count === 1 ? '' : 's'}</span>
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <button class="pngx-btn-primary" style="padding: 4px 10px; font-size: 11.5px;" onclick="closeModal('tagsModal'); showDocumentsView(); setCategoryFilter('${c.name.replace(/'/g, "\\'")}');">
+                      View Documents
+                    </button>
+                    <button class="pngx-btn-vault" style="padding: 4px 10px; font-size: 11.5px;" onclick="openExplorer('${c.name.replace(/'/g, "\\'")}');">
+                      Explorer
+                    </button>
+                  </div>
+                </div>
+              `;
+      }).join("")}
+          </div>
+        </div>
+      `;
+      modal.classList.add("active");
+    }
+
+    // Storage Paths Modal
+    function openStoragePathsModal() {
+      const modal = document.getElementById("pathsModal");
+      const content = document.getElementById("pathsModalContent");
+      if (!modal || !content) return;
+
+      const basePath = statsDataCache ? statsDataCache.documents_path : "~/Documents/OneEAD_Archive/documents";
+
+      content.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="background: #f1f5f9; padding: 12px 14px; border-radius: 6px; font-size: 12.5px; color: #334155;">
+            <strong>Vault Root:</strong> <span style="font-family: monospace;">${basePath}</span>
+          </div>
+          <div style="font-size: 13px; font-weight: 600; color: #1e293b;">Subfolders & Document Counts:</div>
+          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto;">
+            ${categoriesList.map(c => `
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <div style="font-weight: 700; font-size: 13px; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+                    <span>📁</span> <span>${c.name}</span>
+                  </div>
+                  <div style="font-size: 11.5px; color: #64748b; font-family: monospace;">documents/${c.name}/</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="pngx-badge-count" style="font-size: 12px;">${c.count} files</span>
+                  <button class="pngx-btn-vault" style="padding: 5px 10px; font-size: 12px;" onclick="openExplorer('${c.name.replace(/'/g, "\\'")}');">
+                    <span>🖥 Open in Explorer</span>
+                  </button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+      modal.classList.add("active");
+    }
+
+    // Dynamic Upload Category Dropdown
+    function renderUploadCategories() {
+      const select = document.getElementById("uploadCategorySelect");
+      if (!select || categoriesList.length === 0) return;
+      select.innerHTML = categoriesList.map(c => `
+        <option value="${c.name}">${c.name}</option>
+      `).join("") + `<option value="General">General / Other</option>`;
+    }
+
+    // Keyboard Shortcuts (Escape to close modals/dropdowns)
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        document.querySelectorAll(".pngx-modal-backdrop").forEach(m => m.classList.remove("active"));
+        document.querySelectorAll(".pngx-dropdown-menu").forEach(d => d.classList.remove("show"));
+      }
+    });
+
+    // Initialize on page load
+    window.addEventListener("DOMContentLoaded", () => {
+      loadMasterData();
+    });
+  </script>
+</body>
+
+</html>
