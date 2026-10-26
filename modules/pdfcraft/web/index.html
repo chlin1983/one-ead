@@ -27,6 +27,7 @@
         </div>
 
         <span class="chip version-chip" id="chip-version" title="Installed Rust WebAssembly bundle">v0.8.0</span>
+        <span class="chip warn" id="chip-update" hidden></span>
         
         <div class="doc-selector-wrap">
           <label for="doc-select" class="visually-hidden">Document</label>
@@ -59,13 +60,6 @@
           </svg>
           <span>Library &amp; Folder</span>
         </button>
-
-        <button class="btn" id="btn-open-source" type="button" title="Open PdfCraft raw Rust source code folder on your PC">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-          </svg>
-          <span>Raw Source</span>
-        </button>
       </div>
 
       <div class="bar-center">
@@ -75,21 +69,9 @@
       </div>
 
       <div class="bar-right">
-        <button class="btn ghost" id="btn-new-tab" type="button" title="Open active PDF in new browser tab">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-            <polyline points="15 3 21 3 21 9"/>
-            <line x1="10" y1="14" x2="21" y2="3"/>
-          </svg>
-          <span>Pop Out</span>
-        </button>
+        <button class="btn primary" id="btn-update" type="button" hidden>Update Available</button>
+        <button class="btn primary" id="btn-reload" type="button" hidden>Reload to use new version</button>
 
-        <button class="btn ghost" id="btn-fullscreen" type="button" title="Toggle full screen mode">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>
-          </svg>
-          <span id="fs-label">Full Screen</span>
-        </button>
 
         <!-- Settings dropdown -->
         <div class="menu-wrap">
@@ -106,7 +88,7 @@
           <div class="menu" id="menu" role="menu" hidden>
             <div class="menu-header">PdfCraft Workbench</div>
             <button class="menu-item" id="btn-reveal-folder" type="button">Open PDF folder in Explorer</button>
-            <button class="menu-item" id="btn-check-updates" type="button">Check for updates</button>
+            <button class="menu-item" id="btn-check-updates" type="button">Check for updates (manual)</button>
             <button class="menu-item" id="btn-reinstall" type="button">Reinstall / Update engine</button>
             <button class="menu-item" id="btn-delete-doc" type="button" style="color: var(--danger, #d64545);">Delete selected doc</button>
             <div class="menu-divider"></div>

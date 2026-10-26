@@ -1,0 +1,198 @@
+"""Paperless-ngx module for One EAD.
+
+Document management, local OCR, and full-text search vault with 100% offline privacy.
+Documents are stored securely in ~/Documents/OneEAD_Archive outside git.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, PlainTextResponse
+
+from modules.paperless_ngx import manager, ocr_engine
+from server.module import PortalModule
+
+ICON = (
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+    '<polyline points="14 2 14 8 20 8"/>'
+    '<line x1="16" y1="13" x2="8" y2="13"/>'
+    '<line x1="16" y1="17" x2="8" y2="17"/>'
+    '<polyline points="10 9 9 9 8 9"/>'
+    '</svg>'
+)
+
+router = APIRouter()
+
+
+@router.get("/stats")
+def get_stats() -> dict:
+    return manager.get_vault_stats()
+
+
+@router.get("/tesseract")
+def get_tesseract() -> dict:
+    return ocr_engine.get_tesseract_info()
+
+
+@router.post("/open-explorer")
+def open_explorer(subfolder: str = "", doc_id: str = "") -> dict:
+    return manager.open_vault_in_explorer(subfolder=subfolder, doc_id=doc_id)
+
+
+@router.get("/documents")
+def list_documents(q: str = "", tag: str = "", status: str = "") -> dict:
+    docs = manager.list_documents(query=q, tag=tag, status=status)
+    return {"documents": docs, "count": len(docs)}
+
+
+@router.post("/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    tags: str = Form(""),
+    category: str = Form(""),
+    auto_ocr: bool = Form(True),
+    lang: str = Form("eng"),
+) -> dict:
+    if not file.filename:
+        raise HTTPException(400, "Filename is required.")
+    
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(400, "Uploaded file is empty.")
+
+    doc = manager.save_uploaded_document(
+        filename=file.filename,
+        file_bytes=content,
+        tags=tags,
+        category=category,
+        auto_ocr=auto_ocr,
+        lang=lang,
+    )
+    return {"ok": True, "document": doc}
+
+
+@router.get("/documents/{doc_id}")
+def get_document_meta(doc_id: str) -> dict:
+    doc = manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    return {"document": doc}
+
+
+@router.get("/documents/{doc_id}/markdown")
+def get_document_markdown(doc_id: str, limit: Optional[int] = None):
+    doc = manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    md = manager.get_document_markdown(doc_id)
+    if limit and limit > 0 and len(md) > limit:
+        total_len = len(md)
+        md = md[:limit] + f"\n\n\n---\n[Showing fast preview of first {limit:,} characters. Total document length is {total_len:,} characters.]"
+    return PlainTextResponse(md, media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/documents/{doc_id}/download")
+def download_document(doc_id: str):
+    doc = manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    file_path = manager.get_documents_dir() / doc["filename"]
+    if not file_path.is_file():
+        raise HTTPException(404, "File missing from vault storage")
+    return FileResponse(
+        path=str(file_path),
+        filename=doc["original_name"],
+        media_type=doc.get("mime_type", "application/octet-stream"),
+    )
+
+
+@router.get("/documents/{doc_id}/view")
+def view_document(doc_id: str):
+    doc = manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    file_path = manager.get_documents_dir() / doc["filename"]
+    if not file_path.is_file():
+        raise HTTPException(404, "File missing from vault storage")
+    return FileResponse(
+        path=str(file_path),
+        media_type=doc.get("mime_type", "application/pdf"),
+        headers={"Content-Disposition": f"inline; filename=\"{doc['original_name']}\""},
+    )
+
+
+@router.get("/documents/{doc_id}/thumbnail")
+def get_document_thumbnail(doc_id: str):
+    thumb_path = manager.get_or_create_thumbnail(doc_id)
+    if thumb_path and thumb_path.is_file():
+        return FileResponse(
+            path=str(thumb_path),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400, immutable"},
+        )
+    raise HTTPException(404, "Thumbnail not available")
+
+
+@router.post("/documents/{doc_id}/ocr")
+def trigger_ocr(doc_id: str, lang: str = "eng") -> dict:
+    try:
+        updated = manager.process_document_ocr(doc_id, lang=lang, auto_sync_weknora=True)
+        weknora_synced = False
+        weknora_file = None
+        if updated:
+            base_stem = Path(updated.get("original_name", "")).stem
+            weknora_file = f"{base_stem}_ocr.md"
+            fallback_path = Path(__file__).resolve().parent.parent / "weknora" / "data" / "files" / weknora_file
+            weknora_synced = fallback_path.is_file()
+        return {
+            "ok": True,
+            "document": updated,
+            "weknora_synced": weknora_synced,
+            "weknora_file": weknora_file,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"OCR processing failed: {exc}")
+
+
+@router.put("/documents/{doc_id}/tags")
+def update_tags(doc_id: str, tags: str = Form(...)) -> dict:
+    updated = manager.update_document_tags(doc_id, tags)
+    if not updated:
+        raise HTTPException(404, "Document not found")
+    return {"ok": True, "document": updated}
+
+
+@router.delete("/documents/{doc_id}")
+def delete_document(doc_id: str) -> dict:
+    success = manager.delete_document(doc_id)
+    if not success:
+        raise HTTPException(404, "Document not found")
+    return {"ok": True}
+
+
+@router.post("/documents/{doc_id}/sync-weknora")
+def sync_to_weknora(doc_id: str) -> dict:
+    try:
+        res = manager.copy_to_weknora_vault(doc_id)
+        return res
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to sync to WeKnora: {exc}")
+
+
+MODULE = PortalModule(
+    id="paperless-ngx",
+    title="Paperless-ngx",
+    subtitle="Document archive & offline OCR",
+    icon=ICON,
+    accent="#059669",
+    order=96,
+    badge=None,
+    web_dir="web",
+    router=router,
+)

@@ -32,14 +32,18 @@ def create_app() -> FastAPI:
     app = FastAPI(title="One EAD", version="0.1.0")
     modules = discover_modules()
 
-    # Serve everything with strict no-cache and no-store so the browser never
-    # runs a stale plugin build or cached JS/HTML after files change.
+    # Serve HTML/JS/API with strict no-cache, but allow client-side caching of thumbnails
+    # and static media assets so re-rendering cards never re-downloads images.
     @app.middleware("http")
     async def _no_cache(request, call_next):
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        path = request.url.path
+        if "/thumbnail" in path or path.endswith((".png", ".jpg", ".jpeg", ".svg", ".ico", ".woff2")):
+            response.headers["Cache-Control"] = "public, max-age=86400, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         return response
 
     @app.get("/api/modules")

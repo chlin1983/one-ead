@@ -8,6 +8,8 @@
   const state = {
     installed: false,
     installedVersion: "0.8.0",
+    updateAvailable: false,
+    latestVersion: null,
     docs: [],
     activeDoc: null,
     isCollapsed: false,
@@ -20,6 +22,9 @@
     handle: document.getElementById("bar-handle"),
     frame: document.getElementById("app-frame"),
     versionChip: document.getElementById("chip-version"),
+    updateChip: document.getElementById("chip-update"),
+    updateBtn: document.getElementById("btn-update"),
+    reloadBtn: document.getElementById("btn-reload"),
     docSelect: document.getElementById("doc-select"),
     fileInput: document.getElementById("file-input"),
     uploadBtn: document.getElementById("btn-upload"),
@@ -70,11 +75,10 @@
   }
 
   function restorePreferences() {
-    const collapsed = localStorage.getItem("one-ead:pdfcraft:collapsed") === "true";
-    if (collapsed) {
-      state.isCollapsed = true;
-      el.root.classList.add("bar-collapsed");
-    }
+    // Keep toolbar visible by default so users always have immediate access to controls
+    state.isCollapsed = false;
+    el.root.classList.remove("bar-collapsed");
+    localStorage.removeItem("one-ead:pdfcraft:collapsed");
   }
 
   async function checkStatus() {
@@ -89,7 +93,31 @@
         el.versionChip.textContent = `v${state.installedVersion}`;
       }
 
-      if (data.job && data.job.state === "running") {
+      if (data.docs_dir) {
+        storedFolderPath = data.docs_dir;
+        if (el.libPathCode) el.libPathCode.textContent = data.docs_dir;
+      }
+
+      const isRunning = data.job && data.job.state === "running";
+      const hasUpdate = !!(data.update_available || data.has_update);
+      state.updateAvailable = hasUpdate;
+      state.latestVersion = data.latest_version;
+
+      if (el.updateChip) {
+        el.updateChip.hidden = !(hasUpdate && !isRunning);
+        if (hasUpdate && state.latestVersion) {
+          el.updateChip.textContent = `Update available: v${state.latestVersion}`;
+        }
+      }
+
+      if (el.updateBtn) {
+        el.updateBtn.hidden = !(hasUpdate && !isRunning);
+        if (hasUpdate && state.latestVersion) {
+          el.updateBtn.textContent = `Update to v${state.latestVersion}`;
+        }
+      }
+
+      if (isRunning) {
         showInstaller(data.job.message || "Downloading PdfCraft WebAssembly bundle...", data.job_log || []);
         startPolling();
         return;
@@ -200,9 +228,13 @@
         if (data.installed || (data.job && data.job.state === "done")) {
           state.installed = true;
           state.installedVersion = data.installed_version || "0.8.0";
+          state.updateAvailable = false;
           if (el.versionChip) el.versionChip.textContent = `v${state.installedVersion}`;
+          if (el.updateChip) el.updateChip.hidden = true;
+          if (el.updateBtn) el.updateBtn.hidden = true;
+          if (el.reloadBtn) el.reloadBtn.hidden = false;
           hideInstaller();
-          showToast("PdfCraft ready!");
+          showToast(`PdfCraft updated to v${state.installedVersion}! Click 'Reload to use new version'.`);
           await loadDocuments();
         } else if (data.job && data.job.state === "error") {
           if (el.instMsg) el.instMsg.textContent = `Error: ${data.job.error}`;
@@ -267,31 +299,7 @@
       }
     });
 
-    // Pop out in new tab
-    el.newTabBtn?.addEventListener("click", () => {
-      const src = el.frame?.src;
-      if (src) {
-        window.open(src, "_blank");
-      }
-    });
 
-    // Full screen toggle
-    el.fsBtn?.addEventListener("click", () => {
-      if (!document.fullscreenElement) {
-        el.root?.requestFullscreen().catch((err) => {
-          showToast(`Full screen error: ${err.message}`);
-        });
-      } else {
-        document.exitFullscreen();
-      }
-    });
-
-    document.addEventListener("fullscreenchange", () => {
-      const isFs = Boolean(document.fullscreenElement);
-      if (el.fsLabel) {
-        el.fsLabel.textContent = isFs ? "Exit Full Screen" : "Full Screen";
-      }
-    });
 
     // Toolbar collapse / expand
     el.collapseBtn?.addEventListener("click", () => {
@@ -322,20 +330,65 @@
       }
     });
 
-    // Check updates
+    // Top Bar Update button (SolidCraft-style)
+    el.updateBtn?.addEventListener("click", async () => {
+      showToast("Starting PdfCraft WebAssembly update from GitHub...");
+      try {
+        const res = await fetch("/api/pdfcraft/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: true }),
+        });
+        const data = await res.json();
+        showInstaller(`Updating PdfCraft to v${state.latestVersion || "latest"}...`, data.job_log || []);
+        startPolling();
+      } catch (err) {
+        showToast("Error starting update");
+      }
+    });
+
+    // Top Bar Reload button
+    el.reloadBtn?.addEventListener("click", () => {
+      if (el.frame) {
+        // Force refresh iframe to load newly extracted WebAssembly engine
+        const cur = el.frame.getAttribute("src") || "app/index.html";
+        el.frame.src = cur;
+      }
+      el.reloadBtn.hidden = true;
+      showToast(`Reloaded PdfCraft v${state.installedVersion}`);
+    });
+
+    // Check updates (manual on-demand check without 24h periodic routine)
     el.checkUpdatesBtn?.addEventListener("click", async () => {
       el.menu.hidden = true;
-      showToast("Checking GitHub for newer releases…");
+      showToast("Checking GitHub for newer PdfCraft releases…");
       try {
         const res = await fetch("/api/pdfcraft/check", { method: "POST" });
         const data = await res.json();
-        if (data.has_update) {
-          showToast(`New version available: v${data.latest_version}`);
+        const hasUpd = !!(data.update_available || data.has_update);
+        state.updateAvailable = hasUpd;
+        state.latestVersion = data.latest_version;
+        state.installedVersion = data.installed_version || state.installedVersion;
+
+        if (el.versionChip) el.versionChip.textContent = `v${state.installedVersion}`;
+
+        if (hasUpd) {
+          if (el.updateChip) {
+            el.updateChip.hidden = false;
+            el.updateChip.textContent = `Update available: v${data.latest_version}`;
+          }
+          if (el.updateBtn) {
+            el.updateBtn.hidden = false;
+            el.updateBtn.textContent = `Update to v${data.latest_version}`;
+          }
+          showToast(`New release found: v${data.latest_version}! Click "Update to v${data.latest_version}" to install.`);
         } else {
-          showToast(`Up to date! Current: v${data.installed_version}`);
+          if (el.updateChip) el.updateChip.hidden = true;
+          if (el.updateBtn) el.updateBtn.hidden = true;
+          showToast(`PdfCraft is already up to date! Installed: v${data.installed_version}`);
         }
       } catch (err) {
-        showToast("Could not check updates");
+        showToast("Could not check updates from GitHub");
       }
     });
 
@@ -400,17 +453,9 @@
         if (data.path) {
           storedFolderPath = data.path;
           if (el.libPathCode) el.libPathCode.textContent = data.path;
-          try {
-            await navigator.clipboard.writeText(data.path);
-            showToast(`Opened Explorer. Copied path: ${data.path}`, 6000);
-            return;
-          } catch (_) {}
-          showToast(`Opened Explorer: ${data.path}`, 5000);
-        } else {
-          showToast("Opened PDF folder in Explorer");
         }
       } catch (err) {
-        showToast("Could not open folder");
+        console.warn("[pdfcraft] Error opening storage folder in Explorer:", err);
       }
     }
 
@@ -484,16 +529,8 @@
     function openLibraryModal() {
       if (!el.libraryModal) return;
       renderLibraryModal();
+      if (el.libPathCode) el.libPathCode.textContent = storedFolderPath;
       el.libraryModal.hidden = false;
-      // Also request reveal path in background to ensure up-to-date path
-      fetch("/api/pdfcraft/reveal", { method: "POST" })
-        .then(r => r.json())
-        .then(data => {
-          if (data.path) {
-            storedFolderPath = data.path;
-            if (el.libPathCode) el.libPathCode.textContent = data.path;
-          }
-        }).catch(() => {});
     }
 
     function closeLibraryModal() {
@@ -501,28 +538,15 @@
     }
 
     el.openFolderBtn?.addEventListener("click", openLibraryModal);
-    document.getElementById("btn-open-source")?.addEventListener("click", async () => {
-      try {
-        const res = await fetch("/api/pdfcraft/open-source", { method: "POST" });
-        const data = await res.json();
-        if (data.path) {
-          showToast(`Opened PdfCraft Rust source: ${data.path}`);
-        } else {
-          showToast("PdfCraft source not found");
-        }
-      } catch (err) {
-        showToast("Could not open source folder");
-      }
-    });
     el.closeModalBtn?.addEventListener("click", closeLibraryModal);
     el.modalUploadBtn?.addEventListener("click", () => el.fileInput?.click());
     el.modalOpenExplorerBtn?.addEventListener("click", openStorageFolder);
     el.modalCopyPathBtn?.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(storedFolderPath);
-        showToast(`Copied path to clipboard: ${storedFolderPath}`, 4000);
+        showToast("Copied folder path to clipboard", 2500);
       } catch (_) {
-        showToast(storedFolderPath, 5000);
+        showToast(storedFolderPath, 3000);
       }
     });
 

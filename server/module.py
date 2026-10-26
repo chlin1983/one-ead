@@ -44,6 +44,8 @@ class PortalModule:
     router: Optional[APIRouter] = None
     #: Populated by the registry: absolute path to this module's package.
     package_dir: Optional[Path] = field(default=None, repr=False)
+    #: Optional status badge shown on the card and sidebar (e.g. "Planned", "Beta").
+    badge: Optional[str] = None
 
     @property
     def entry_url(self) -> str:
@@ -69,4 +71,5 @@ class PortalModule:
             "order": self.order,
             "entry": self.entry_url,
             "hasApi": self.router is not None,
+            "badge": self.badge,
         }

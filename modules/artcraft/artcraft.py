@@ -517,6 +517,32 @@ def install_all(force: bool = False) -> dict:
         }
 
 
+def uninstall_app(app_id: str) -> dict:
+    if app_id not in APP_MAP:
+        raise ValueError(f"Invalid app id: {app_id}")
+
+    meta = APP_MAP[app_id]
+    name = meta.get("name", app_id)
+
+    with _JOB_LOCK:
+        if app_id in _job_state["queue"]:
+            _job_state["queue"].remove(app_id)
+        if _job_state["active_app"] == app_id:
+            raise ValueError(f"Cannot uninstall {name} while installation is in progress")
+
+        app_dir = APPS_DIR / app_id
+        if app_dir.exists():
+            shutil.rmtree(app_dir, ignore_errors=True)
+
+        installed_map = _read_installed()
+        if app_id in installed_map:
+            del installed_map[app_id]
+            _write_installed(installed_map)
+
+        _log_line(f"Uninstalled {name} and cleaned disk space.")
+        return {"status": "uninstalled", "app_id": app_id, "name": name}
+
+
 def status() -> dict:
     apps = list_apps()
     installed_count = sum(1 for a in apps if a["installed"])

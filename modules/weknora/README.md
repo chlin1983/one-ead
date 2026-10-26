@@ -121,7 +121,76 @@ Navigate to [http://127.0.0.1:8082](http://127.0.0.1:8082).
 
 ---
 
-## 5. Security & Privacy Architecture
+## 5. Relationship & Integration with Paperless-ngx
+
+WeKnora Lite and [Paperless-ngx](../paperless_ngx/README.md) operate as a symbiotic pair within the One EAD portal, each handling specialized stages of technical document intelligence:
+
+| Function | Paperless-ngx | WeKnora (Lite Mode) |
+| :--- | :--- | :--- |
+| **Primary Specialty** | **Document Archive, Folder Organization & Local OCR** | **LLM Knowledge Retrieval (RAG) & Document QA** |
+| **Search Mechanism** | Exact keyword & phrase search (SQLite `FTS5`) | Semantic vector similarity (`sqlite-vec`) + Hybrid RAG |
+| **Storage Structure** | Categorized disk folders (`~/Documents/OneEAD_Archive/documents`) | Chunked vector embeddings & relational knowledge tables |
+| **Hardware Overhead** | Minimal (Zero GPU VRAM, standard CPU processing) | GPU-accelerated (Tuned 6GB VRAM budget with local Ollama) |
+| **AI Inference** | None (100% deterministic local Python/C) | Local LLM (`qwen3:8b`) & Embeddings (`nomic-embed-text`) |
+
+### Cross-Plugin Synergy & Dual Ingestion Pipeline
+
+One EAD supports **two independent and complementary ingestion workflows** for raw PDFs and technical documents:
+
+```mermaid
+graph TD
+    subgraph "Dual Ingestion Entrypoints"
+        RawDoc["User Raw PDF / Standard / Datasheet"]
+    end
+
+    %% Path A: Direct to WeKnora
+    RawDoc -->|"Path A: Direct Upload (RAG & Fast QA)"| W_Upload["WeKnora Knowledge Base Upload"]
+    W_Upload -->|"Built-in doc_extractor.py"| W_Extractor["PyMuPDF + Tesseract OCR Engine"]
+    W_Extractor -->|"Semantic Chunker"| W_Chunks["WeKnora Semantic Chunks"]
+    W_Chunks -->|"Local Ollama nomic-embed-text"| W_Vec["WeKnora Vector DB sqlite-vec"]
+    W_Vec -->|"Local Ollama Qwen3:8b"| W_RAG["Interactive RAG Chat & Document QA"]
+
+    %% Path B: Via Paperless-ngx
+    RawDoc -->|"Path B: Archive & Organize First"| P_Vault["Paperless-ngx Vault Ingest"]
+    P_Vault -->|"Organize & Secure"| P_Store["Confidential Vault (~/Documents/OneEAD_Archive)"]
+    P_Vault -->|"Local OCR (PyMuPDF + Tesseract)"| P_OCR["OCR Engine & Markdown Cache"]
+    P_OCR -->|"Index"| P_FTS["SQLite FTS5 Full-Text Exact Search"]
+    P_OCR -->|"Optional 1-Click 'Sync to WeKnora'"| W_Upload
+
+    W_Vec -.->|"Bi-Directional Text Recovery"| P_FTS
+```
+
+#### Dual Ingestion Paths Explained
+
+1. **Path A: Direct WeKnora Upload (RAG & Fast Document QA — 100% Standalone)**:
+   - Users can upload any raw PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), or Markdown file **directly in WeKnora** (via the Knowledge Base upload UI).
+   - **No Paperless-ngx upload is required.**
+   - WeKnora invokes its standalone [`scripts/doc_extractor.py`](./scripts/doc_extractor.py) subprocess, which extracts digital text, converts math/formulas into LaTeX, formats tables into Markdown, and uses local Tesseract OCR for scanned pages.
+   - Text is semantically chunked, vector-embedded via local Ollama (`nomic-embed-text`), and immediately available for interactive AI chat.
+
+2. **Path B: Paperless-ngx Archival Ingestion (Long-Term Vaulting & Management)**:
+   - Users upload documents into **Paperless-ngx** when they need formal document classification, folder tagging, metadata tracking, and exact SQLite `FTS5` full-text search.
+   - Files are stored in the confidential user vault (`~/Documents/OneEAD_Archive/documents/`).
+   - If the user later wants deep AI conversational question-answering on an archived document, clicking **"Sync to WeKnora"** (`/api/paperless-ngx/documents/{id}/sync-weknora`) exports the clean OCR Markdown directly to WeKnora for automated chunking and vector indexing.
+
+---
+
+### OCR Updates & Re-Indexing Clarification
+
+When new or updated OCR capabilities (like Tesseract OCR, enhanced table detection, or LaTeX math normalization) are introduced:
+
+1. **New Documents**:
+   - Any document uploaded **after** the OCR improvements are in place automatically uses the newest OCR pipeline during initial ingestion. No manual re-indexing is needed.
+2. **Existing Documents**:
+   - For documents uploaded **before** the new OCR was added, their existing vector embeddings and chunks in `weknora.db` were created from the older extraction.
+   - To have WeKnora take advantage of new OCR text on an *existing* document:
+     - **In Paperless-ngx**: Click **"Re-run OCR & Auto-Sync"** on the document (automatically runs OCR and synchronizes the updated Markdown to WeKnora in 1 step).
+     - **In WeKnora**: Click **"Re-index"** in the Knowledge Base (or re-upload the file) so `doc_extractor.py` re-runs with the new OCR engine and updates the embeddings.
+   - Paperless-ngx's *Index Recovery* feature allows Paperless's FTS5 exact text index to be quickly restored from WeKnora's cached chunks if the local FTS table is ever lost. This avoids running heavy OCR from scratch for search restoration, but is distinct from re-extracting text when an OCR algorithm is upgraded.
+
+---
+
+## 6. Security & Privacy Architecture
 
 WeKnora Lite is configured with a **local-first architecture**: by default, it uses embedded local storage (SQLite), in-memory task queues, and local Ollama on loopback (`127.0.0.1`). External connectivity depends on the configured endpoints and enabled features. Review network access, endpoint configurations, and security settings before processing confidential documents.
 
@@ -132,9 +201,9 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 | **LLM Inference** | `http://127.0.0.1:11434` (`qwen3:8b` / `qwen2.5`) | **Local Loopback** (Local Ollama daemon) |
 | **Vector Embeddings** | `http://127.0.0.1:11434` (`nomic-embed-text` / `bge-m3`) | **Local Loopback** (Local Ollama daemon) |
 | **Document Extraction** | [`scripts/doc_extractor.py`](./scripts/doc_extractor.py) (PyMuPDF, python-docx, openpyxl, python-pptx) | **Local Subprocess** (Direct file parsing, zero external APIs) |
-| **Relational Database** | [`data/weknora.db`](./data/weknora.db) | **Local Embedded** (SQLite with FTS5) |
-| **Vector Index** | `sqlite-vec` extension inside `data/weknora.db` | **Local Embedded** (Zero external vector services) |
-| **File Storage** | [`data/files/`](./data/files) | **Local Disk** (Local directory storage) |
+| **Relational Database** | `~/Documents/OneEAD_Archive/weknora_data/weknora.db` (or [`data/weknora.db`](./data/weknora.db)) | **Local Embedded** (SQLite with FTS5) |
+| **Vector Index** | `sqlite-vec` extension inside `weknora.db` | **Local Embedded** (Zero external vector services) |
+| **File Storage** | `~/Documents/OneEAD_Archive/weknora_data/files/` (or [`data/files/`](./data/files)) | **Local Disk** (Isolated external directory storage) |
 | **Task / Stream Queue** | In-Memory (`STREAM_MANAGER_TYPE=memory`) | **Local Process Memory** (Zero Redis dependency) |
 | **Frontend Web Assets** | [`WeKnora/web/assets`](./WeKnora/web/assets) | **Local Static** (Embedded assets) |
 | **Telemetry & Tracking** | Disabled | **Zero telemetry, zero update checks** |
@@ -150,7 +219,7 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 
 ---
 
-## 6. Upstream Advisory Review & Scope
+## 7. Upstream Advisory Review & Scope
 
 | Advisory / CVE | Upstream Context | One EAD / WeKnora Lite Applicability |
 | :--- | :--- | :--- |
@@ -161,7 +230,7 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 
 ---
 
-## 7. Operational Boundaries & Threat Model
+## 8. Operational Boundaries & Threat Model
 
 * **Loopback Limitation**: Loopback binding (`127.0.0.1`) protects the application from incoming requests from external local area networks (LAN) or the internet. However, loopback binding **does not** protect against other unprivileged or malicious processes running locally under the same OS user.
 * **No LAN Exposure**: Do not expose One EAD or WeKnora to a local area network (e.g. by binding to `0.0.0.0` or using port forwarding) unless a full multi-user authentication, authorization, and session management architecture is explicitly implemented and verified.
@@ -172,4 +241,5 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
   3. Verify clean application of `modules/weknora/patches/weknora_lite.patch` or rebase the patch.
   4. Update `PINNED_COMMIT` in `modules/weknora/scripts/build_lite.bat`.
   5. Run automated tests and recompile binary.
+
 

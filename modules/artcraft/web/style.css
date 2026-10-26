@@ -648,6 +648,19 @@ body {
   color: #ffffff;
 }
 
+.btn-uninstall-app {
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  transition: all 0.2s ease;
+}
+
+.btn-uninstall-app:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
 /* Suite Footer */
 .suite-footer {
   text-align: center;
