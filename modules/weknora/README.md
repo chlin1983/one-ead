@@ -72,7 +72,24 @@ ollama pull nomic-embed-text
 
 ---
 
-## 3. Windows Compilation & Build Guide
+## 3. RAG Temperature & Generation Settings
+
+WeKnora configures specialized model generation temperatures across different agent modes and pipeline tasks to balance deterministic retrieval accuracy with natural reasoning:
+
+| Agent / Pipeline Component | Temperature | Configuration File | Rationale |
+| :--- | :---: | :--- | :--- |
+| **Quick Answer (`builtin-quick-answer`)** | **`0.2`** | `config/builtin_agents.yaml` | **Primary Knowledge Base RAG mode.** Tuned to 0.2 to minimize hallucinations and ensure strict adherence to retrieved document evidence. |
+| **Document Summarization** | **`0.3`** | `config/config.yaml` (`conversation.summary.temperature`) | Generates document overview profiles and topic categorization upon initial ingestion. |
+| **Smart Reasoning (`builtin-smart-reasoning`)** | **`0.7`** | `config/builtin_agents.yaml` | ReAct reasoning framework with multi-step tool calling, exploration, and synthesis. |
+| **Data Analyst (`builtin-data-analyst`)** | **`0.3`** | `config/builtin_agents.yaml` | Structured SQL queries and statistical calculations on CSV/Excel files. |
+| **Document Extraction (`builtin-doc-extract`)** | **`0.2`** | `config/builtin_agents.yaml` | Structured attribute, entity, and metadata extraction. |
+
+> [!TIP]
+> For standard engineering document Q&A, **Quick Answer** is the recommended agent mode, as its **0.2** temperature guarantees factual, low-creativity grounding in the ingested PDFs and specifications.
+
+---
+
+## 4. Windows Compilation & Build Guide
 
 ### Step 1: Upstream Repository
 The repository is cloned inside `modules/weknora/WeKnora`:
@@ -104,7 +121,7 @@ This produces `modules/weknora/WeKnora-lite.exe`.
 
 ---
 
-## 4. Launching the Application
+## 5. Launching the Application
 
 ### Option A: From One EAD Portal (Recommended)
 1. Start One EAD (`python run.py`).
@@ -121,7 +138,7 @@ Navigate to [http://127.0.0.1:8082](http://127.0.0.1:8082).
 
 ---
 
-## 5. Relationship & Integration with Paperless-ngx
+## 6. Relationship & Integration with Paperless-ngx
 
 WeKnora Lite and [Paperless-ngx](../paperless_ngx/README.md) operate as a symbiotic pair within the One EAD portal, each handling specialized stages of technical document intelligence:
 
@@ -190,7 +207,7 @@ When new or updated OCR capabilities (like Tesseract OCR, enhanced table detecti
 
 ---
 
-## 6. Security & Privacy Architecture
+## 7. Security & Privacy Architecture
 
 WeKnora Lite is configured with a **local-first architecture**: by default, it uses embedded local storage (SQLite), in-memory task queues, and local Ollama on loopback (`127.0.0.1`). External connectivity depends on the configured endpoints and enabled features. Review network access, endpoint configurations, and security settings before processing confidential documents.
 
@@ -219,7 +236,7 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 
 ---
 
-## 7. Upstream Advisory Review & Scope
+## 8. Upstream Advisory Review & Scope
 
 | Advisory / CVE | Upstream Context | One EAD / WeKnora Lite Applicability |
 | :--- | :--- | :--- |
@@ -230,7 +247,7 @@ WeKnora Lite is configured with a **local-first architecture**: by default, it u
 
 ---
 
-## 8. Operational Boundaries & Threat Model
+## 9. Operational Boundaries & Threat Model
 
 * **Loopback Limitation**: Loopback binding (`127.0.0.1`) protects the application from incoming requests from external local area networks (LAN) or the internet. However, loopback binding **does not** protect against other unprivileged or malicious processes running locally under the same OS user.
 * **No LAN Exposure**: Do not expose One EAD or WeKnora to a local area network (e.g. by binding to `0.0.0.0` or using port forwarding) unless a full multi-user authentication, authorization, and session management architecture is explicitly implemented and verified.
