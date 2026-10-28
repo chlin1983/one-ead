@@ -715,7 +715,7 @@ def _patch_document_extractor(module) -> None:
     if orig and not getattr(orig, "_one_ead_sorted", False):
         def _extract_pdf_sorted(data: bytes, filename: str) -> str:
             try:
-                import fitz
+                import pymupdf as fitz
                 with fitz.open(stream=data, filetype="pdf") as doc:
                     if doc.is_encrypted and not doc.authenticate(""):
                         raise module.CorruptDocumentError(f"{filename} is encrypted and cannot be read", filename=filename)

@@ -163,9 +163,8 @@ def extract_and_ocr_pdf(
     Returns:
         tuple (markdown_content, total_pages, ocr_pages_count)
     """
-    import fitz  # PyMuPDF
-
-    doc = fitz.open(str(pdf_path))
+    import pymupdf
+    doc = pymupdf.open(str(pdf_path))
     total_pages = len(doc)
     ocr_pages_count = 0
     pages_output: List[str] = []

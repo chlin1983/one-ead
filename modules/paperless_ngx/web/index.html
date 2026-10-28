@@ -217,16 +217,19 @@
     /* -------------------------------------------------------------
        Main Canvas
        ------------------------------------------------------------- */
+    /* Main Canvas: Independent Flex Layout (Pinned Header, Zero Outer Page Scroll) */
     .pngx-main-content {
       flex: 1;
       height: 100vh;
       max-height: 100vh;
-      padding: 24px 30px 60px;
+      padding: 6px 14px 6px;
       background: var(--pngx-content-bg);
-      overflow-y: auto !important;
-      overflow-x: hidden !important;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden !important;
       box-sizing: border-box;
       overscroll-behavior: contain;
+      min-width: 0;
     }
 
     .pngx-main-content::-webkit-scrollbar {
@@ -251,18 +254,19 @@
       background: #ffffff;
       border: 1px solid var(--pngx-card-border);
       border-radius: 8px;
-      padding: 6px 12px;
+      padding: 4px 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 12px;
+      gap: 8px;
+      margin-bottom: 4px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
       position: relative;
       z-index: 25;
-      min-height: 44px;
+      min-height: 38px;
       box-sizing: border-box;
       flex-wrap: nowrap;
+      flex-shrink: 0;
     }
 
     .pngx-toolbar-left {
@@ -313,7 +317,7 @@
       border-radius: 6px;
       overflow: hidden;
       background: #ffffff;
-      height: 31px;
+      height: 29px;
       flex-shrink: 0;
     }
 
@@ -321,9 +325,9 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 0 10px;
+      padding: 0 8px;
       height: 100%;
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 600;
       background: #ffffff;
       border: none;
@@ -353,9 +357,9 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 0 12px;
-      height: 31px;
-      font-size: 12px;
+      padding: 0 11px;
+      height: 29px;
+      font-size: 11.5px;
       font-weight: 600;
       border-radius: 6px;
       background: #059669;
@@ -378,9 +382,9 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 0 10px;
-      height: 31px;
-      font-size: 11.5px;
+      padding: 0 9px;
+      height: 29px;
+      font-size: 11px;
       font-weight: 600;
       border-radius: 6px;
       background: #ffffff;
@@ -466,7 +470,7 @@
       border-radius: 6px;
       overflow: hidden;
       background: #ffffff;
-      height: 31px;
+      height: 29px;
       min-width: 170px;
       max-width: 460px;
       flex: 1 1 280px;
@@ -483,9 +487,9 @@
       background: #f8fafc;
       border: none;
       border-right: 1px solid var(--pngx-border);
-      padding: 0 6px;
+      padding: 0 5px;
       height: 100%;
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--pngx-text-muted);
       cursor: pointer;
@@ -496,9 +500,9 @@
 
     .pngx-filter-input {
       border: none;
-      padding: 0 24px 0 10px;
+      padding: 0 22px 0 8px;
       height: 100%;
-      font-size: 12.5px;
+      font-size: 12px;
       color: var(--pngx-text-main);
       width: 100%;
       min-width: 140px;
@@ -535,10 +539,10 @@
     .pngx-filter-chip-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 0 10px;
-      height: 31px;
-      font-size: 11.5px;
+      gap: 5px;
+      padding: 0 9px;
+      height: 29px;
+      font-size: 11px;
       font-weight: 600;
       border-radius: 6px;
       border: 1px solid var(--pngx-border);
@@ -637,12 +641,12 @@
       background: #f8fafc;
       border: 1px solid #e2e8f0;
       color: var(--pngx-text-muted);
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      padding: 0 9px;
-      height: 31px;
-      line-height: 29px;
+      padding: 0 8px;
+      height: 29px;
+      line-height: 27px;
       border-radius: 6px;
       transition: none !important;
       white-space: nowrap;
@@ -686,6 +690,14 @@
     /* -------------------------------------------------------------
        Dashboard Overview Grid
        ------------------------------------------------------------- */
+    #pngxDashboardSection {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      padding-bottom: 24px;
+    }
+
     .pngx-dashboard-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -733,33 +745,35 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 18px;
-      font-size: 13px;
+      margin-bottom: 6px;
+      font-size: 12px;
       color: var(--pngx-text-muted);
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
     .pngx-doc-count {
       font-weight: 700;
       color: var(--pngx-text-main);
       white-space: nowrap;
+      font-size: 12px;
     }
 
     .pngx-category-breadcrumbs {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       flex-wrap: wrap;
     }
 
     .pngx-crumb-chip {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      padding: 4px 12px;
+      gap: 4px;
+      padding: 2.5px 10px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       background: #ffffff;
       border: 1px solid var(--pngx-border);
@@ -794,18 +808,18 @@
     .pngx-pagination {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
     }
 
     .pngx-page-btn {
-      width: 26px;
-      height: 26px;
+      width: 24px;
+      height: 24px;
       border-radius: 4px;
       border: 1px solid var(--pngx-border);
       background: #ffffff;
       display: grid;
       place-items: center;
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
       color: var(--pngx-text-main);
       transition: none !important;
@@ -1038,6 +1052,301 @@
     .pngx-card-btn svg {
       width: 15px;
       height: 15px;
+    }
+
+    .pngx-card-btn * {
+      pointer-events: none;
+    }
+
+    .pngx-doc-card.active-preview {
+      border-color: #059669 !important;
+      box-shadow: 0 0 0 2.5px rgba(5, 150, 105, 0.45) !important;
+    }
+
+    .pngx-table-row.active-preview {
+      background: #ecfdf5 !important;
+      border-left: 3px solid #059669 !important;
+    }
+
+    /* -------------------------------------------------------------
+       Side-by-Side Split View & Embedded PDF Viewer Panel
+       ------------------------------------------------------------- */
+    .pngx-split-wrapper {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      height: 100%;
+      width: 100%;
+      gap: 0;
+      position: relative;
+      margin-bottom: 0;
+      overflow: hidden;
+    }
+
+    .pngx-documents-pane {
+      flex: 1;
+      min-width: 280px;
+      height: 100%;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      padding-right: 6px;
+      padding-bottom: 24px;
+      box-sizing: border-box;
+      overscroll-behavior: contain;
+      transition: flex 0.15s ease;
+    }
+
+    .pngx-documents-pane::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .pngx-documents-pane::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .pngx-documents-pane::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+    }
+
+    .pngx-documents-pane::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Draggable Splitter Handle */
+    .pngx-split-resizer {
+      width: 10px;
+      margin: 0 4px;
+      cursor: col-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      user-select: none;
+      z-index: 35;
+      background: #e2e8f0;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      height: 100%;
+      position: relative;
+      top: 0;
+      box-sizing: border-box;
+      transition: background 0.15s ease, width 0.15s ease, border-color 0.15s ease;
+    }
+
+    .pngx-split-resizer:hover,
+    .pngx-split-resizer.is-dragging {
+      background: #059669 !important;
+      border-color: #047857 !important;
+      width: 12px;
+    }
+
+    .pngx-resizer-handle {
+      width: 3px;
+      height: 48px;
+      background: #94a3b8;
+      border-radius: 999px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      transition: background 0.15s ease, height 0.15s ease;
+    }
+
+    .pngx-split-resizer:hover .pngx-resizer-handle,
+    .pngx-split-resizer.is-dragging .pngx-resizer-handle {
+      background: #ffffff;
+      height: 64px;
+    }
+
+    .pngx-split-resizer[hidden] {
+      display: none !important;
+    }
+
+    /* Side-by-Side PDF Panel - Fixed locked full height, ZERO empty space below */
+    .pngx-pdf-sidepanel {
+      width: 48%;
+      min-width: 360px;
+      max-width: 80%;
+      height: 100%;
+      max-height: 100%;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      background: #ffffff;
+      border: 1px solid var(--pngx-card-border);
+      border-radius: 8px;
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+      z-index: 25;
+      margin-left: 2px;
+      position: relative;
+      top: 0;
+      box-sizing: border-box;
+      transition: width 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .pngx-pdf-sidepanel.is-expanded {
+      width: 72% !important;
+    }
+
+    .pngx-pdf-sidepanel[hidden] {
+      display: none !important;
+    }
+
+    /* PDF Panel Header Bar */
+    .pngx-pdf-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--pngx-card-border);
+      flex-shrink: 0;
+      gap: 8px;
+    }
+
+    .pngx-pdf-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .pngx-pdf-meta svg {
+      color: #059669;
+      flex-shrink: 0;
+    }
+
+    .pngx-pdf-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--pngx-text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+
+    .pngx-pdf-match-badge {
+      font-size: 11px;
+      font-weight: 700;
+      background: #fef08a;
+      color: #854d0e;
+      border: 1px solid #fde047;
+      border-radius: 4px;
+      padding: 2px 7px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    /* Page Navigation in Header */
+    .pngx-pdf-page-nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 1px 4px;
+      margin-left: auto;
+    }
+
+    .pngx-pdf-page-btn {
+      background: transparent;
+      border: none;
+      font-size: 14px;
+      line-height: 1;
+      padding: 3px 6px;
+      color: var(--pngx-text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .pngx-pdf-page-btn:hover {
+      background: #f1f5f9;
+      color: var(--pngx-brand);
+    }
+
+    .pngx-pdf-page-badge {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--pngx-text-main);
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+
+    .pngx-pdf-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .pngx-pdf-action-btn {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      color: var(--pngx-text-muted);
+      cursor: pointer;
+      text-decoration: none;
+      transition: none !important;
+    }
+
+    .pngx-pdf-action-btn:hover {
+      background: #f1f5f9;
+      color: var(--pngx-brand);
+      border-color: #cbd5e1;
+    }
+
+    .pngx-pdf-close-btn {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      margin-left: 2px;
+    }
+
+    .pngx-pdf-close-btn:hover {
+      background: #fee2e2;
+      color: #dc2626;
+      border-color: #fca5a5;
+    }
+
+    .pngx-pdf-frame-wrapper {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      background: #525659;
+      overflow: hidden;
+    }
+
+    .pngx-pdf-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    .pngx-match-hl {
+      background: #fef08a;
+      color: #854d0e;
+      padding: 0 2px;
+      border-radius: 2px;
     }
 
     /* -------------------------------------------------------------
@@ -1678,26 +1987,97 @@
       </div>
 
       <!-- =============================================================
-           Documents Container: Cards Grid or Flat List
+           Documents Container: Side-by-Side Split View
            ============================================================= -->
-      <div id="pngxCardsGrid" class="pngx-cards-grid"></div>
+      <div class="pngx-split-wrapper" id="pngxSplitWrapper">
+        <!-- Left: Documents List/Grid Pane -->
+        <div class="pngx-documents-pane" id="pngxDocumentsPane">
+          <div id="pngxCardsGrid" class="pngx-cards-grid"></div>
 
-      <div id="pngxListView" class="pngx-list-view" style="display: none;">
-        <table class="pngx-list-table">
-          <thead>
-            <tr>
-              <th style="width: 36px; text-align: center;"><input type="checkbox" id="listSelectAllCheckbox"
-                  onchange="toggleSelectAll(this.checked)" /></th>
-              <th>Document</th>
-              <th style="width: 170px;">Category / Path</th>
-              <th style="width: 110px;">Date</th>
-              <th style="width: 130px;">Pages & Size</th>
-              <th style="width: 115px;">OCR Status</th>
-              <th style="width: 195px; text-align: right; padding-right: 12px;">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="pngxTableBody"></tbody>
-        </table>
+          <div id="pngxListView" class="pngx-list-view" style="display: none;">
+            <table class="pngx-list-table">
+              <thead>
+                <tr>
+                  <th style="width: 36px; text-align: center;"><input type="checkbox" id="listSelectAllCheckbox"
+                      onchange="toggleSelectAll(this.checked)" /></th>
+                  <th>Document</th>
+                  <th style="width: 170px;">Category / Path</th>
+                  <th style="width: 110px;">Date</th>
+                  <th style="width: 130px;">Pages & Size</th>
+                  <th style="width: 115px;">OCR Status</th>
+                  <th style="width: 195px; text-align: right; padding-right: 12px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pngxTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Draggable Splitter Handle -->
+        <div class="pngx-split-resizer" id="pngxSplitResizer" title="Drag to adjust width of the PDF viewer (Double-click to expand)" hidden>
+          <div class="pngx-resizer-handle"></div>
+        </div>
+
+        <!-- Right: Side-by-Side PDF Viewer Panel -->
+        <div class="pngx-pdf-sidepanel" id="pngxPdfSidepanel" hidden>
+          <div class="pngx-pdf-bar">
+            <div class="pngx-pdf-meta">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              <span class="pngx-pdf-title" id="pngxPdfTitle" title="Document Preview">Document Preview</span>
+              <span class="pngx-pdf-match-badge" id="pngxPdfMatchBadge" style="display: none;" title="Click to jump to match page"></span>
+              
+              <!-- Page Navigation in Header -->
+              <div class="pngx-pdf-page-nav">
+                <button class="pngx-pdf-page-btn" id="btnPdfPrevPage" title="Previous Page" onclick="changeSidePdfPage(-1)">‹</button>
+                <span class="pngx-pdf-page-badge" id="pngxPdfPageBadge">Page 1</span>
+                <button class="pngx-pdf-page-btn" id="btnPdfNextPage" title="Next Page" onclick="changeSidePdfPage(1)">›</button>
+              </div>
+            </div>
+
+            <div class="pngx-pdf-actions">
+              <!-- Expand / Restore width toggle -->
+              <button class="pngx-pdf-action-btn" id="btnToggleSidePdfWidth" onclick="toggleSidePdfExpand()" title="Toggle wide layout view (Expand / Restore)">
+                <svg id="iconExpandSidePdf" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                </svg>
+              </button>
+              <!-- Open in Windows File Explorer -->
+              <button class="pngx-pdf-action-btn" id="btnSidePdfExplorer" onclick="openCurrentSidePdfInExplorer()" title="Open document in Windows File Explorer">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+              </button>
+              <!-- Download File -->
+              <button class="pngx-pdf-action-btn" id="btnSidePdfDownload" onclick="downloadCurrentSidePdf()" title="Download PDF document">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
+              <!-- Popout link in new tab -->
+              <a class="pngx-pdf-action-btn" id="sidePdfPopoutLink" href="#" target="_blank" title="Open PDF in new browser tab">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+              </a>
+              <!-- Close button -->
+              <button class="pngx-pdf-close-btn" id="btnCloseSidePdf" title="Close PDF panel" onclick="closeSidePdf()">&times;</button>
+            </div>
+          </div>
+
+          <!-- Embedded PDF Iframe -->
+          <div class="pngx-pdf-frame-wrapper" id="pngxPdfFrameWrapper">
+            <iframe id="pngxPdfFrame" class="pngx-pdf-iframe" src="" title="Document PDF Preview"></iframe>
+          </div>
+        </div>
       </div>
 
     </main>
@@ -1965,6 +2345,16 @@
       }
     }
 
+    function escapeHtml(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     function showToast(msg) {
       // Toast notifications disabled per user preference
     }
@@ -2045,6 +2435,8 @@
           return (b.id || "").localeCompare(a.id || "");
         });
       }
+
+      window.currentSearchResults = filtered;
 
       // Render updated list
       if (currentViewMode === "grid") {
@@ -2252,6 +2644,7 @@
           const res = await fetch(url);
           const data = await res.json();
           const results = data.documents || [];
+          window.currentSearchResults = results;
 
           if (currentViewMode === "grid") {
             renderCards(results);
@@ -2370,6 +2763,7 @@
 
       // Update list select all checkbox in table header
       const listSelectAll = document.getElementById("listSelectAllCheckbox");
+      const tableCheckboxes = document.querySelectorAll("#pngxTableBody input[type='checkbox']");
       if (listSelectAll && tableCheckboxes.length > 0) {
         const allChecked = Array.from(tableCheckboxes).every(cb => cb.checked);
         const someChecked = Array.from(tableCheckboxes).some(cb => cb.checked);
@@ -2540,7 +2934,7 @@
         const isSelected = selectedDocIds.has(doc.id);
 
         return `
-          <div class="pngx-doc-card ${isSelected ? 'selected' : ''}" data-doc-id="${doc.id}">
+          <div class="pngx-doc-card ${isSelected ? 'selected' : ''} ${activeSidePdfDocId === doc.id ? 'active-preview' : ''}" data-doc-id="${doc.id}">
             
             <!-- Checkbox for Selection -->
             <input 
@@ -2553,7 +2947,7 @@
             />
 
             <!-- Thumbnail Area with Authentic Tag Pills -->
-            <div class="pngx-card-thumb-wrap" onclick="openDocDetail('${doc.id}')">
+            <div class="pngx-card-thumb-wrap" onclick="viewDocInSidePanel('${doc.id}', event)">
               <img 
                 class="pngx-card-thumb-img" 
                 src="/api/paperless-ngx/documents/${doc.id}/thumbnail" 
@@ -2578,13 +2972,13 @@
 
             <!-- Card Body -->
             <div class="pngx-card-body">
-              <div class="pngx-card-title" title="${doc.original_name}" onclick="openDocDetail('${doc.id}')">
+              <div class="pngx-card-title" title="${doc.original_name}" onclick="viewDocInSidePanel('${doc.id}', event)">
                 ${doc.original_name}
               </div>
 
               ${doc.snippet ? `
-                <div class="pngx-card-snippet" style="font-size: 11px; color: #1e293b; background: #fef9c3; border-left: 3px solid #eab308; padding: 4px 6px; border-radius: 4px; margin-top: 4px; line-height: 1.35; max-height: 48px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
-                  ${doc.snippet}
+                <div class="pngx-card-snippet" style="font-size: 11px; color: #1e293b; background: #fef9c3; border-left: 3px solid #eab308; padding: 4px 6px; border-radius: 4px; margin-top: 4px; line-height: 1.35; max-height: 48px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; cursor: pointer;" onclick="viewDocInSidePanel('${doc.id}', event)" title="Click to view match in PDF side panel">
+                  ${(doc.match_pages && doc.match_pages.length > 0) ? `<span style="display: inline-block; font-size: 10px; font-weight: 700; color: #854d0e; background: #fde047; padding: 0 4px; border-radius: 3px; margin-right: 4px;">p. ${doc.match_pages.join(', ')}</span>` : ''}${doc.snippet}
                 </div>` : ''}
 
               <div class="pngx-card-meta">
@@ -2614,25 +3008,25 @@
 
             <!-- Bottom 4 Icon Action Bar -->
             <div class="pngx-card-footer">
-              <button class="pngx-card-btn" title="View OCR Text & Details" onclick="openDocDetail('${doc.id}')">
+              <button type="button" class="pngx-card-btn" title="View OCR Text & Details" onclick="openDocDetail('${doc.id}')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <line x1="16" y1="13" x2="8" y2="13"/>
                   <line x1="16" y1="17" x2="8" y2="17"/>
                 </svg>
               </button>
-              <button class="pngx-card-btn" title="Open Document View (inline PDF)" onclick="viewDocInline('${doc.id}')">
+              <button type="button" class="pngx-card-btn" title="View PDF in Side Panel" onclick="viewDocInSidePanel('${doc.id}', event)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                   <circle cx="12" cy="12" r="3"/>
                 </svg>
               </button>
-              <button class="pngx-card-btn" title="Open in Windows Explorer" onclick="openExplorer('${cat.replace(/'/g, "\\'")}', '${doc.id}')">
+              <button type="button" class="pngx-card-btn" title="Open in Windows Explorer" onclick="openDocInExplorer('${doc.id}')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                 </svg>
               </button>
-              <button class="pngx-card-btn" title="Download Document" onclick="downloadDocFile('${doc.id}')">
+              <button type="button" class="pngx-card-btn" title="Download Document" onclick="downloadDocFile('${doc.id}')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                   <polyline points="7 10 12 15 17 10"/>
@@ -2672,7 +3066,7 @@
         const isSelected = selectedDocIds.has(doc.id);
 
         return `
-          <tr class="${isSelected ? 'selected' : ''}">
+          <tr class="pngx-table-row ${isSelected ? 'selected' : ''} ${activeSidePdfDocId === doc.id ? 'active-preview' : ''}" data-doc-id="${doc.id}">
             <td style="text-align: center;">
               <input 
                 type="checkbox" 
@@ -2682,7 +3076,7 @@
               />
             </td>
             <td>
-              <div class="pngx-table-doc-cell" title="${doc.original_name}" onclick="openDocDetail('${doc.id}')">
+              <div class="pngx-table-doc-cell" title="${doc.original_name}" onclick="viewDocInSidePanel('${doc.id}', event)">
                 <svg class="pngx-table-file-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
@@ -2690,8 +3084,8 @@
                 <span class="pngx-table-doc-name">${doc.original_name}</span>
               </div>
               ${doc.snippet ? `
-                <div style="font-size: 10.5px; color: #475569; background: #fef9c3; border-left: 2px solid #eab308; padding: 1px 6px; border-radius: 3px; margin-top: 2px; line-height: 1.25; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  ${doc.snippet}
+                <div style="font-size: 10.5px; color: #475569; background: #fef9c3; border-left: 2px solid #eab308; padding: 1px 6px; border-radius: 3px; margin-top: 2px; line-height: 1.25; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;" onclick="viewDocInSidePanel('${doc.id}', event)" title="Click to view match in PDF side panel">
+                  ${(doc.match_pages && doc.match_pages.length > 0) ? `<span style="display: inline-block; font-size: 10px; font-weight: 700; color: #854d0e; background: #fde047; padding: 0 4px; border-radius: 3px; margin-right: 4px;">p. ${doc.match_pages.join(', ')}</span>` : ''}${doc.snippet}
                 </div>` : ''}
             </td>
             <td>
@@ -2708,15 +3102,15 @@
             </td>
             <td style="text-align: right; padding-right: 12px;">
               <div class="pngx-table-actions">
-                <button class="pngx-tbl-btn" title="View document inline" onclick="viewDocInline('${doc.id}')">
+                <button type="button" class="pngx-tbl-btn" title="View PDF in side panel" onclick="viewDocInSidePanel('${doc.id}', event)">
                   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   <span>View</span>
                 </button>
-                <button class="pngx-tbl-btn" title="View details and OCR text" onclick="openDocDetail('${doc.id}')">
+                <button type="button" class="pngx-tbl-btn" title="View details and OCR text" onclick="openDocDetail('${doc.id}')">
                   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                   <span>Details</span>
                 </button>
-                <button class="pngx-tbl-btn" title="Open containing folder in Explorer" onclick="openExplorer('${cat.replace(/'/g, "\\'")}', '${doc.id}')">
+                <button type="button" class="pngx-tbl-btn" title="Open containing folder in Explorer" onclick="openDocInExplorer('${doc.id}')">
                   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                   <span>Explorer</span>
                 </button>
@@ -2730,6 +3124,12 @@
     // -------------------------------------------------------------
     // Open Explorer in Native Windows Shell
     // -------------------------------------------------------------
+    function openDocInExplorer(docId) {
+      const doc = (window.currentSearchResults || []).find(d => d.id === docId) || masterDocuments.find(d => d.id === docId);
+      const cat = (doc && doc.tags) ? doc.tags : "";
+      openExplorer(cat, docId);
+    }
+
     async function openExplorer(subfolder = "", docId = "") {
       showToast("Opening Windows File Explorer...");
       try {
@@ -2762,7 +3162,18 @@
     // Modal Details with Fast Instant Preview (prevents 6MB text lag freeze)
     async function openDocDetail(docId, loadFull = false) {
       activeDocId = docId;
-      const doc = masterDocuments.find(d => d.id === docId);
+      let doc = (window.currentSearchResults || []).find(d => d.id === docId) || masterDocuments.find(d => d.id === docId);
+      if (!doc) {
+        try {
+          const res = await fetch(`/api/paperless-ngx/documents/${docId}`);
+          if (res.ok) {
+            const data = await res.json();
+            doc = data.document;
+          }
+        } catch (e) {
+          console.error("Failed to load document metadata:", e);
+        }
+      }
       if (!doc) return;
 
       document.getElementById("modalDocTitle").innerText = doc.original_name;
@@ -2855,11 +3266,372 @@
     }
 
     function downloadDocFile(docId) {
-      window.open(`/api/paperless-ngx/documents/${docId}/download`, "_blank");
+      const a = document.createElement("a");
+      a.href = `/api/paperless-ngx/documents/${docId}/download`;
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
 
     function viewDocInline(docId) {
-      window.open(`/api/paperless-ngx/documents/${docId}/view`, "_blank");
+      viewDocInSidePanel(docId);
+    }
+
+    // -------------------------------------------------------------
+    // Side-by-Side Embedded PDF Preview Panel & Resizer
+    // -------------------------------------------------------------
+    // Side PDF viewer state
+    let activeSidePdfDocId = null;
+    let activeSidePdfDoc = null;
+    let currentSidePdfPage = 1;
+    let totalSidePdfPages = 1;
+    let activeSidePdfQuery = "";
+    let activeSidePdfMatchPages = [];
+
+    function updateSidePdfHeaderUI() {
+      const matchBadge = document.getElementById("pngxPdfMatchBadge");
+      const pageBadge = document.getElementById("pngxPdfPageBadge");
+      const btnPrev = document.getElementById("btnPdfPrevPage");
+      const btnNext = document.getElementById("btnPdfNextPage");
+
+      if (pageBadge) {
+        pageBadge.textContent = `Page ${currentSidePdfPage} of ${totalSidePdfPages}`;
+      }
+
+      if (matchBadge) {
+        if (activeSidePdfQuery && activeSidePdfMatchPages.length > 0) {
+          const cleanQ = escapeHtml(activeSidePdfQuery.trim());
+          const matchIdx = activeSidePdfMatchPages.indexOf(currentSidePdfPage);
+          if (matchIdx !== -1) {
+            matchBadge.innerHTML = `🎯 Match ${matchIdx + 1} of ${activeSidePdfMatchPages.length} (Page ${currentSidePdfPage}): "<strong>${cleanQ}</strong>"`;
+          } else {
+            matchBadge.innerHTML = `🎯 ${activeSidePdfMatchPages.length} match pages (Page ${currentSidePdfPage}): "<strong>${cleanQ}</strong>"`;
+          }
+          matchBadge.style.display = "inline-flex";
+          matchBadge.title = `Click to cycle matches [Pages: ${activeSidePdfMatchPages.join(', ')}]`;
+          matchBadge.onclick = () => {
+            if (activeSidePdfMatchPages.length > 1) {
+              changeSidePdfPage(1);
+            } else if (activeSidePdfMatchPages.length === 1) {
+              jumpToSidePdfPage(activeSidePdfMatchPages[0]);
+            }
+          };
+        } else if (activeSidePdfQuery) {
+          const cleanQ = escapeHtml(activeSidePdfQuery.trim());
+          matchBadge.innerHTML = `🎯 Page ${currentSidePdfPage}: "<strong>${cleanQ}</strong>"`;
+          matchBadge.style.display = "inline-flex";
+          matchBadge.title = `Search query: ${activeSidePdfQuery}`;
+          matchBadge.onclick = () => jumpToSidePdfPage(currentSidePdfPage);
+        } else {
+          matchBadge.style.display = "none";
+        }
+      }
+
+      if (btnPrev && btnNext) {
+        if (activeSidePdfMatchPages.length > 0) {
+          btnPrev.title = `Previous matching page for "${activeSidePdfQuery}"`;
+          btnNext.title = `Next matching page for "${activeSidePdfQuery}"`;
+        } else {
+          btnPrev.title = "Previous Page";
+          btnNext.title = "Next Page";
+        }
+      }
+    }
+
+    async function viewDocInSidePanel(docId, event) {
+      if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+
+      let doc = (window.currentSearchResults || []).find(d => d.id === docId) || masterDocuments.find(d => d.id === docId);
+      if (!doc) {
+        try {
+          const res = await fetch(`/api/paperless-ngx/documents/${docId}`);
+          if (res.ok) {
+            const data = await res.json();
+            doc = data.document;
+          }
+        } catch (e) {
+          console.error("Failed to fetch doc:", e);
+        }
+      }
+      if (!doc) return;
+
+      activeSidePdfDocId = docId;
+      activeSidePdfDoc = doc;
+      totalSidePdfPages = doc.page_count || 1;
+
+      const panel = document.getElementById("pngxPdfSidepanel");
+      const resizer = document.getElementById("pngxSplitResizer");
+      const titleEl = document.getElementById("pngxPdfTitle");
+
+      // Query and match pages setup
+      const q = (filterState.query || "").trim();
+      activeSidePdfQuery = q;
+      activeSidePdfMatchPages = (doc.match_pages && Array.isArray(doc.match_pages)) ? [...doc.match_pages] : [];
+
+      let targetPage = 1;
+      if (q) {
+        if (activeSidePdfMatchPages.length > 0) {
+          targetPage = activeSidePdfMatchPages[0];
+        } else {
+          try {
+            const mRes = await fetch(`/api/paperless-ngx/documents/${docId}/match-page?q=${encodeURIComponent(q)}`);
+            if (mRes.ok) {
+              const mData = await mRes.json();
+              if (mData.pages && Array.isArray(mData.pages)) {
+                activeSidePdfMatchPages = mData.pages;
+                doc.match_pages = mData.pages;
+              }
+              if (mData.page && mData.page > 0) {
+                targetPage = mData.page;
+                doc.match_page = targetPage;
+              }
+            }
+          } catch (err) {
+            console.debug("match-page lookup error:", err);
+          }
+        }
+      } else if (doc.match_page && doc.match_page > 0) {
+        targetPage = doc.match_page;
+      }
+
+      currentSidePdfPage = targetPage;
+
+      if (titleEl) {
+        titleEl.textContent = doc.original_name;
+        titleEl.title = `${doc.original_name} (${doc.page_count || 1} pages)`;
+      }
+
+      if (panel) {
+        panel.hidden = false;
+        panel.removeAttribute("hidden");
+        panel.style.display = "flex";
+        if (!panel.style.width) {
+          panel.style.width = "48%";
+        }
+      }
+      if (resizer) {
+        resizer.hidden = false;
+        resizer.removeAttribute("hidden");
+        resizer.style.display = "flex";
+      }
+
+      jumpToSidePdfPage(targetPage);
+      updateActivePreviewItem(docId);
+
+      if (q) {
+        const matchCount = activeSidePdfMatchPages.length;
+        showToast(`Jumped to Page ${targetPage} (${matchCount} page${matchCount !== 1 ? 's' : ''} with "${q}" highlighted in yellow)`);
+      } else {
+        showToast("Opened PDF preview");
+      }
+    }
+
+    function changeSidePdfPage(delta) {
+      if (!activeSidePdfDocId) return;
+
+      // When search query is active with matching pages, jump directly between matching pages!
+      if (activeSidePdfMatchPages && activeSidePdfMatchPages.length > 0) {
+        if (delta > 0) {
+          // Find first match strictly greater than current page
+          const nextMatch = activeSidePdfMatchPages.find(p => p > currentSidePdfPage);
+          if (nextMatch) {
+            jumpToSidePdfPage(nextMatch);
+            showToast(`Jumped to next match: Page ${nextMatch}`);
+          } else {
+            // Reached or past the last match: wrap to first match
+            const firstMatch = activeSidePdfMatchPages[0];
+            jumpToSidePdfPage(firstMatch);
+            if (activeSidePdfMatchPages.length > 1) {
+              showToast(`Wrapped to first match: Page ${firstMatch}`);
+            } else {
+              showToast(`Document has 1 matching page (Page ${firstMatch})`);
+            }
+          }
+        } else if (delta < 0) {
+          // Find last match strictly less than current page
+          const prevMatches = activeSidePdfMatchPages.filter(p => p < currentSidePdfPage);
+          if (prevMatches.length > 0) {
+            const prevMatch = prevMatches[prevMatches.length - 1];
+            jumpToSidePdfPage(prevMatch);
+            showToast(`Jumped to previous match: Page ${prevMatch}`);
+          } else {
+            // Reached or before first match: wrap to last match
+            const lastMatch = activeSidePdfMatchPages[activeSidePdfMatchPages.length - 1];
+            jumpToSidePdfPage(lastMatch);
+            if (activeSidePdfMatchPages.length > 1) {
+              showToast(`Wrapped to last match: Page ${lastMatch}`);
+            } else {
+              showToast(`Document has 1 matching page (Page ${lastMatch})`);
+            }
+          }
+        }
+        return;
+      }
+
+      // Normal sequential navigation when not searching
+      const newPage = Math.max(1, Math.min(currentSidePdfPage + delta, totalSidePdfPages));
+      if (newPage === currentSidePdfPage) return;
+      jumpToSidePdfPage(newPage);
+    }
+
+    function jumpToSidePdfPage(page) {
+      if (!activeSidePdfDocId) return;
+      currentSidePdfPage = page;
+      updateSidePdfHeaderUI();
+
+      const frame = document.getElementById("pngxPdfFrame");
+      const q = (activeSidePdfQuery || "").trim();
+      // Pass q as query parameter so backend highlights keyword occurrences in yellow!
+      const pdfUrl = `/api/paperless-ngx/documents/${activeSidePdfDocId}/view?p=${page}&q=${encodeURIComponent(q)}&_t=${Date.now()}#page=${page}&view=FitH&navpanes=0&toolbar=1`;
+      const popoutLink = document.getElementById("sidePdfPopoutLink");
+      if (popoutLink) popoutLink.href = pdfUrl;
+      if (frame) {
+        try {
+          frame.contentWindow.location.replace(pdfUrl);
+        } catch (e) {
+          frame.src = pdfUrl;
+        }
+      }
+    }
+
+    function toggleSidePdfExpand() {
+      const panel = document.getElementById("pngxPdfSidepanel");
+      const icon = document.getElementById("iconExpandSidePdf");
+      if (!panel) return;
+      panel.classList.toggle("is-expanded");
+      const isExp = panel.classList.contains("is-expanded");
+      if (isExp) {
+        panel.style.width = "72%";
+        if (icon) {
+          icon.innerHTML = `<path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/>`;
+        }
+      } else {
+        panel.style.width = "48%";
+        if (icon) {
+          icon.innerHTML = `<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>`;
+        }
+      }
+    }
+
+    function closeSidePdf() {
+      const panel = document.getElementById("pngxPdfSidepanel");
+      const resizer = document.getElementById("pngxSplitResizer");
+      const frame = document.getElementById("pngxPdfFrame");
+      if (panel) {
+        panel.hidden = true;
+        panel.setAttribute("hidden", "");
+        panel.style.display = "none";
+        panel.classList.remove("is-expanded");
+      }
+      if (resizer) {
+        resizer.hidden = true;
+        resizer.setAttribute("hidden", "");
+        resizer.style.display = "none";
+      }
+      if (frame) frame.src = "";
+      activeSidePdfDocId = null;
+      activeSidePdfDoc = null;
+      updateActivePreviewItem(null);
+    }
+
+    function openCurrentSidePdfInExplorer() {
+      if (activeSidePdfDoc) {
+        openExplorer(activeSidePdfDoc.tags || "documents", activeSidePdfDoc.id);
+      }
+    }
+
+    function downloadCurrentSidePdf() {
+      if (activeSidePdfDocId) {
+        downloadDocFile(activeSidePdfDocId);
+      }
+    }
+
+    function updateActivePreviewItem(docId) {
+      document.querySelectorAll(".pngx-doc-card").forEach(c => {
+        if (c.getAttribute("data-doc-id") === docId) {
+          c.classList.add("active-preview");
+        } else {
+          c.classList.remove("active-preview");
+        }
+      });
+      document.querySelectorAll(".pngx-table-row").forEach(r => {
+        if (r.getAttribute("data-doc-id") === docId) {
+          r.classList.add("active-preview");
+        } else {
+          r.classList.remove("active-preview");
+        }
+      });
+    }
+
+    function initPaperlessResizer() {
+      const container = document.getElementById("pngxSplitWrapper");
+      const resizer = document.getElementById("pngxSplitResizer");
+      const panel = document.getElementById("pngxPdfSidepanel");
+      const frame = document.getElementById("pngxPdfFrame");
+
+      if (!container || !resizer || !panel) return;
+
+      let overlay = document.getElementById("pngxDragOverlay");
+      if (!overlay) {
+        overlay = document.createElement("div");
+        overlay.id = "pngxDragOverlay";
+        overlay.style.cssText = "position: fixed; inset: 0; z-index: 99999; cursor: col-resize; display: none; background: transparent; user-select: none;";
+        document.body.appendChild(overlay);
+      }
+
+      let isDragging = false;
+      let startX = 0;
+      let startWidth = 0;
+
+      resizer.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = panel.getBoundingClientRect().width;
+        resizer.classList.add("is-dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        if (overlay) overlay.style.display = "block";
+        if (frame) frame.style.pointerEvents = "none";
+        e.preventDefault();
+      });
+
+      resizer.addEventListener("dblclick", () => {
+        toggleSidePdfExpand();
+      });
+
+      const onMouseMove = (e) => {
+        if (!isDragging) return;
+        const deltaX = startX - e.clientX;
+        const containerWidth = container.getBoundingClientRect().width;
+        let newWidth = startWidth + deltaX;
+
+        const minWidth = 280;
+        const maxWidth = Math.max(minWidth, containerWidth - 240);
+        newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+
+        panel.style.width = `${newWidth}px`;
+        panel.style.maxWidth = `${maxWidth}px`;
+      };
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          isDragging = false;
+          resizer.classList.remove("is-dragging");
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+          if (overlay) overlay.style.display = "none";
+          if (frame) frame.style.pointerEvents = "auto";
+        }
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+      overlay.addEventListener("mousemove", onMouseMove);
+      overlay.addEventListener("mouseup", onMouseUp);
     }
 
     function closeModal(id) {
@@ -3192,6 +3964,7 @@
 
     // Initialize on page load
     window.addEventListener("DOMContentLoaded", () => {
+      initPaperlessResizer();
       loadMasterData();
     });
   </script>

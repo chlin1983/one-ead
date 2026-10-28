@@ -409,7 +409,7 @@ def extract_acoustic_port_spec(pdf_path: Path) -> Optional[Dict[str, Any]]:
     if not pdf_path.exists():
         return None
     try:
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(str(pdf_path))
     except Exception:
         return None

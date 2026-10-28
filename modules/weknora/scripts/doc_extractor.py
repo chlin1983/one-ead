@@ -81,8 +81,8 @@ def normalize_math_unicode(text: str) -> str:
     return "".join(result)
 
 def extract_pdf(path: str) -> str:
-    import fitz  # PyMuPDF
-    doc = fitz.open(path)
+    import pymupdf
+    doc = pymupdf.open(path)
     pages = []
 
     for i, page in enumerate(doc):
@@ -426,8 +426,8 @@ def extract_pptx(path: str) -> str:
     return "\n\n".join(slides)
 
 def extract_epub(path: str) -> str:
-    import fitz
-    doc = fitz.open(path)
+    import pymupdf
+    doc = pymupdf.open(path)
     pages = []
     for page in doc:
         t = page.get_text("text").strip()
