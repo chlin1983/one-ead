@@ -176,6 +176,10 @@ const el = {
   fsMathCloseBtn: document.getElementById("fs-math-close-btn"),
   fsMathCatSelect: document.getElementById("fs-math-cat-select"),
   fsMathSubSelect: document.getElementById("fs-math-sub-select"),
+  fsMathScopeRow: document.getElementById("fs-math-scope-row"),
+  fsScopeSingleBtn: document.getElementById("fs-scope-single"),
+  fsScopeAllBtn: document.getElementById("fs-scope-all"),
+  fsScopeAllCount: document.getElementById("fs-scope-all-count"),
   fsMathDetailsContainer: document.getElementById("fs-math-details-container"),
   fsMathCalcCount: document.getElementById("fs-math-calc-count"),
   fsMathCalcList: document.getElementById("fs-math-calc-list"),
@@ -2568,6 +2572,16 @@ function buildFullscreenPlotData(bi, blockName) {
     });
   }
 
+  // Filter out any explicitly excluded curves
+  if (state.excludedCurves && state.excludedCurves[bi]) {
+    plotTraces.forEach((t) => {
+      if (!t.isCalculated && state.excludedCurves[bi].includes(t.name)) {
+        t.visible = false;
+        t.isExcluded = true;
+      }
+    });
+  }
+
   // Inject any existing calculated traces for this plot
   const calcs = state.calculatedCurves[bi] || [];
   calcs.forEach((ct) => {
@@ -2589,6 +2603,30 @@ function buildFullscreenPlotData(bi, blockName) {
       hovertemplate: ct.hovertemplate || "%{y:.2f}<extra></extra>",
     });
   });
+
+  // Automatically adjust plotYRange to show all visible curves (both raw & calculated)
+  // unless user manually locked a custom Y range for this plot
+  const custom = state.customYScales && state.customYScales[bi];
+  const hasManualY = custom && !custom.isAuto;
+  if (!hasManualY) {
+    let allYMin = Infinity;
+    let allYMax = -Infinity;
+    plotTraces.forEach((t) => {
+      if (t.visible === false || t.visible === "legendonly" || t.isExcluded) return;
+      if (!Array.isArray(t.y)) return;
+      for (let i = 0; i < t.y.length; i++) {
+        const v = t.y[i];
+        if (typeof v === "number" && !isNaN(v) && isFinite(v)) {
+          if (v < allYMin) allYMin = v;
+          if (v > allYMax) allYMax = v;
+        }
+      }
+    });
+    if (isFinite(allYMin) && isFinite(allYMax) && allYMax > allYMin) {
+      const pad = (allYMax - allYMin) * 0.06;
+      plotYRange = [allYMin - pad, allYMax + pad];
+    }
+  }
 
   return { plotTraces, plotXIsFreq, plotXLabel, plotYLabel, plotYRange, blockName };
 }
@@ -2659,6 +2697,8 @@ function openFullscreen(bi, blockName) {
       1
     );
     bindPvVisibilitySync();
+    if (el.fsMathPanel) el.fsMathPanel.hidden = false;
+    if (el.fsMathBtn) el.fsMathBtn.classList.add("active");
     initFsCurveMathPanel(bi);
     initFsPlotResizer();
     updateToggleAllBtnState();
@@ -2670,8 +2710,8 @@ function openFullscreen(bi, blockName) {
 function closeFullscreen() {
   if (!el.fsOverlay) return;
   el.fsOverlay.hidden = true;
-  if (el.fsMathPanel) el.fsMathPanel.hidden = true;
-  if (el.fsMathBtn) el.fsMathBtn.classList.remove("active");
+  if (el.fsMathPanel) el.fsMathPanel.hidden = false;
+  if (el.fsMathBtn) el.fsMathBtn.classList.add("active");
   state.fsPlotInfo = null;
   if (el.fsCurveTable) {
     el.fsCurveTable.hidden = true;
@@ -2939,17 +2979,191 @@ function computeMultiCurveOp(traces, opType = "mean") {
   return { x, y };
 }
 
+// ── HIGH-PERFORMANCE FREQUENCY DOWNSAMPLING ENGINES ──
+function downsampleCurveLogGrid(xIn, yIn, numPoints) {
+  if (!xIn || !yIn || xIn.length < 2) return { x: xIn || [], y: yIn || [] };
+  const valid = [];
+  for (let i = 0; i < xIn.length; i++) {
+    const f = xIn[i];
+    const y = yIn[i];
+    if (typeof f === "number" && f > 0 && isFinite(f) && typeof y === "number" && isFinite(y)) {
+      valid.push({ f, y });
+    }
+  }
+  if (valid.length < 2) return { x: xIn, y: yIn };
+  valid.sort((a, b) => a.f - b.f);
+
+  const fMin = valid[0].f;
+  const fMax = valid[valid.length - 1].f;
+  if (fMin <= 0 || fMax <= fMin) return { x: xIn, y: yIn };
+
+  const logMin = Math.log10(fMin);
+  const logMax = Math.log10(fMax);
+  const N = Math.max(5, Math.min(parseInt(numPoints, 10) || 100, 5000));
+
+  const outX = [];
+  const outY = [];
+  const logX = valid.map((v) => Math.log10(v.f));
+  const vals = valid.map((v) => v.y);
+
+  for (let k = 0; k < N; k++) {
+    const targetLogF = logMin + (k / (N - 1)) * (logMax - logMin);
+    const targetF = Math.pow(10, targetLogF);
+
+    let idx = 0;
+    let low = 0;
+    let high = logX.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (logX[mid] <= targetLogF) {
+        idx = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    let yVal;
+    if (idx >= logX.length - 1) {
+      yVal = vals[vals.length - 1];
+    } else {
+      const x0 = logX[idx];
+      const x1 = logX[idx + 1];
+      const y0 = vals[idx];
+      const y1 = vals[idx + 1];
+      const t = (x1 > x0) ? (targetLogF - x0) / (x1 - x0) : 0;
+      yVal = y0 + t * (y1 - y0);
+    }
+
+    outX.push(parseFloat(targetF.toFixed(2)));
+    outY.push(parseFloat(yVal.toFixed(3)));
+  }
+
+  return { x: outX, y: outY };
+}
+
+function downsampleCurveCustomHz(xIn, yIn, customHzList) {
+  if (!xIn || !yIn || xIn.length < 2) return { x: xIn || [], y: yIn || [] };
+  const valid = [];
+  for (let i = 0; i < xIn.length; i++) {
+    const f = xIn[i];
+    const y = yIn[i];
+    if (typeof f === "number" && f > 0 && isFinite(f) && typeof y === "number" && isFinite(y)) {
+      valid.push({ f, y });
+    }
+  }
+  if (valid.length < 2) return { x: xIn, y: yIn };
+  valid.sort((a, b) => a.f - b.f);
+
+  const fMin = valid[0].f;
+  const fMax = valid[valid.length - 1].f;
+
+  const targets = String(customHzList || "")
+    .split(/[\s,;]+/)
+    .map((s) => parseFloat(s))
+    .filter((v) => !isNaN(v) && v >= fMin && v <= fMax);
+
+  targets.sort((a, b) => a - b);
+  const uniqueTargets = targets.filter((v, i, a) => i === 0 || Math.abs(v - a[i - 1]) > 1e-6);
+  if (!uniqueTargets.length) return { x: xIn, y: yIn };
+
+  const logX = valid.map((v) => Math.log10(v.f));
+  const vals = valid.map((v) => v.y);
+
+  const outX = [];
+  const outY = [];
+
+  for (const targetF of uniqueTargets) {
+    const targetLogF = Math.log10(targetF);
+    let idx = 0;
+    let low = 0;
+    let high = logX.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (logX[mid] <= targetLogF) {
+        idx = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    let yVal;
+    if (idx >= logX.length - 1) {
+      yVal = vals[vals.length - 1];
+    } else {
+      const x0 = logX[idx];
+      const x1 = logX[idx + 1];
+      const y0 = vals[idx];
+      const y1 = vals[idx + 1];
+      const t = (x1 > x0) ? (targetLogF - x0) / (x1 - x0) : 0;
+      yVal = y0 + t * (y1 - y0);
+    }
+
+    outX.push(parseFloat(targetF.toFixed(2)));
+    outY.push(parseFloat(yVal.toFixed(3)));
+  }
+
+  return { x: outX, y: outY };
+}
+
 // ── EXTENSIBLE OPERATOR REGISTRY ──
-// Easily add any custom filter, smoothing, or arithmetic calculation here!
+// ── FREQUENCY-BASED NORMALIZATION ENGINE (Y = 0 at f0) ──
+function normalizeCurveAtFrequency(xIn, yIn, targetHz) {
+  if (!xIn || !yIn || !xIn.length || !yIn.length) return { x: xIn || [], y: yIn || [], refVal: 0 };
+  const f0 = typeof targetHz === "number" && !isNaN(targetHz) && targetHz > 0 ? targetHz : 1000;
+
+  const valid = [];
+  for (let i = 0; i < xIn.length; i++) {
+    const f = xIn[i];
+    const y = yIn[i];
+    if (typeof f === "number" && isFinite(f) && typeof y === "number" && isFinite(y)) {
+      valid.push({ f, y });
+    }
+  }
+  if (!valid.length) return { x: xIn, y: yIn, refVal: 0 };
+  valid.sort((a, b) => a.f - b.f);
+
+  let refY = 0;
+  if (f0 <= valid[0].f) {
+    refY = valid[0].y;
+  } else if (f0 >= valid[valid.length - 1].f) {
+    refY = valid[valid.length - 1].y;
+  } else {
+    let idx = 0;
+    while (idx < valid.length - 1 && valid[idx + 1].f < f0) {
+      idx++;
+    }
+    const f1 = valid[idx].f;
+    const f2 = valid[idx + 1].f;
+    const y1 = valid[idx].y;
+    const y2 = valid[idx + 1].y;
+
+    if (f1 > 0 && f2 > 0) {
+      const logF1 = Math.log10(f1);
+      const logF2 = Math.log10(f2);
+      const logF0 = Math.log10(f0);
+      const t = logF2 > logF1 ? (logF0 - logF1) / (logF2 - logF1) : 0;
+      refY = y1 + t * (y2 - y1);
+    } else {
+      const t = f2 > f1 ? (f0 - f1) / (f2 - f1) : 0;
+      refY = y1 + t * (y2 - y1);
+    }
+  }
+
+  const outY = yIn.map((y) => (typeof y === "number" && isFinite(y) ? parseFloat((y - refY).toFixed(3)) : y));
+  return { x: [...xIn], y: outY, refVal: refY };
+}
+
 const CURVE_MATH_OPERATORS = {
-  // ── 1. Single Curve (Unary) ──
+  // ── 1. Curve Processing (Level Shift, Downsample, Scale, Mirror, Smoothing, Limit) ──
   offset: {
     id: "offset",
-    name: "Y-Offset (± dB / Value)",
+    name: "Level Shift",
     mode: "single",
-    description: "Add or subtract a fixed level offset (e.g. +3 dB or -6 dB)",
+    description: "Shift curve level up or down by fixed dB",
     params: [
-      { id: "offset", label: "Offset Value (dB)", type: "number", default: 3, step: 0.5 }
+      { id: "offset", label: "Level Shift (dB)", type: "number", default: 3, step: 0.5 }
     ],
     calc: (traceA, _, params) => {
       const val = parseFloat(params.offset) || 0;
@@ -2960,13 +3174,57 @@ const CURVE_MATH_OPERATORS = {
       };
     }
   },
+  normalize: {
+    id: "normalize",
+    name: "Normalize (Y = 0 at Hz)",
+    shortName: "Normalize",
+    mode: "single",
+    description: "Shift curve vertically so level equals 0 dB (Y = 0) at specified frequency",
+    params: [
+      { id: "freq", label: "Reference Frequency (Hz)", type: "number", default: 1000, step: 10 }
+    ],
+    calc: (traceA, _, params) => {
+      const f0 = parseFloat(params.freq) || 1000;
+      const { x, y } = normalizeCurveAtFrequency(traceA.x, traceA.y, f0);
+      return {
+        x,
+        y,
+        defaultName: `${traceA.name} [Norm 0dB @ ${f0}Hz]`
+      };
+    }
+  },
+  downsample: {
+    id: "downsample",
+    name: "Downsample Frequency Grid",
+    mode: "single",
+    description: "Resample frequency grid to uniform log-grid points or custom frequency list",
+    calc: (traceA, _, params) => {
+      const method = params.method || "points";
+      if (method === "custom") {
+        const { x, y } = downsampleCurveCustomHz(traceA.x, traceA.y, params.customHz || "");
+        return {
+          x,
+          y,
+          defaultName: `${traceA.name} [Downsample Custom]`
+        };
+      } else {
+        const numPts = parseInt(params.numPoints, 10) || 100;
+        const { x, y } = downsampleCurveLogGrid(traceA.x, traceA.y, numPts);
+        return {
+          x,
+          y,
+          defaultName: `${traceA.name} [Downsample ${numPts}pt]`
+        };
+      }
+    }
+  },
   scale: {
     id: "scale",
-    name: "Scale / Multiply (Y × Factor)",
+    name: "Scale / Multiply",
     mode: "single",
     description: "Multiply all curve values by a constant scale factor",
     params: [
-      { id: "factor", label: "Multiplication Factor", type: "number", default: 2, step: 0.1 }
+      { id: "factor", label: "Multiplier Factor", type: "number", default: 2, step: 0.1 }
     ],
     calc: (traceA, _, params) => {
       const factor = parseFloat(params.factor) || 1;
@@ -2977,23 +3235,29 @@ const CURVE_MATH_OPERATORS = {
       };
     }
   },
-  invert: {
-    id: "invert",
-    name: "Invert Polarity (-Y)",
+  mirror: {
+    id: "mirror",
+    name: "Mirror at Y-Axis",
     mode: "single",
-    description: "Invert polarity of the curve by multiplying by -1",
-    params: [],
-    calc: (traceA) => {
+    description: "Mirror curve values symmetrically across a horizontal mirror plane Y",
+    calc: (traceA, _, params) => {
+      const mirrorY = parseFloat(params.mirrorY) || 0;
       return {
         x: [...traceA.x],
-        y: traceA.y.map((y) => (typeof y === "number" && isFinite(y) ? -y : y)),
-        defaultName: `${traceA.name} [Inverted]`
+        y: traceA.y.map((y) => (typeof y === "number" && isFinite(y) ? 2 * mirrorY - y : y)),
+        defaultName: mirrorY === 0 ? `${traceA.name} [Mirror Y=0]` : `${traceA.name} [Mirror Y=${mirrorY}]`
       };
     }
   },
+  exclude: {
+    id: "exclude",
+    name: "Remove / Exclude Curve",
+    mode: "single",
+    description: "Exclude curve from the active plot and batch calculations"
+  },
   smooth_octave: {
     id: "smooth_octave",
-    name: "Octave Band Smoothing (RTA)",
+    name: "Fractional Octave Smoothing (RTA)",
     mode: "single",
     description: "Smooth frequency curve using fractional octave energy averaging",
     params: [
@@ -3038,7 +3302,7 @@ const CURVE_MATH_OPERATORS = {
   },
   butterSmoothing: {
     id: "butterSmoothing",
-    name: "Butterworth Smoothing (butterSmoothing)",
+    name: "Butterworth Smoothing (Lowpass)",
     mode: "single",
     description: "Zero-phase 2nd-order Butterworth low-pass filter smoothing",
     params: [
@@ -3055,7 +3319,7 @@ const CURVE_MATH_OPERATORS = {
   },
   CxxSmoothing: {
     id: "CxxSmoothing",
-    name: "Continuous Octave Smoothing (CxxSmoothing)",
+    name: "Continuous Octave Smoothing (Cxx IEC)",
     mode: "single",
     description: "Gaussian-weighted continuous fractional-octave band smoothing",
     params: [
@@ -3190,17 +3454,6 @@ const CURVE_MATH_OPERATORS = {
       };
     }
   },
-  segmented_envelope: {
-    id: "segmented_envelope",
-    name: "Segmented Envelope (Limit Curve)",
-    mode: "segmented",
-    description: "Set limit curve with custom frequency segments and offsets on any curve"
-  },
-  peakvalley: {
-    id: "peakvalley",
-    name: "Peak-Valley Distance (1st / 2nd)",
-    mode: "analysis"
-  },
   min: {
     id: "min",
     name: "Min Envelope (Broadband)",
@@ -3215,37 +3468,83 @@ const CURVE_MATH_OPERATORS = {
         defaultName: `[Min Envelope (Broadband)] (${traces.length} curves)`
       };
     }
+  },
+  segmented_envelope: {
+    id: "segmented_envelope",
+    name: "Segmented Envelope (Limit Curve)",
+    mode: "segmented",
+    description: "Set limit curve with custom frequency segments and offsets on any curve"
+  },
+  peakvalley: {
+    id: "peakvalley",
+    name: "Peak-Valley Distance (1st / 2nd)",
+    mode: "analysis"
   }
 };
 
+let fsMathTargetScope = "single"; // "single" or "all"
+let fsDownsampleMethod = "points"; // "points" or "custom"
 let fsMathSelectedCurveA = 0;
 let fsMathSelectedCurveB = 1;
 let fsMathSelectedTarget = 0;
 const fsPvParams = { fmin: "", fmax: "" };
 let fsMathParamOffset = "3";
+let fsMathParamNormalizeFreq = "1000";
+let fsMathParamMirrorY = "0";
+let fsMathParamFactor = "2.0";
+let fsMathParamDownsamplePoints = "100";
+let fsMathParamDownsampleCustom = "20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 12000";
 
 const FS_MATH_CATEGORY_OPS = {
-  single: [
-    { id: "offset", name: "Y-Offset (± dB / Level Shift)" },
+  processing_single: [
+    { id: "offset", name: "Level Shift" },
+    { id: "normalize", name: "Normalize (Y = 0 at Hz)" },
     { id: "segmented_envelope", name: "Segmented Envelope (Limit Curve)" },
-    { id: "butterSmoothing", name: "Butterworth Smoothing (Lowpass)" },
+    { id: "downsample", name: "Downsample Frequency Grid" },
     { id: "CxxSmoothing", name: "Continuous Octave Smoothing (Cxx IEC)" },
     { id: "smooth_octave", name: "Fractional Octave Smoothing (RTA)" },
+    { id: "butterSmoothing", name: "Butterworth Smoothing (Lowpass)" },
     { id: "smooth_median", name: "Median Filter Smoothing" },
-    { id: "scale", name: "Scale / Multiply (Y × Factor)" },
-    { id: "invert", name: "Invert Polarity (-Y)" }
+    { id: "scale", name: "Scale / Multiply" },
+    { id: "mirror", name: "Mirror at Y-Axis" },
+    { id: "exclude", name: "Remove / Exclude Curve" }
+  ],
+  processing_all: [
+    {
+      group: "Batch Operations (All Curves)",
+      items: [
+        { id: "offset", name: "Level Shift" },
+        { id: "normalize", name: "Normalize (Y = 0 at Hz)" },
+        { id: "downsample", name: "Downsample Frequency Grid" },
+        { id: "CxxSmoothing", name: "Continuous Octave Smoothing (Cxx IEC)" },
+        { id: "smooth_octave", name: "Fractional Octave Smoothing (RTA)" },
+        { id: "butterSmoothing", name: "Butterworth Smoothing (Lowpass)" },
+        { id: "smooth_median", name: "Median Filter Smoothing" },
+        { id: "scale", name: "Scale / Multiply" },
+        { id: "mirror", name: "Mirror at Y-Axis" }
+      ]
+    },
+    {
+      group: "Multi-Curve Statistics (Ensemble & Envelopes)",
+      items: [
+        { id: "mean", name: "Average / Mean Curve" },
+        { id: "median", name: "Median Curve" },
+        { id: "max", name: "Max Envelope (Broadband)" },
+        { id: "min", name: "Min Envelope (Broadband)" }
+      ]
+    },
+    {
+      group: "Curve Management",
+      items: [
+        { id: "exclude", name: "Remove / Exclude Curve" }
+      ]
+    }
   ],
   two: [
-    { id: "minus", name: "Difference (Curve A − Curve B)" },
+    { id: "minus", name: "Difference (Curve A - Curve B)" },
     { id: "plus", name: "Sum (Curve A + Curve B)" },
     { id: "multiply", name: "Multiply (Curve A × Curve B)" },
     { id: "divide", name: "Divide / Ratio (Curve A / Curve B)" }
-  ],
-  multi: [
-    { id: "max", name: "Max Envelope (Broadband)" },
-    { id: "min", name: "Min Envelope (Broadband)" },
-    { id: "mean", name: "Average / Mean Curve" },
-    { id: "median", name: "Median Curve" }
   ],
   analysis: [
     { id: "peakvalley", name: "Peak-Valley Distance (1st / 2nd)" }
@@ -3256,8 +3555,8 @@ function populateFsCurveSelect(selectEl, selectedIdx, defaultIdx = 0) {
   if (!selectEl) return;
   selectEl.innerHTML = "";
   const allPlotTraces = el.fsPlotDiv?.data || [];
-  const rawTraces = allPlotTraces.map((t, idx) => ({ t, idx })).filter((x) => !x.t.isCalculated);
-  const calcTraces = allPlotTraces.map((t, idx) => ({ t, idx })).filter((x) => !!x.t.isCalculated);
+  const rawTraces = allPlotTraces.map((t, idx) => ({ t, idx })).filter((x) => !x.t.isCalculated && x.t.visible !== false && x.t.visible !== "legendonly");
+  const calcTraces = allPlotTraces.map((t, idx) => ({ t, idx })).filter((x) => !!x.t.isCalculated && x.t.visible !== false && x.t.visible !== "legendonly");
 
   if (calcTraces.length > 0) {
     const rawGroup = document.createElement("optgroup");
@@ -3280,7 +3579,7 @@ function populateFsCurveSelect(selectEl, selectedIdx, defaultIdx = 0) {
     });
     selectEl.appendChild(calcGroup);
   } else {
-    allPlotTraces.forEach((t, idx) => {
+    rawTraces.forEach(({ t, idx }) => {
       const opt = document.createElement("option");
       opt.value = String(idx);
       opt.textContent = t.name || `Curve ${idx + 1}`;
@@ -3288,7 +3587,7 @@ function populateFsCurveSelect(selectEl, selectedIdx, defaultIdx = 0) {
     });
   }
 
-  const validIndices = allPlotTraces.map((_, i) => i);
+  const validIndices = (rawTraces.concat(calcTraces)).map((x) => x.idx);
   if (validIndices.includes(selectedIdx)) {
     selectEl.value = String(selectedIdx);
   } else if (validIndices.includes(defaultIdx)) {
@@ -3308,22 +3607,72 @@ function initFsCurveMathPanel(bi) {
 
 function populateFsMathSubFeatures(preserve = true) {
   if (!el.fsMathCatSelect || !el.fsMathSubSelect) return;
-  const cat = el.fsMathCatSelect.value || "single";
-  const ops = FS_MATH_CATEGORY_OPS[cat] || [];
+  const cat = el.fsMathCatSelect.value || "processing";
+  const rawTraces = (el.fsPlotDiv?.data || []).filter((t) => !t.isCalculated && t.visible !== false && t.visible !== "legendonly");
+  const count = rawTraces.length;
+
+  if (el.fsScopeAllCount) {
+    el.fsScopeAllCount.textContent = String(count);
+  }
+
+  // Target Scope button active states
+  if (el.fsScopeSingleBtn) {
+    el.fsScopeSingleBtn.classList.toggle("active", fsMathTargetScope === "single");
+  }
+  if (el.fsScopeAllBtn) {
+    el.fsScopeAllBtn.classList.toggle("active", fsMathTargetScope === "all");
+  }
+
+  // Show/Hide Scope row based on Main Feature
+  if (el.fsMathScopeRow) {
+    el.fsMathScopeRow.style.display = (cat === "processing") ? "flex" : "none";
+  }
+
   const prevVal = el.fsMathSubSelect.value;
-
   el.fsMathSubSelect.innerHTML = "";
-  ops.forEach((item) => {
-    const opt = document.createElement("option");
-    opt.value = item.id;
-    opt.textContent = item.name;
-    el.fsMathSubSelect.appendChild(opt);
-  });
 
-  if (preserve && prevVal && ops.some((o) => o.id === prevVal)) {
+  let validOpIds = [];
+
+  if (cat === "processing") {
+    if (fsMathTargetScope === "all") {
+      const groups = FS_MATH_CATEGORY_OPS.processing_all;
+      groups.forEach((grp) => {
+        const og = document.createElement("optgroup");
+        og.label = grp.group;
+        grp.items.forEach((item) => {
+          const opt = document.createElement("option");
+          opt.value = item.id;
+          opt.textContent = item.name;
+          og.appendChild(opt);
+          validOpIds.push(item.id);
+        });
+        el.fsMathSubSelect.appendChild(og);
+      });
+    } else {
+      const ops = FS_MATH_CATEGORY_OPS.processing_single;
+      ops.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.id;
+        opt.textContent = item.name;
+        el.fsMathSubSelect.appendChild(opt);
+        validOpIds.push(item.id);
+      });
+    }
+  } else {
+    const ops = FS_MATH_CATEGORY_OPS[cat] || [];
+    ops.forEach((item) => {
+      const opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.name;
+      el.fsMathSubSelect.appendChild(opt);
+      validOpIds.push(item.id);
+    });
+  }
+
+  if (preserve && prevVal && validOpIds.includes(prevVal)) {
     el.fsMathSubSelect.value = prevVal;
-  } else if (ops.length) {
-    el.fsMathSubSelect.value = ops[0].id;
+  } else if (validOpIds.length) {
+    el.fsMathSubSelect.value = validOpIds[0];
   }
 
   renderFsFeatureDetails();
@@ -3367,14 +3716,46 @@ function renderPillButtonGroup(label, inputId, options, defaultValue, onChange) 
   return row;
 }
 
+function getFsOperationParams(opId) {
+  const params = {};
+  if (opId === "offset") {
+    const rawVal = document.getElementById("fs-math-param-offset")?.value?.trim();
+    params.offset = isNaN(parseFloat(rawVal)) ? 0 : parseFloat(rawVal);
+  } else if (opId === "normalize") {
+    const rawVal = document.getElementById("fs-math-param-normalize-freq")?.value?.trim();
+    params.freq = isNaN(parseFloat(rawVal)) ? 1000 : parseFloat(rawVal);
+  } else if (opId === "downsample") {
+    params.method = fsDownsampleMethod || "points";
+    params.numPoints = parseInt(document.getElementById("fs-math-param-downsample-points")?.value, 10) || 100;
+    params.customHz = document.getElementById("fs-math-param-downsample-custom")?.value || "";
+  } else if (opId === "mirror") {
+    const rawVal = document.getElementById("fs-math-param-mirror-y")?.value?.trim();
+    params.mirrorY = isNaN(parseFloat(rawVal)) ? 0 : parseFloat(rawVal);
+  } else if (opId === "scale") {
+    const rawVal = document.getElementById("fs-math-param-factor")?.value?.trim();
+    params.factor = isNaN(parseFloat(rawVal)) ? 2.0 : parseFloat(rawVal);
+  } else if (opId === "butterSmoothing") {
+    const val = parseFloat(document.getElementById("fs-math-param-cutoff")?.value);
+    params.cutoff = isNaN(val) ? 0.15 : val;
+  } else if (opId === "CxxSmoothing") {
+    params.fraction = document.getElementById("fs-math-param-cxx-fraction")?.value || "6";
+  } else if (opId === "smooth_octave") {
+    params.fraction = document.getElementById("fs-math-param-oct-fraction")?.value || "3";
+  } else if (opId === "smooth_median") {
+    params.window = document.getElementById("fs-math-param-window")?.value || "5";
+  }
+  return params;
+}
+
 function renderFsFeatureDetails() {
   if (!el.fsMathDetailsContainer || !el.fsMathSubSelect) return;
+  const cat = el.fsMathCatSelect?.value || "processing";
   const opId = el.fsMathSubSelect.value || "offset";
   const op = CURVE_MATH_OPERATORS[opId];
   if (!op) return;
 
   const bi = state.fsPlotInfo?.bi;
-  const nonCalcTraces = (el.fsPlotDiv?.data || []).filter((t) => !t.isCalculated);
+  const nonCalcTraces = (el.fsPlotDiv?.data || []).filter((t) => !t.isCalculated && t.visible !== false && t.visible !== "legendonly");
   const existingCalcs = state.calculatedCurves[bi] || [];
 
   el.fsMathDetailsContainer.innerHTML = "";
@@ -3385,115 +3766,89 @@ function renderFsFeatureDetails() {
 
   const title = document.createElement("span");
   title.className = "fs-math-details-title";
-  const icon = op.mode === "multi" ? "📊" : op.mode === "two" ? "⚖️" : op.mode === "analysis" ? "📐" : "🎛️";
+  const icon = (cat === "two" || op.mode === "two") ? "⚖️" : (cat === "analysis" || op.mode === "analysis") ? "📐" : "🎛️";
   title.textContent = `${icon} ${op.name}`;
   header.appendChild(title);
   el.fsMathDetailsContainer.appendChild(header);
 
+  // ── BRANCH: ALL CURVES (BATCH & MULTI-CURVE) ──
+  if (cat === "processing" && fsMathTargetScope === "all") {
+    const count = nonCalcTraces.length;
 
-  // 3. Dynamic Controls based on Feature Type
-  if (op.mode === "multi") {
-    // ── Multi-Curve Statistics (Envelopes / Averages) ──
-    const scopeBadge = document.createElement("div");
-    scopeBadge.className = "fs-math-scope-badge";
-    scopeBadge.textContent = `⚡ Applies automatically across all ${nonCalcTraces.length} active measurement curves.`;
-    el.fsMathDetailsContainer.appendChild(scopeBadge);
+    // Multi-Curve Statistics (Ensemble & Envelopes)
+    if (["mean", "median", "max", "min"].includes(opId)) {
+      const scopeBadge = document.createElement("div");
+      scopeBadge.className = "fs-math-scope-badge";
+      scopeBadge.textContent = `⚡ Applies automatically across all ${count} active measurement curves.`;
+      el.fsMathDetailsContainer.appendChild(scopeBadge);
 
-    const existingStat = existingCalcs.find((c) => c.opId === opId);
-    if (existingStat) {
-      const activeBadge = document.createElement("div");
-      activeBadge.className = "fs-math-active-badge";
-      activeBadge.innerHTML = `<span>✓ Currently active on plot: <strong>${existingStat.name}</strong></span>`;
-      el.fsMathDetailsContainer.appendChild(activeBadge);
-
-      const btnRow = document.createElement("div");
-      btnRow.className = "fs-math-btn-row";
-
-      const updateBtn = document.createElement("button");
-      updateBtn.type = "button";
-      updateBtn.className = "btn primary btn-sm fs-math-card-btn";
-      updateBtn.textContent = "🔄 Re-calculate";
-      updateBtn.addEventListener("click", () => applyStatEnvelope(opId));
-
-      const removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = "btn outline btn-sm fs-math-card-btn";
-      removeBtn.style.color = "var(--danger)";
-      removeBtn.style.borderColor = "rgba(239, 68, 68, 0.4)";
-      removeBtn.textContent = "🗑️ Remove";
-      removeBtn.addEventListener("click", () => removeStatEnvelope(opId));
-
-      btnRow.appendChild(updateBtn);
-      btnRow.appendChild(removeBtn);
-      el.fsMathDetailsContainer.appendChild(btnRow);
-    } else {
-      const addBtn = document.createElement("button");
-      addBtn.type = "button";
-      addBtn.className = "btn primary btn-sm fs-math-card-btn";
-      addBtn.textContent = `⚡ Add ${op.name}`;
-      addBtn.addEventListener("click", () => applyStatEnvelope(opId));
-      el.fsMathDetailsContainer.appendChild(addBtn);
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
+      applyBtn.textContent = `⚡ Apply ${op.name}`;
+      applyBtn.addEventListener("click", () => applyStatEnvelope(opId));
+      el.fsMathDetailsContainer.appendChild(applyBtn);
+      return;
     }
-  } else if (op.mode === "two") {
-    // ── Two Curves Comparison (Difference / Sum / Ratio) ──
-    const rowA = document.createElement("div");
-    rowA.className = "fs-math-row";
-    rowA.innerHTML = '<label for="fs-math-cmp-a">Curve A (Reference)</label>';
-    const selA = document.createElement("select");
-    selA.id = "fs-math-cmp-a";
-    selA.className = "fs-math-select";
 
-    const rowB = document.createElement("div");
-    rowB.className = "fs-math-row";
-    rowB.innerHTML = '<label for="fs-math-cmp-b">Curve B (Target)</label>';
-    const selB = document.createElement("select");
-    selB.id = "fs-math-cmp-b";
-    selB.className = "fs-math-select";
+    // Curve Exclusion in All Curves mode
+    if (opId === "exclude") {
+      renderFsExcludeDetails(bi, true);
+      return;
+    }
 
-    populateFsCurveSelect(selA, fsMathSelectedCurveA, 0);
-    populateFsCurveSelect(selB, fsMathSelectedCurveB, 1);
-
-    selA.addEventListener("change", () => { fsMathSelectedCurveA = parseInt(selA.value, 10); });
-    selB.addEventListener("change", () => { fsMathSelectedCurveB = parseInt(selB.value, 10); });
-
-    rowA.appendChild(selA);
-    rowB.appendChild(selB);
-    el.fsMathDetailsContainer.appendChild(rowA);
-    el.fsMathDetailsContainer.appendChild(rowB);
-
-    const calcBtn = document.createElement("button");
-    calcBtn.type = "button";
-    calcBtn.className = "btn primary btn-sm fs-math-card-btn";
-    calcBtn.textContent = `⚡ Calculate & Plot ${op.name.split(" ")[0]}`;
-    calcBtn.addEventListener("click", () => applyTwoCurveOp(opId));
-    el.fsMathDetailsContainer.appendChild(calcBtn);
-  } else if (op.mode === "single") {
-    // ── Single Curve Adjustment ──
-    const rowTarget = document.createElement("div");
-    rowTarget.className = "fs-math-row";
-    rowTarget.innerHTML = '<label for="fs-math-target-curve">Target Curve</label>';
-    const selTarget = document.createElement("select");
-    selTarget.id = "fs-math-target-curve";
-    selTarget.className = "fs-math-select";
-
-    populateFsCurveSelect(selTarget, fsMathSelectedTarget, 0);
-    selTarget.addEventListener("change", () => { fsMathSelectedTarget = parseInt(selTarget.value, 10); });
-    rowTarget.appendChild(selTarget);
-    el.fsMathDetailsContainer.appendChild(rowTarget);
+    // Batch Operations: Level Shift, Downsample, Scale, Mirror, Smoothing
+    const matchingCalcs = existingCalcs.filter((c) => c.batchOpId === opId || (c.opId === opId && c.isBatch));
 
     if (opId === "offset") {
-      const offsetInputRow = document.createElement("div");
-      offsetInputRow.className = "fs-math-row";
-      const currentOffsetVal = fsMathParamOffset !== undefined ? fsMathParamOffset : "3";
-      offsetInputRow.innerHTML = `
-        <label for="fs-math-param-offset">Offset Value (dB)</label>
-        <input type="text" id="fs-math-param-offset" class="fs-math-input" placeholder="e.g. input +3 or -3 to offset curve" value="${currentOffsetVal}">
-        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Note: Input e.g. +3 or -3 to offset the curve</span>
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-offset">LEVEL SHIFT (DB)</label>
+        <input type="text" id="fs-math-param-offset" class="fs-math-input" placeholder="e.g. 3 or -3" value="${escapeHtml(fsMathParamOffset)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Note: Input e.g. +3 or -3 to shift the curve</span>
       `;
-      offsetInputRow.querySelector("#fs-math-param-offset")?.addEventListener("input", (e) => {
+      inputRow.querySelector("#fs-math-param-offset")?.addEventListener("input", (e) => {
         fsMathParamOffset = e.target.value;
       });
-      el.fsMathDetailsContainer.appendChild(offsetInputRow);
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "normalize") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-normalize-freq">NORMALIZATION FREQUENCY (HZ)</label>
+        <input type="text" id="fs-math-param-normalize-freq" class="fs-math-input" placeholder="1000" value="${escapeHtml(fsMathParamNormalizeFreq)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Shift each curve vertically so level equals 0 dB (Y = 0) at this frequency.</span>
+      `;
+      inputRow.querySelector("#fs-math-param-normalize-freq")?.addEventListener("input", (e) => {
+        fsMathParamNormalizeFreq = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "downsample") {
+      renderFsDownsampleInputs();
+    } else if (opId === "mirror") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-mirror-y">MIRROR PLANE / SYMMETRY LEVEL (Y)</label>
+        <input type="text" id="fs-math-param-mirror-y" class="fs-math-input" placeholder="0" value="${escapeHtml(fsMathParamMirrorY)}">
+      `;
+      inputRow.querySelector("#fs-math-param-mirror-y")?.addEventListener("input", (e) => {
+        fsMathParamMirrorY = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "scale") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-factor">MULTIPLIER FACTOR</label>
+        <input type="text" id="fs-math-param-factor" class="fs-math-input" placeholder="2.0" value="${escapeHtml(fsMathParamFactor)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Enter a multiplier (e.g. 0.5 to halve, 2.0 to double, decimals supported)</span>
+      `;
+      inputRow.querySelector("#fs-math-param-factor")?.addEventListener("input", (e) => {
+        fsMathParamFactor = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
     } else if (opId === "butterSmoothing") {
       el.fsMathDetailsContainer.appendChild(
         renderPillButtonGroup("Cutoff Ratio Wc", "fs-math-param-cutoff", [
@@ -3530,33 +3885,92 @@ function renderFsFeatureDetails() {
           { value: "15", label: "15 Pts (Heavy)" }
         ], "5")
       );
-    } else if (opId === "scale") {
-      el.fsMathDetailsContainer.appendChild(
-        renderPillButtonGroup("Multiplier Factor", "fs-math-param-factor", [
-          { value: "0.5", label: "0.5× (Half)" },
-          { value: "2.0", label: "2.0× (Double)" },
-          { value: "5.0", label: "5.0×" },
-          { value: "10.0", label: "10.0×" }
-        ], "2.0")
-      );
     }
 
-    const applyBtn = document.createElement("button");
-    applyBtn.type = "button";
-    applyBtn.className = "btn primary btn-sm fs-math-card-btn";
-    applyBtn.textContent = `⚡ Apply ${op.name.split(" ")[0]}`;
-    applyBtn.addEventListener("click", () => {
-      applySingleCurveOp(opId);
-      const prev = applyBtn.textContent;
-      applyBtn.textContent = "✓ Applied!";
-      setTimeout(() => { if (applyBtn) applyBtn.textContent = prev; }, 800);
-    });
-    el.fsMathDetailsContainer.appendChild(applyBtn);
+    // Action buttons for Batch Mode
+    if (matchingCalcs.length > 0) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "fs-math-btn-row";
+
+      const updateBtn = document.createElement("button");
+      updateBtn.type = "button";
+      updateBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-blue";
+      const opLabel = (opId === "downsample") ? "Downsample" : (op.shortName || op.name);
+      updateBtn.innerHTML = `🔄 Update ${escapeHtml(opLabel)} (${matchingCalcs.length} Curves)`;
+      updateBtn.addEventListener("click", () => applyBatchCurveOp(opId));
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn outline btn-sm fs-math-card-btn fs-math-btn-remove";
+      removeBtn.innerHTML = `🗑️ Remove (${matchingCalcs.length})`;
+      removeBtn.addEventListener("click", () => removeBatchCurveOp(opId));
+
+      btnRow.appendChild(updateBtn);
+      btnRow.appendChild(removeBtn);
+      el.fsMathDetailsContainer.appendChild(btnRow);
+    } else {
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
+      applyBtn.innerHTML = `⚡ Apply ${escapeHtml(op.name.split(" ")[0])} to All (${count} Curves)`;
+      if (opId === "mirror") {
+        applyBtn.innerHTML = `⚡ Apply Mirror to All (${count} Curves)`;
+      } else if (opId === "scale") {
+        applyBtn.innerHTML = `⚡ Apply Scale to All (${count} Curves)`;
+      } else if (opId === "downsample") {
+        applyBtn.innerHTML = `⚡ Apply Downsample to All (${count} Curves)`;
+      } else if (opId === "offset") {
+        applyBtn.innerHTML = `⚡ Apply Level Shift to All (${count} Curves)`;
+      }
+      applyBtn.addEventListener("click", () => applyBatchCurveOp(opId));
+      el.fsMathDetailsContainer.appendChild(applyBtn);
+    }
+    return;
+  }
+
+  // ── BRANCH: SINGLE CURVE MODE & TWO-CURVE / ANALYSIS ──
+  if (op.mode === "two") {
+    // ── Two Curves Comparison (Difference / Sum / Ratio) ──
+    const rowA = document.createElement("div");
+    rowA.className = "fs-math-row";
+    rowA.innerHTML = '<label for="fs-math-cmp-a">CURVE A (REFERENCE)</label>';
+    const selA = document.createElement("select");
+    selA.id = "fs-math-cmp-a";
+    selA.className = "fs-math-select";
+
+    const rowB = document.createElement("div");
+    rowB.className = "fs-math-row";
+    rowB.innerHTML = '<label for="fs-math-cmp-b">CURVE B (TARGET)</label>';
+    const selB = document.createElement("select");
+    selB.id = "fs-math-cmp-b";
+    selB.className = "fs-math-select";
+
+    populateFsCurveSelect(selA, fsMathSelectedCurveA, 0);
+    populateFsCurveSelect(selB, fsMathSelectedCurveB, 1);
+
+    selA.addEventListener("change", () => { fsMathSelectedCurveA = parseInt(selA.value, 10); });
+    selB.addEventListener("change", () => { fsMathSelectedCurveB = parseInt(selB.value, 10); });
+
+    rowA.appendChild(selA);
+    rowB.appendChild(selB);
+    el.fsMathDetailsContainer.appendChild(rowA);
+    el.fsMathDetailsContainer.appendChild(rowB);
+
+    const calcBtn = document.createElement("button");
+    calcBtn.type = "button";
+    calcBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
+    calcBtn.textContent = `⚡ Calculate & Plot ${op.name.split(" ")[0]}`;
+    calcBtn.addEventListener("click", () => applyTwoCurveOp(opId));
+    el.fsMathDetailsContainer.appendChild(calcBtn);
+  } else if (opId === "exclude") {
+    renderFsExcludeDetails(bi, false);
+  } else if (op.mode === "segmented" || opId === "segmented_envelope") {
+    renderFsSegmentedEnvelopeDetails();
   } else if (op.mode === "analysis") {
     // ── Peak-Valley Distance (1st / 2nd) ──
     const rowTarget = document.createElement("div");
     rowTarget.className = "fs-math-row";
-    rowTarget.innerHTML = '<label for="fs-math-target-curve">Target Curve</label>';
+    rowTarget.innerHTML = '<label for="fs-math-target-curve">TARGET CURVE</label>';
     const selTarget = document.createElement("select");
     selTarget.id = "fs-math-target-curve";
     selTarget.className = "fs-math-select";
@@ -3568,10 +3982,10 @@ function renderFsFeatureDetails() {
     const rangeRow = document.createElement("div");
     rangeRow.className = "fs-math-row";
     rangeRow.innerHTML = `
-      <label for="fs-math-param-pv-fmin">Search Range (Hz)</label>
+      <label for="fs-math-param-pv-fmin">SEARCH RANGE (HZ)</label>
       <div style="display:flex; gap:6px;">
-        <input type="text" id="fs-math-param-pv-fmin" class="fs-math-input" placeholder="Min (blank = full)" value="${fsPvParams.fmin}">
-        <input type="text" id="fs-math-param-pv-fmax" class="fs-math-input" placeholder="Max (blank = full)" value="${fsPvParams.fmax}">
+        <input type="text" id="fs-math-param-pv-fmin" class="fs-math-input" placeholder="Min (blank = full)" value="${escapeHtml(fsPvParams.fmin)}">
+        <input type="text" id="fs-math-param-pv-fmax" class="fs-math-input" placeholder="Max (blank = full)" value="${escapeHtml(fsPvParams.fmax)}">
       </div>
     `;
     rangeRow.querySelector("#fs-math-param-pv-fmin").addEventListener("input", (e) => { fsPvParams.fmin = e.target.value; });
@@ -3580,7 +3994,7 @@ function renderFsFeatureDetails() {
 
     const runBtn = document.createElement("button");
     runBtn.type = "button";
-    runBtn.className = "btn primary btn-sm fs-math-card-btn";
+    runBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
     runBtn.textContent = "📐 Measure Peak-Valley Distance";
     runBtn.addEventListener("click", applyPeakValley);
     el.fsMathDetailsContainer.appendChild(runBtn);
@@ -3604,8 +4018,264 @@ function renderFsFeatureDetails() {
         `② Peak 2 above valley line: <strong>${c.pv.d2.value.toFixed(2)} dB</strong> @ ${fmtPvHz(c.pv.P2.x)}`;
       el.fsMathDetailsContainer.appendChild(box);
     });
-  } else if (op.mode === "segmented" || opId === "segmented_envelope") {
-    renderFsSegmentedEnvelopeDetails();
+  } else {
+    // ── Single Curve Processing (Level Shift, Downsample, Scale, Mirror, Smoothing) ──
+    const rowTarget = document.createElement("div");
+    rowTarget.className = "fs-math-row";
+    rowTarget.innerHTML = '<label for="fs-math-target-curve">TARGET CURVE</label>';
+    const selTarget = document.createElement("select");
+    selTarget.id = "fs-math-target-curve";
+    selTarget.className = "fs-math-select";
+
+    populateFsCurveSelect(selTarget, fsMathSelectedTarget, 0);
+    selTarget.addEventListener("change", () => { fsMathSelectedTarget = parseInt(selTarget.value, 10); });
+    rowTarget.appendChild(selTarget);
+    el.fsMathDetailsContainer.appendChild(rowTarget);
+
+    if (opId === "offset") {
+      const offsetInputRow = document.createElement("div");
+      offsetInputRow.className = "fs-math-row";
+      offsetInputRow.innerHTML = `
+        <label for="fs-math-param-offset">LEVEL SHIFT (DB)</label>
+        <input type="text" id="fs-math-param-offset" class="fs-math-input" placeholder="e.g. 3 or -3" value="${escapeHtml(fsMathParamOffset)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Note: Input e.g. +3 or -3 to shift the curve</span>
+      `;
+      offsetInputRow.querySelector("#fs-math-param-offset")?.addEventListener("input", (e) => {
+        fsMathParamOffset = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(offsetInputRow);
+    } else if (opId === "normalize") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-normalize-freq">NORMALIZATION FREQUENCY (HZ)</label>
+        <input type="text" id="fs-math-param-normalize-freq" class="fs-math-input" placeholder="1000" value="${escapeHtml(fsMathParamNormalizeFreq)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Shift curve vertically so level equals 0 dB (Y = 0) at this frequency.</span>
+      `;
+      inputRow.querySelector("#fs-math-param-normalize-freq")?.addEventListener("input", (e) => {
+        fsMathParamNormalizeFreq = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "downsample") {
+      renderFsDownsampleInputs();
+    } else if (opId === "mirror") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-mirror-y">MIRROR PLANE / SYMMETRY LEVEL (Y)</label>
+        <input type="text" id="fs-math-param-mirror-y" class="fs-math-input" placeholder="0" value="${escapeHtml(fsMathParamMirrorY)}">
+      `;
+      inputRow.querySelector("#fs-math-param-mirror-y")?.addEventListener("input", (e) => {
+        fsMathParamMirrorY = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "scale") {
+      const inputRow = document.createElement("div");
+      inputRow.className = "fs-math-row";
+      inputRow.innerHTML = `
+        <label for="fs-math-param-factor">MULTIPLIER FACTOR</label>
+        <input type="text" id="fs-math-param-factor" class="fs-math-input" placeholder="2.0" value="${escapeHtml(fsMathParamFactor)}">
+        <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Enter a multiplier (e.g. 0.5 to halve, 2.0 to double, decimals supported)</span>
+      `;
+      inputRow.querySelector("#fs-math-param-factor")?.addEventListener("input", (e) => {
+        fsMathParamFactor = e.target.value;
+      });
+      el.fsMathDetailsContainer.appendChild(inputRow);
+    } else if (opId === "butterSmoothing") {
+      el.fsMathDetailsContainer.appendChild(
+        renderPillButtonGroup("Cutoff Ratio Wc", "fs-math-param-cutoff", [
+          { value: "0.05", label: "0.05 (Heavy)" },
+          { value: "0.15", label: "0.15 (Default)" },
+          { value: "0.30", label: "0.30 (Light)" },
+          { value: "0.50", label: "0.50 (Fine)" }
+        ], "0.15")
+      );
+    } else if (opId === "CxxSmoothing") {
+      el.fsMathDetailsContainer.appendChild(
+        renderPillButtonGroup("Smoothing Bandwidth", "fs-math-param-cxx-fraction", [
+          { value: "3", label: "1/3 Octave" },
+          { value: "6", label: "1/6 Oct (IEC)" },
+          { value: "12", label: "1/12 Octave" },
+          { value: "24", label: "1/24 Octave" }
+        ], "6")
+      );
+    } else if (opId === "smooth_octave") {
+      el.fsMathDetailsContainer.appendChild(
+        renderPillButtonGroup("Octave Fraction", "fs-math-param-oct-fraction", [
+          { value: "1", label: "1/1 Octave" },
+          { value: "3", label: "1/3 Octave" },
+          { value: "6", label: "1/6 Octave" },
+          { value: "12", label: "1/12 Octave" }
+        ], "3")
+      );
+    } else if (opId === "smooth_median") {
+      el.fsMathDetailsContainer.appendChild(
+        renderPillButtonGroup("Filter Window (Points)", "fs-math-param-window", [
+          { value: "3", label: "3 Pts (Light)" },
+          { value: "5", label: "5 Pts (Medium)" },
+          { value: "9", label: "9 Pts (Strong)" },
+          { value: "15", label: "15 Pts (Heavy)" }
+        ], "5")
+      );
+    }
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
+    applyBtn.innerHTML = `⚡ Apply ${escapeHtml(op.name)}`;
+    applyBtn.addEventListener("click", () => {
+      applySingleCurveOp(opId);
+      const prev = applyBtn.innerHTML;
+      applyBtn.innerHTML = "✓ Applied!";
+      setTimeout(() => { if (applyBtn) applyBtn.innerHTML = prev; }, 800);
+    });
+    el.fsMathDetailsContainer.appendChild(applyBtn);
+  }
+}
+
+function renderFsDownsampleInputs() {
+  const methodRow = document.createElement("div");
+  methodRow.className = "fs-math-row";
+  methodRow.innerHTML = `
+    <label>DOWNSAMPLE METHOD</label>
+    <div class="fs-math-pills">
+      <button type="button" class="fs-math-pill-btn ${fsDownsampleMethod === 'points' ? 'active' : ''}" id="ds-pill-points">
+        ⚏ Point Count (Log Grid)
+      </button>
+      <button type="button" class="fs-math-pill-btn ${fsDownsampleMethod === 'custom' ? 'active' : ''}" id="ds-pill-custom">
+        📋 Custom Hz List
+      </button>
+    </div>
+  `;
+  methodRow.querySelector("#ds-pill-points")?.addEventListener("click", () => {
+    fsDownsampleMethod = "points";
+    renderFsFeatureDetails();
+  });
+  methodRow.querySelector("#ds-pill-custom")?.addEventListener("click", () => {
+    fsDownsampleMethod = "custom";
+    renderFsFeatureDetails();
+  });
+  el.fsMathDetailsContainer.appendChild(methodRow);
+
+  if (fsDownsampleMethod === "points") {
+    const pointsRow = document.createElement("div");
+    pointsRow.className = "fs-math-row";
+    pointsRow.innerHTML = `
+      <label for="fs-math-param-downsample-points">NUMBER OF POINTS (LOG GRID)</label>
+      <input type="text" id="fs-math-param-downsample-points" class="fs-math-input" placeholder="100" value="${escapeHtml(fsMathParamDownsamplePoints)}">
+      <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Resamples curve uniformly across log₁₀ frequency scale.</span>
+    `;
+    pointsRow.querySelector("#fs-math-param-downsample-points")?.addEventListener("input", (e) => {
+      fsMathParamDownsamplePoints = e.target.value;
+    });
+    el.fsMathDetailsContainer.appendChild(pointsRow);
+  } else {
+    const customRow = document.createElement("div");
+    customRow.className = "fs-math-row";
+    customRow.innerHTML = `
+      <label for="fs-math-param-downsample-custom">CUSTOM FREQUENCIES (HZ)</label>
+      <textarea id="fs-math-param-downsample-custom" class="fs-math-textarea" rows="4" placeholder="20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 12000">${escapeHtml(fsMathParamDownsampleCustom)}</textarea>
+      <span style="font-size:11px; color:var(--text-dim); margin-top:3px; display:block;">Comma, space, or newline-separated list of frequency points in Hz. Drag bottom-right corner to enlarge.</span>
+    `;
+    customRow.querySelector("#fs-math-param-downsample-custom")?.addEventListener("input", (e) => {
+      fsMathParamDownsampleCustom = e.target.value;
+    });
+    el.fsMathDetailsContainer.appendChild(customRow);
+  }
+}
+
+function renderFsExcludeDetails(bi, isAllMode) {
+  const container = el.fsMathDetailsContainer;
+  const allPlotTraces = (el.fsPlotDiv?.data || []).filter((t) => !t.isCalculated);
+  const excludedList = (state.excludedCurves && state.excludedCurves[bi]) || [];
+
+  const note = document.createElement("div");
+  note.className = "fs-math-details-desc";
+  note.textContent = isAllMode
+    ? "Exclude specific curves from the active plot and all subsequent batch calculations."
+    : "Temporarily exclude the selected curve from the active plot and batch calculations.";
+  container.appendChild(note);
+
+  if (!isAllMode) {
+    const rowTarget = document.createElement("div");
+    rowTarget.className = "fs-math-row";
+    rowTarget.innerHTML = '<label for="fs-math-target-curve">TARGET CURVE TO EXCLUDE</label>';
+    const selTarget = document.createElement("select");
+    selTarget.id = "fs-math-target-curve";
+    selTarget.className = "fs-math-select";
+    populateFsCurveSelect(selTarget, fsMathSelectedTarget, 0);
+    selTarget.addEventListener("change", () => { fsMathSelectedTarget = parseInt(selTarget.value, 10); });
+    rowTarget.appendChild(selTarget);
+    container.appendChild(rowTarget);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn outline btn-sm fs-math-card-btn fs-math-btn-remove";
+    btn.innerHTML = "🗑️ Exclude Selected Curve";
+    btn.addEventListener("click", () => {
+      const idx = parseInt(document.getElementById("fs-math-target-curve")?.value, 10);
+      const trace = (el.fsPlotDiv?.data || [])[idx];
+      if (!trace) return;
+      state.excludedCurves = state.excludedCurves || {};
+      state.excludedCurves[bi] = state.excludedCurves[bi] || [];
+      if (!state.excludedCurves[bi].includes(trace.name)) {
+        state.excludedCurves[bi].push(trace.name);
+      }
+      state.plotRevisions = state.plotRevisions || {};
+      state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
+      updateFullscreenPlotTraces(bi);
+      populateFsMathSubFeatures(true);
+    });
+    container.appendChild(btn);
+  } else {
+    // List all traces with toggle
+    const listDiv = document.createElement("div");
+    listDiv.style.display = "flex";
+    listDiv.style.flexDirection = "column";
+    listDiv.style.gap = "6px";
+    listDiv.style.maxHeight = "180px";
+    listDiv.style.overflowY = "auto";
+
+    allPlotTraces.forEach((t) => {
+      const isEx = excludedList.includes(t.name);
+      const item = document.createElement("div");
+      item.style.cssText = "display:flex; align-items:center; justify-content:space-between; padding:5px 8px; background:var(--surface); border:1px solid var(--border); border-radius:6px; font-size:11.5px;";
+      item.innerHTML = `
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; ${isEx ? 'text-decoration:line-through; opacity:0.6;' : 'font-weight:600;'}">${escapeHtml(t.name)}</span>
+        <button type="button" class="btn btn-sm ${isEx ? 'fs-math-btn-teal' : 'fs-math-btn-remove'}" style="padding:2px 8px; font-size:10.5px;">${isEx ? 'Restore' : 'Exclude'}</button>
+      `;
+      item.querySelector("button")?.addEventListener("click", () => {
+        state.excludedCurves = state.excludedCurves || {};
+        state.excludedCurves[bi] = state.excludedCurves[bi] || [];
+        if (isEx) {
+          state.excludedCurves[bi] = state.excludedCurves[bi].filter((n) => n !== t.name);
+        } else {
+          state.excludedCurves[bi].push(t.name);
+        }
+        state.plotRevisions = state.plotRevisions || {};
+        state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
+        updateFullscreenPlotTraces(bi);
+        populateFsMathSubFeatures(true);
+      });
+      listDiv.appendChild(item);
+    });
+    container.appendChild(listDiv);
+  }
+
+  if (excludedList.length > 0) {
+    const restoreAllBtn = document.createElement("button");
+    restoreAllBtn.type = "button";
+    restoreAllBtn.className = "btn primary btn-sm fs-math-card-btn fs-math-btn-teal";
+    restoreAllBtn.innerHTML = `✓ Restore All Excluded Curves (${excludedList.length})`;
+    restoreAllBtn.addEventListener("click", () => {
+      state.excludedCurves = state.excludedCurves || {};
+      state.excludedCurves[bi] = [];
+      state.plotRevisions = state.plotRevisions || {};
+      state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
+      updateFullscreenPlotTraces(bi);
+      populateFsMathSubFeatures(true);
+    });
+    container.appendChild(restoreAllBtn);
   }
 }
 
@@ -4266,6 +4936,71 @@ function applyTwoCurveOp(opId) {
   addOrUpdateCalculatedCurve(bi, newTrace);
 }
 
+function applyBatchCurveOp(opId) {
+  if (!state.fsPlotInfo || !el.fsPlotDiv || !el.fsPlotDiv.data) return;
+  const bi = state.fsPlotInfo.bi;
+
+  const rawTraces = (el.fsPlotDiv.data || []).filter((t) => !t.isCalculated && t.visible !== false && t.visible !== "legendonly");
+  if (!rawTraces.length) {
+    alert("No active measurement curves found on the plot.");
+    return;
+  }
+
+  const op = CURVE_MATH_OPERATORS[opId];
+  if (!op || !op.calc) return;
+
+  const params = getFsOperationParams(opId);
+
+  rawTraces.forEach((trace) => {
+    try {
+      const result = op.calc(trace, null, params);
+      if (result && result.x && result.y && result.x.length) {
+        const color = FS_MATH_PALETTE[fsMathColorIdx % FS_MATH_PALETTE.length];
+        fsMathColorIdx++;
+        const newTrace = {
+          x: result.x,
+          y: result.y,
+          mode: "lines",
+          name: result.defaultName,
+          origName: result.defaultName,
+          isCalculated: true,
+          isBatch: true,
+          batchOpId: opId,
+          srcTraceName: trace.name,
+          calcId: `calc_${opId}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          opId: opId,
+          line: {
+            color: color,
+            dash: opId.includes("smooth") ? "solid" : "dash",
+            width: 2.2
+          },
+          visible: true
+        };
+        addOrUpdateCalculatedCurve(bi, newTrace);
+      }
+    } catch (e) {
+      console.error("Batch op error on trace", trace.name, e);
+    }
+  });
+
+  renderFsFeatureDetails();
+  renderFsCalculatedCurvesList(bi);
+}
+
+function removeBatchCurveOp(opId) {
+  if (!state.fsPlotInfo) return;
+  const bi = state.fsPlotInfo.bi;
+  state.calculatedCurves = state.calculatedCurves || {};
+  const list = state.calculatedCurves[bi] || [];
+  state.calculatedCurves[bi] = list.filter((c) => c.opId !== opId && c.batchOpId !== opId);
+  state.plotRevisions = state.plotRevisions || {};
+  state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
+  updateFullscreenPlotTraces(bi);
+  renderFsFeatureDetails();
+  renderFsCalculatedCurvesList(bi);
+  schedulePersist();
+}
+
 function applySingleCurveOp(opId) {
   if (!state.fsPlotInfo || !el.fsPlotDiv || !el.fsPlotDiv.data) return;
   const bi = state.fsPlotInfo.bi;
@@ -4286,32 +5021,7 @@ function applySingleCurveOp(opId) {
   const op = CURVE_MATH_OPERATORS[opId];
   if (!op || !op.calc) return;
 
-  const params = {};
-  if (opId === "offset") {
-    const rawVal = document.getElementById("fs-math-param-offset")?.value?.trim();
-    if (!rawVal) {
-      alert("Please input an offset value in dB (e.g. +3 or -3).");
-      return;
-    }
-    const val = parseFloat(rawVal);
-    if (isNaN(val)) {
-      alert("Invalid offset value. Please input a number (e.g. +3 or -3).");
-      return;
-    }
-    params.offset = val;
-  } else if (opId === "butterSmoothing") {
-    const val = parseFloat(document.getElementById("fs-math-param-cutoff")?.value);
-    params.cutoff = isNaN(val) ? 0.15 : val;
-  } else if (opId === "CxxSmoothing") {
-    params.fraction = document.getElementById("fs-math-param-cxx-fraction")?.value || "6";
-  } else if (opId === "smooth_octave") {
-    params.fraction = document.getElementById("fs-math-param-oct-fraction")?.value || "3";
-  } else if (opId === "smooth_median") {
-    params.window = document.getElementById("fs-math-param-window")?.value || "5";
-  } else if (opId === "scale") {
-    const val = parseFloat(document.getElementById("fs-math-param-factor")?.value);
-    params.factor = isNaN(val) ? 1 : val;
-  }
+  const params = getFsOperationParams(opId);
 
   let result;
   try {
@@ -4415,7 +5125,7 @@ function renderFsCalculatedCurvesList(bi) {
     left.className = "fs-math-calc-left";
 
     const swatch = document.createElement("span");
-    swatch.style.cssText = `display:inline-block; width:12px; height:3px; background:${ct.line?.color || "#ef4444"}; border-radius:1px; flex-shrink:0;`;
+    swatch.style.cssText = `display:inline-block; width:12px; height:3px; background:${ct.line?.color || "#ef4444"}; border-radius:1px; flex-shrink:0; margin-top:5px;`;
 
     const name = document.createElement("span");
     name.className = "fs-math-calc-name";
@@ -4442,6 +5152,9 @@ function renderFsCalculatedCurvesList(bi) {
       const traceIdx = (el.fsPlotDiv?.data || []).findIndex((t) => (t.calcId && t.calcId === ct.calcId) || t.name === ct.name);
       if (traceIdx >= 0) {
         toggleFullscreenTraceVisibility(traceIdx);
+        state.plotRevisions = state.plotRevisions || {};
+        state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
+        updateFullscreenPlotTraces(bi);
       }
     });
 
@@ -4459,6 +5172,8 @@ function renderFsCalculatedCurvesList(bi) {
         calcs.splice(itemIdx, 1);
         state.calculatedCurves[bi] = calcs;
       }
+      state.plotRevisions = state.plotRevisions || {};
+      state.plotRevisions[bi] = (state.plotRevisions[bi] || 0) + 1;
       updateFullscreenPlotTraces(bi);
       renderFsFeatureDetails();
       renderFsCalculatedCurvesList(bi);
@@ -4477,6 +5192,15 @@ function renderFsCalculatedCurvesList(bi) {
 function initFsCurveMathEvents() {
   el.fsMathBtn?.addEventListener("click", toggleFsMathPanel);
   el.fsMathCloseBtn?.addEventListener("click", toggleFsMathPanel);
+
+  el.fsScopeSingleBtn?.addEventListener("click", () => {
+    fsMathTargetScope = "single";
+    populateFsMathSubFeatures(false);
+  });
+  el.fsScopeAllBtn?.addEventListener("click", () => {
+    fsMathTargetScope = "all";
+    populateFsMathSubFeatures(false);
+  });
 
   el.fsMathCatSelect?.addEventListener("change", () => populateFsMathSubFeatures(false));
   el.fsMathSubSelect?.addEventListener("change", renderFsFeatureDetails);

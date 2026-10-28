@@ -831,9 +831,9 @@
     /* ── Fullscreen Curve Math & Post-Processing Panel ── */
     /* ── Fullscreen Curve Math & Post-Processing Panel ── */
     .fs-math-panel {
-      width: 390px;
-      min-width: 340px;
-      max-width: 480px;
+      width: 410px;
+      min-width: 360px;
+      max-width: 520px;
       border-left: 1.5px solid var(--border-strong);
       background: var(--surface);
       display: flex;
@@ -888,6 +888,72 @@
     }
 
     /* ── Dropdown-Driven Feature Selector & Details Card ── */
+    /* ── Target Scope Pill Buttons ── */
+    .fs-math-scope-pills {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+    }
+    .fs-math-scope-btn {
+      flex: 1;
+      height: 32px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-dim);
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .fs-math-scope-btn:hover {
+      border-color: #0fa5a4;
+      color: var(--text);
+    }
+    .fs-math-scope-btn.active {
+      background: #0fa5a4 !important;
+      border-color: #0d9488 !important;
+      color: #ffffff !important;
+      font-weight: 700;
+      box-shadow: 0 1px 3px rgba(15, 165, 164, 0.3);
+    }
+    .fs-math-btn-teal {
+      background: #0fa5a4 !important;
+      border: 1px solid #0d9488 !important;
+      color: #ffffff !important;
+      font-weight: 600;
+      box-shadow: 0 1px 2px rgba(15, 165, 164, 0.2);
+    }
+    .fs-math-btn-teal:hover {
+      background: #0d9488 !important;
+      border-color: #0f766e !important;
+    }
+    .fs-math-btn-blue {
+      background: #0284c7 !important;
+      border: 1px solid #0369a1 !important;
+      color: #ffffff !important;
+      font-weight: 600;
+      box-shadow: 0 1px 2px rgba(2, 132, 199, 0.2);
+    }
+    .fs-math-btn-blue:hover {
+      background: #0369a1 !important;
+    }
+    .fs-math-btn-remove {
+      background: #fff5f5 !important;
+      border: 1px solid #f87171 !important;
+      color: #dc2626 !important;
+      font-weight: 600;
+    }
+    .fs-math-btn-remove:hover {
+      background: #fee2e2 !important;
+      border-color: #ef4444 !important;
+    }
+
     .fs-math-feature-box {
       background: var(--surface-2);
       border: 1px solid var(--border);
@@ -1025,10 +1091,33 @@
       box-sizing: border-box;
       width: 100%;
     }
+    .fs-math-textarea {
+      min-height: 80px;
+      height: 95px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 11.5px;
+      outline: none;
+      font-family: inherit;
+      box-sizing: border-box;
+      width: 100%;
+      resize: vertical;
+      line-height: 1.4;
+      display: block;
+    }
     .fs-math-select:focus,
-    .fs-math-input:focus {
+    .fs-math-input:focus,
+    .fs-math-textarea:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+    .fs-math-textarea::placeholder {
+      color: var(--text-dim);
+      opacity: 0.8;
+      font-style: italic;
     }
     .fs-math-input::placeholder {
       color: var(--text-dim);
@@ -1071,19 +1160,27 @@
     }
     .fs-math-card-btn {
       width: 100%;
-      height: 32px;
+      min-height: 36px;
+      height: auto;
+      padding: 6px 10px;
       font-weight: 600;
-      font-size: 12px;
+      font-size: 11.5px;
+      line-height: 1.25;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      text-align: center;
       gap: 6px;
       border-radius: 6px;
+      box-sizing: border-box;
+      white-space: normal;
+      word-break: break-word;
     }
     .fs-math-btn-row {
       display: flex;
       gap: 8px;
       width: 100%;
+      align-items: stretch;
     }
     .fs-math-btn-row .fs-math-card-btn {
       flex: 1;
@@ -1136,14 +1233,14 @@
     }
     .fs-math-calc-item {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 8px;
-      padding: 5px 8px;
+      padding: 6px 8px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
-      font-size: 11px;
+      font-size: 11.5px;
       transition: background 0.15s;
     }
     .fs-math-calc-item:hover {
@@ -1151,23 +1248,25 @@
     }
     .fs-math-calc-left {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
       min-width: 0;
       flex: 1;
     }
     .fs-math-calc-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
       color: var(--text);
       font-weight: 600;
+      line-height: 1.35;
     }
     .fs-math-calc-btns {
       display: flex;
       align-items: center;
       gap: 3px;
       flex-shrink: 0;
+      margin-top: 1px;
     }
     .fs-math-icon-btn {
       background: transparent;
@@ -2099,7 +2198,7 @@
         <button id="fs-toggle-all-btn" class="fs-btn" title="Hide or show all curves at once"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Hide All</button>
         <button id="fs-refresh-btn" class="fs-btn" title="Reset plot view & zoom to default (refresh plot)">↺ Refresh</button>
         <button id="fs-scale-btn" class="fs-btn" title="Configure plot properties & axis scales (or right-click)">⚙ Property</button>
-        <button id="fs-math-btn" class="fs-btn" title="Toggle Curve Math & Post-Processing Panel (M)">⚡ Curve Math</button>
+        <button id="fs-math-btn" class="fs-btn active" title="Toggle Curve Processing Panel (M)">⚡ Curve Processing</button>
         <button id="fs-close-btn" class="fs-btn fs-btn-close" title="Exit fullscreen (Esc)">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           Exit Fullscreen
@@ -2127,14 +2226,14 @@
       </div>
 
       <!-- Right Panel: Curve Math & Post-Processing -->
-      <aside id="fs-math-panel" class="fs-math-panel" hidden aria-label="Curve Math and Processing Panel">
+      <aside id="fs-math-panel" class="fs-math-panel" aria-label="Curve Processing Panel">
         <div class="fs-math-header">
           <div class="fs-math-title">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
-            <span>Curve Post-Processing</span>
+            <span>Curve Processing</span>
           </div>
           <button class="fs-math-close-btn" id="fs-math-close-btn" title="Close Panel (M)">&times;</button>
         </div>
@@ -2143,16 +2242,29 @@
           <!-- 1. TWO-LEVEL STEPPED FEATURE SELECTION -->
           <div class="fs-math-feature-box">
             <div class="fs-math-row">
-              <label for="fs-math-cat-select" class="fs-math-feature-label">1. Main Feature</label>
+              <label for="fs-math-cat-select" class="fs-math-feature-label">1. MAIN FEATURE</label>
               <select id="fs-math-cat-select" class="fs-math-feature-select">
-                <option value="single" selected>🎛️ Single Curve Processing</option>
+                <option value="processing" selected>🎛️ Curve Processing</option>
                 <option value="two">⚖️ Compare Two Curves</option>
-                <option value="multi">📊 Multi-Curve Processing</option>
                 <option value="analysis">📐 Curve Analysis</option>
               </select>
             </div>
-            <div class="fs-math-row" style="margin-top: 5px;">
-              <label for="fs-math-sub-select" class="fs-math-feature-label">2. Sub Feature / Operation</label>
+
+            <!-- TARGET SCOPE (Active under Curve Processing) -->
+            <div class="fs-math-row" id="fs-math-scope-row" style="margin-top: 6px;">
+              <label class="fs-math-feature-label">TARGET SCOPE</label>
+              <div class="fs-math-scope-pills" id="fs-math-scope-pills">
+                <button type="button" class="fs-math-scope-btn active" id="fs-scope-single" data-scope="single">
+                  <span class="fs-scope-icon">🎯</span> Single Curve
+                </button>
+                <button type="button" class="fs-math-scope-btn" id="fs-scope-all" data-scope="all">
+                  <span class="fs-scope-icon">👥</span> All Curves (<span id="fs-scope-all-count">0</span>)
+                </button>
+              </div>
+            </div>
+
+            <div class="fs-math-row" style="margin-top: 6px;">
+              <label for="fs-math-sub-select" class="fs-math-feature-label">2. SUB FEATURE / OPERATION</label>
               <select id="fs-math-sub-select" class="fs-math-feature-select"></select>
             </div>
           </div>
@@ -2175,6 +2287,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=drag_sync_19"></script>
+  <script src="app.js?v=curve_proc_8"></script>
 </body>
 </html>
