@@ -85,6 +85,22 @@ def get_document_meta(doc_id: str) -> dict:
     return {"document": doc}
 
 
+_highlight_cache: dict[str, bytes] = {}
+
+
+@router.get("/documents/{doc_id}/match-page")
+def get_document_match_page(doc_id: str, q: str = "") -> dict:
+    pages = manager.find_all_query_pages(doc_id, q)
+    first_page = pages[0] if pages else 1
+    return {
+        "doc_id": doc_id,
+        "query": q,
+        "page": first_page,
+        "pages": pages,
+        "total": len(pages),
+    }
+
+
 @router.get("/documents/{doc_id}/markdown")
 def get_document_markdown(doc_id: str, limit: Optional[int] = None):
     doc = manager.get_document(doc_id)
@@ -113,13 +129,59 @@ def download_document(doc_id: str):
 
 
 @router.get("/documents/{doc_id}/view")
-def view_document(doc_id: str):
+def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None):
     doc = manager.get_document(doc_id)
     if not doc:
         raise HTTPException(404, "Document not found")
     file_path = manager.get_documents_dir() / doc["filename"]
     if not file_path.is_file():
         raise HTTPException(404, "File missing from vault storage")
+
+    clean_q = (q or "").strip()
+    if clean_q and file_path.suffix.lower() == ".pdf":
+        cache_key = f"{doc_id}:{clean_q.lower()}"
+        if cache_key in _highlight_cache:
+            return Response(
+                content=_highlight_cache[cache_key],
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"inline; filename=\"{doc['original_name']}\"",
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
+
+        try:
+            import pymupdf
+            pdf_doc = pymupdf.open(str(file_path))
+            has_matches = False
+            for page in pdf_doc:
+                rects = page.search_for(clean_q)
+                for r in rects:
+                    has_matches = True
+                    annot = page.add_highlight_annot(r)
+                    annot.set_colors(stroke=(1.0, 0.90, 0.0))  # Vivid yellow highlight
+                    annot.set_opacity(0.6)
+                    annot.update()
+
+            if has_matches:
+                pdf_bytes = pdf_doc.tobytes(deflate=True)
+                pdf_doc.close()
+                if len(_highlight_cache) > 40:
+                    _highlight_cache.pop(next(iter(_highlight_cache)))
+                _highlight_cache[cache_key] = pdf_bytes
+                return Response(
+                    content=pdf_bytes,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": f"inline; filename=\"{doc['original_name']}\"",
+                        "Cache-Control": "public, max-age=3600",
+                    },
+                )
+            pdf_doc.close()
+        except Exception as exc:
+            import logging
+            logging.getLogger("paperless_ngx").warning("Failed highlighting PDF on view: %s", exc)
+
     return FileResponse(
         path=str(file_path),
         media_type=doc.get("mime_type", "application/pdf"),
@@ -173,6 +235,9 @@ def delete_document(doc_id: str) -> dict:
     success = manager.delete_document(doc_id)
     if not success:
         raise HTTPException(404, "Document not found")
+    to_del = [k for k in _highlight_cache if k.startswith(f"{doc_id}:")]
+    for k in to_del:
+        _highlight_cache.pop(k, None)
     return {"ok": True}
 
 

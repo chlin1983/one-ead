@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import fitz
+import pymupdf as fitz
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from server.module import PortalModule
@@ -173,7 +173,7 @@ def highlight_datasheet_pdf(
     Open PDF using PyMuPDF and apply bright yellow highlights over the target parameter
     and its corresponding numerical value on the requested page.
     """
-    import fitz
+    import pymupdf as fitz
 
     doc = fitz.open(str(pdf_path))
     target_idx = max(0, min(page_num - 1, len(doc) - 1))

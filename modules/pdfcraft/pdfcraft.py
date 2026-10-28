@@ -133,7 +133,7 @@ def ensure_sample_doc() -> None:
         return
 
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz  # PyMuPDF
 
         doc = fitz.open()
 

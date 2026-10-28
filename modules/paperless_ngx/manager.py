@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import html
 import json
 import logging
 import os
@@ -600,6 +601,84 @@ def sanitize_fts_query(query: str) -> str:
     return " ".join(f'"{w}"*' for w in words)
 
 
+def sanitize_snippet_html(raw_snippet: str) -> str:
+    """Safely escapes HTML in FTS snippets while preserving highlighting."""
+    if not raw_snippet:
+        return ""
+    # Replace FTS <b> match markers with temporary placeholders
+    s = raw_snippet.replace("<b>", "\x01").replace("</b>", "\x02")
+    # Escape any raw HTML characters (<, >, &, ", ') from the document OCR text
+    s = html.escape(s)
+    # Restore styled highlight
+    s = s.replace("\x01", "<b class=\"pngx-match-hl\">").replace("\x02", "</b>")
+    return s
+
+
+def find_all_query_pages(doc_id: str, query: str) -> List[int]:
+    """Finds all 1-based page numbers where the search query appears.
+    Checks PyMuPDF directly first (exact match coordinates), and falls back
+    to cached OCR Markdown if needed.
+    """
+    if not query or not query.strip():
+        return []
+
+    clean_q = query.strip()
+    q_lower = clean_q.lower()
+    matching_pages = set()
+
+    # 1. Check PDF directly via PyMuPDF (fitz)
+    try:
+        doc_info = get_document(doc_id)
+        if doc_info and doc_info.get("filename"):
+            pdf_path = get_documents_dir() / doc_info["filename"]
+            if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
+                import pymupdf
+                pdf_doc = pymupdf.open(str(pdf_path))
+                for page_idx in range(len(pdf_doc)):
+                    page = pdf_doc[page_idx]
+                    rects = page.search_for(clean_q)
+                    if rects:
+                        matching_pages.add(page_idx + 1)
+                pdf_doc.close()
+    except Exception as exc:
+        logger.debug("Failed searching PDF for query pages: %s", exc)
+
+    # 2. Check OCR markdown cache (especially for scanned PDFs or OCR-extracted text)
+    if not matching_pages:
+        cache_path = get_ocr_cache_dir() / f"{doc_id}.md"
+        if cache_path.is_file():
+            try:
+                content = cache_path.read_text(encoding="utf-8", errors="replace")
+                pattern = re.compile(r"<!--\s*Page\s+(\d+)", re.IGNORECASE)
+                page_markers = []
+                for match in pattern.finditer(content):
+                    page_markers.append((match.start(), int(match.group(1))))
+                
+                pos = 0
+                while True:
+                    idx = content.lower().find(q_lower, pos)
+                    if idx == -1:
+                        break
+                    matched_page = 1
+                    for marker_pos, p_num in page_markers:
+                        if marker_pos <= idx:
+                            matched_page = p_num
+                        else:
+                            break
+                    matching_pages.add(matched_page)
+                    pos = idx + len(q_lower)
+            except Exception as exc:
+                logger.debug("Failed reading OCR cache for query pages: %s", exc)
+
+    return sorted(list(matching_pages))
+
+
+def find_query_page(doc_id: str, query: str) -> int:
+    """Finds the 1-based page number where the search query first appears."""
+    pages = find_all_query_pages(doc_id, query)
+    return pages[0] if pages else 1
+
+
 def list_documents(query: str = "", tag: str = "", status: str = "") -> List[Dict[str, Any]]:
     """Lists vault documents with optional full-text search, tag and status filtering."""
     init_vault()
@@ -640,10 +719,20 @@ def list_documents(query: str = "", tag: str = "", status: str = "") -> List[Dic
         docs = [dict(r) for r in rows]
         unique_docs: List[Dict[str, Any]] = []
         seen_names = set()
+        clean_q = query.strip()
         for doc in docs:
             name = doc.get("original_name") or doc.get("id")
             if name not in seen_names:
                 seen_names.add(name)
+                if doc.get("snippet"):
+                    doc["snippet"] = sanitize_snippet_html(doc["snippet"])
+                if clean_q:
+                    all_matches = find_all_query_pages(doc["id"], clean_q)
+                    doc["match_pages"] = all_matches
+                    doc["match_page"] = all_matches[0] if all_matches else 1
+                else:
+                    doc["match_pages"] = []
+                    doc["match_page"] = 1
                 unique_docs.append(doc)
         return unique_docs
 
@@ -688,8 +777,8 @@ def get_or_create_thumbnail(doc_id: str, dpi: int = 75) -> Optional[Path]:
 
     if doc_path.suffix.lower() == ".pdf":
         try:
-            import fitz
-            pdf = fitz.open(str(doc_path))
+            import pymupdf
+            pdf = pymupdf.open(str(doc_path))
             if len(pdf) > 0:
                 pix = pdf[0].get_pixmap(dpi=dpi)
                 pix.save(str(thumb_path))
