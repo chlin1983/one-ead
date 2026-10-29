@@ -13,6 +13,63 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
+import base64
+import json
+import urllib.request
+import urllib.error
+
+_CACHED_VISION_MODEL = None
+_VISION_CHECK_DONE = False
+
+def get_available_vision_model() -> str:
+    """Checks local Ollama server for available vision models."""
+    global _CACHED_VISION_MODEL, _VISION_CHECK_DONE
+    if _VISION_CHECK_DONE:
+        return _CACHED_VISION_MODEL or ""
+    _VISION_CHECK_DONE = True
+    try:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "doc_extractor"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            models = [m.get("name", "") for m in data.get("models", [])]
+            for candidate in ["minicpm-v:latest", "minicpm-v", "gemma4:e4b", "llava:latest", "llava:7b", "glm-ocr:latest"]:
+                for m in models:
+                    if m == candidate or m.startswith(candidate.split(":")[0]):
+                        _CACHED_VISION_MODEL = m
+                        return _CACHED_VISION_MODEL
+    except Exception:
+        pass
+    return ""
+
+def describe_image_with_vlm(img_bytes: bytes, caption_hint: str = "") -> str:
+    """Calls local Ollama VLM to generate a concise technical description of a diagram/chart/image."""
+    model = get_available_vision_model()
+    if not model or not img_bytes:
+        return ""
+    try:
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        prompt = (
+            "Describe this figure or diagram concisely in 2-3 sentences for a technical search index. "
+            "Explicitly mention the figure title or number if visible, axis names and units, key curves, labels, or flow elements."
+        )
+        if caption_hint:
+            prompt += f"\nCaption context: {caption_hint}"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "images": [b64],
+            "stream": False
+        }
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("response", "").strip()
+    except Exception:
+        return ""
 
 def find_tesseract_binary() -> str:
     """Finds local Tesseract OCR executable if available."""
@@ -257,6 +314,97 @@ def extract_pdf(path: str) -> str:
         d = page.get_text("dict")
         blocks = d.get("blocks", [])
 
+        # 3b. Extract figures and diagrams with local VLM
+        figure_suppress_rects = []
+        fig_caption_pattern = re.compile(r"^(?:Figure|Fig\.|Chart|Diagram)\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE)
+        vlm_model = get_available_vision_model()
+        fig_count_on_page = 0
+
+        def _calc_dr_bbox(dr):
+            pts = []
+            r = dr.get("rect")
+            if r and (r.width > 0 or r.height > 0):
+                pts.extend([pymupdf.Point(r.x0, r.y0), pymupdf.Point(r.x1, r.y1)])
+            for it in dr.get("items", []):
+                for elem in it[1:]:
+                    if isinstance(elem, pymupdf.Point):
+                        pts.append(elem)
+                    elif isinstance(elem, pymupdf.Rect):
+                        pts.extend([pymupdf.Point(elem.x0, elem.y0), pymupdf.Point(elem.x1, elem.y1)])
+            if pts:
+                return pymupdf.Rect(
+                    min(p.x for p in pts),
+                    min(p.y for p in pts),
+                    max(p.x for p in pts),
+                    max(p.y for p in pts)
+                )
+            return pymupdf.Rect(r) if r else pymupdf.Rect(0, 0, 0, 0)
+
+        drawing_rects = [_calc_dr_bbox(dr) for dr in drawings] if drawings else []
+
+        if vlm_model:
+            # First pass: find explicit figure captions (e.g. Figure 1.1 ...)
+            for b in blocks:
+                if b.get("type") != 0 or fig_count_on_page >= 4:
+                    continue
+                raw_text = "".join(s.get("text", "") for l in b.get("lines", []) for s in l.get("spans", [])).strip()
+                if fig_caption_pattern.match(raw_text):
+                    cap_rect = pymupdf.Rect(b["bbox"])
+                    # Look for vector drawings or raster images sitting above the caption (or below)
+                    above_cand = [
+                        r for r in drawing_rects
+                        if r.y1 <= cap_rect.y0 + 15 and r.y0 >= cap_rect.y0 - 450
+                        and max(r.width, r.height) >= 15
+                    ] + [
+                        pymupdf.Rect(ib["bbox"]) for ib in blocks
+                        if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y0 + 15
+                        and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y0 - 450
+                    ]
+                    below_cand = [
+                        r for r in drawing_rects
+                        if r.y0 >= cap_rect.y1 - 15 and r.y1 <= cap_rect.y1 + 450
+                        and max(r.width, r.height) >= 15
+                    ] + [
+                        pymupdf.Rect(ib["bbox"]) for ib in blocks
+                        if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y1 - 15
+                        and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y1 + 450
+                    ]
+
+                    cand_rects = above_cand if above_cand else below_cand
+                    if cand_rects:
+                        u_rect = cand_rects[0]
+                        for cr in cand_rects[1:]:
+                            u_rect |= cr
+                        crop_rect = pymupdf.Rect(
+                            max(0, min(u_rect.x0, cap_rect.x0) - 30),
+                            max(0, min(u_rect.y0, cap_rect.y0) - 15),
+                            min(page.rect.width, max(u_rect.x1, cap_rect.x1) + 30),
+                            min(page.rect.height, max(u_rect.y1, cap_rect.y1) + 15)
+                        )
+                        pix = page.get_pixmap(clip=crop_rect, dpi=120)
+                        vlm_desc = describe_image_with_vlm(pix.tobytes("png"), caption_hint=raw_text)
+                        if vlm_desc:
+                            fig_md = f"> **{raw_text}**\n>\n> *Visual Analysis*: {vlm_desc}"
+                            combined_items.append((crop_rect.y0, "figure", fig_md))
+                            figure_suppress_rects.append(crop_rect)
+                            fig_count_on_page += 1
+
+            # Second pass: stand-alone raster image blocks (type == 1) not covered by captioned figures
+            for b in blocks:
+                if b.get("type") != 1 or fig_count_on_page >= 4:
+                    continue
+                ib_rect = pymupdf.Rect(b.get("bbox", (0, 0, 0, 0)))
+                if ib_rect.width >= 100 and ib_rect.height >= 80:
+                    if any(ib_rect.intersects(sr) for sr in figure_suppress_rects):
+                        continue
+                    pix = page.get_pixmap(clip=ib_rect, dpi=120)
+                    vlm_desc = describe_image_with_vlm(pix.tobytes("png"))
+                    if vlm_desc:
+                        img_md = f"> **[Diagram / Figure]**\n>\n> *Visual Analysis*: {vlm_desc}"
+                        combined_items.append((ib_rect.y0, "figure", img_md))
+                        figure_suppress_rects.append(ib_rect)
+                        fig_count_on_page += 1
+
         for b in blocks:
             if b.get("type") != 0:
                 continue
@@ -265,6 +413,10 @@ def extract_pdf(path: str) -> str:
                 continue
 
             b_bbox = b.get("bbox", (0, 0, 0, 0))
+
+            # Exclude text that falls inside a recognized figure region (captions and internal axis/curve labels)
+            if any(b_bbox[1] >= sr.y0 - 5 and b_bbox[3] <= sr.y1 + 5 and max(b_bbox[0], sr.x0) < min(b_bbox[2], sr.x1) for sr in figure_suppress_rects):
+                continue
 
             # Exclude text that is already captured inside a table bounding box
             if any(b_bbox[0] >= tb[0] - 5 and b_bbox[2] <= tb[2] + 5 and b_bbox[1] >= tb[1] - 5 and b_bbox[3] <= tb[3] + 5 for tb in table_bboxes):
