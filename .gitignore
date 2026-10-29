@@ -78,14 +78,15 @@ modules/excalidraw/data/
 # Runtime root data directory
 data/
 
-# WeKnora local repository clone, builds, and user data
+# WeKnora upstream repository clone, runtime data, and local toolchains
 modules/weknora/WeKnora/
 modules/weknora/upstream/
 modules/weknora/data/
-modules/weknora/*.exe
-modules/weknora/WeKnora-lite*
 modules/weknora/.env.lite
 modules/weknora/tools/
+!modules/weknora/dist/
+
+
 
 # Temporary scratch and debug scripts
 scratch/

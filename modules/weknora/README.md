@@ -89,34 +89,65 @@ WeKnora configures specialized model generation temperatures across different ag
 
 ---
 
-## 4. Windows Compilation & Build Guide
+## 4. Fresh Clone Setup: Obtaining the Binary
 
-### Step 1: Upstream Repository
+On a fresh clone, you can acquire the binary in two ways:
+
+### Method A: 1-Click Download Prebuilt Binary (Fastest — Zero Compilers)
+
+Prebuilt Windows binaries are published on [GitHub Releases](https://github.com/chlin1983/one-ead/releases). You do **not** need Go, MinGW GCC, or Node.js.
+
+* **Via One EAD Web Portal**:
+  1. Open One EAD and select **WeKnora** in the sidebar.
+  2. Click the blue **Download Prebuilt Binary** button under *Build & Binary Groundwork*.
+  3. The status pill will change to **Binary Ready** upon completion.
+* **Via Command Line**:
+  ```powershell
+  python modules/weknora/scripts/download_binary.py
+  ```
+  *(Downloads `weknora-lite-windows-amd64.zip` or `WeKnora-lite.exe` directly into `modules/weknora/`)*
+
+> [!TIP]
+> **GitHub Actions Automation**: A workflow is provided at [`.github/workflows/build-weknora.yml`](../../.github/workflows/build-weknora.yml). Triggering it from GitHub Actions (or pushing a `v*` tag) automatically builds the Windows executable and attaches it to your GitHub Releases.
+
+---
+
+### Method B: Native Windows Compilation & Build Guide
+
+If you prefer to compile from source or apply modifications:
+
+#### Step 1: Upstream Repository
 The repository is cloned inside `modules/weknora/WeKnora`:
 ```bash
 git clone https://github.com/Tencent/WeKnora.git modules/weknora/WeKnora
+cd modules/weknora/WeKnora
+git checkout 2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5
+cd ../../..
 ```
 
-### Step 2: Build Frontend Assets
+#### Step 2: Build Frontend Assets
 In PowerShell or Command Prompt:
 ```powershell
 cd modules/weknora/WeKnora/frontend
-npm install
+npm install --prefer-offline --ignore-scripts
 npm run build
 cd ..
 # Copy dist to web directory
 xcopy /E /I /Y frontend\dist web
+cd ../../..
 ```
 
-### Step 3: Build the Go Lite Binary
+#### Step 3: Build the Go Lite Binary
 WeKnora Lite requires CGO enabled for SQLite FTS5 and vector bindings:
-1. Install **Go 1.23+**: [https://go.dev/dl/](https://go.dev/dl/)
-2. Install a C compiler (GCC/MinGW). Recommended:
-   - [w64devkit](https://github.com/skeeto/w64devkit/releases) (Portable standalone GCC for Windows, extract and add to PATH)
-3. Run the automated build script:
-```powershell
-modules\weknora\scripts\build_lite.bat
-```
+1. Portable toolchains can be downloaded automatically (no admin needed):
+   ```powershell
+   python modules\weknora\scripts\setup_tools.py
+   ```
+   *(Or install [Go 1.23+](https://go.dev/dl/) and [w64devkit GCC](https://github.com/skeeto/w64devkit/releases) manually)*
+2. Run the automated build script:
+   ```powershell
+   modules\weknora\scripts\build_lite.bat
+   ```
 This produces `modules/weknora/WeKnora-lite.exe`.
 
 ---

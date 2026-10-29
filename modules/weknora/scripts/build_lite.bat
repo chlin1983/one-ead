@@ -102,7 +102,9 @@ if %errorlevel% equ 0 (
     if exist "%REPO_DIR%\frontend\dist" (
         if exist "%REPO_DIR%\web" rmdir /s /q "%REPO_DIR%\web"
         xcopy /E /I /Y "%REPO_DIR%\frontend\dist" "%REPO_DIR%\web" >nul
-        echo [SUCCESS] Frontend built and copied to web/ directory.
+        if not exist "%MODULE_DIR%\dist" mkdir "%MODULE_DIR%\dist"
+        xcopy /E /I /Y "%REPO_DIR%\frontend\dist" "%MODULE_DIR%\dist" >nul
+        echo [SUCCESS] Frontend built and copied to web/ and dist/ directories.
     ) else (
         echo [WARN] frontend\dist not found, check frontend build logs.
     )

@@ -1,0 +1,1 @@
+modules/weknora/WeKnora-lite.exe filter=lfs diff=lfs merge=lfs -text
