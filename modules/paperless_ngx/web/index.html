@@ -1607,6 +1607,12 @@
       opacity: 0;
       cursor: pointer;
     }
+
+    @keyframes spin {
+      100% {
+        transform: rotate(360deg);
+      }
+    }
   </style>
 </head>
 
@@ -1704,6 +1710,14 @@
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
           <span>Upload Document</span>
+        </div>
+        <div class="pngx-menu-item" id="sidebarScanVaultItem" onclick="triggerVaultScan()" title="Auto-scan documents folder for newly added files">
+          <svg class="pngx-menu-icon" id="sidebarScanVaultIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+          <span id="sidebarScanVaultLabel">Auto-Scan Vault</span>
         </div>
         <div class="pngx-menu-item" onclick="showSettingsModal()">
           <svg class="pngx-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2896,7 +2910,7 @@
       const seen = new Set();
       const unique = [];
       for (const d of docs) {
-        const key = d.original_name || d.id;
+        const key = d.id;
         if (!seen.has(key)) {
           seen.add(key);
           unique.push(d);
@@ -3699,6 +3713,48 @@
       }
     }
 
+    let isVaultScanning = false;
+    async function triggerVaultScan() {
+      if (isVaultScanning) return;
+      isVaultScanning = true;
+      const icon = document.getElementById("sidebarScanVaultIcon");
+      const label = document.getElementById("sidebarScanVaultLabel");
+      const modalBtn = document.getElementById("btnScanVaultNow");
+      const modalMsg = document.getElementById("scanVaultModalStatus");
+
+      if (icon) icon.style.animation = "spin 1s linear infinite";
+      if (label) label.innerText = "Scanning...";
+      if (modalBtn) { modalBtn.disabled = true; modalBtn.innerText = "Scanning..."; }
+      if (modalMsg) {
+        modalMsg.style.display = "block";
+        modalMsg.innerText = "Scanning documents vault & synchronizing with WeKnora...";
+        modalMsg.style.color = "#475569";
+      }
+
+      try {
+        const res = await fetch("/api/paperless-ngx/scan", { method: "POST" });
+        const data = await res.json();
+        await loadMasterData();
+        const msg = (data.new_imported && data.new_imported > 0)
+          ? `Discovered & imported ${data.new_imported} new document(s) (OCR & WeKnora synced)!`
+          : (data.message || "All documents in vault are up to date.");
+        if (modalMsg) {
+          modalMsg.innerText = msg;
+          modalMsg.style.color = (data.new_imported && data.new_imported > 0) ? "#059669" : "#475569";
+        }
+      } catch (err) {
+        if (modalMsg) {
+          modalMsg.innerText = "Scan error: " + err;
+          modalMsg.style.color = "#ef4444";
+        }
+      } finally {
+        if (icon) icon.style.animation = "";
+        if (label) label.innerText = "Auto-Scan Vault";
+        if (modalBtn) { modalBtn.disabled = false; modalBtn.innerText = "Scan Vault Now"; }
+        isVaultScanning = false;
+      }
+    }
+
     // Status Modal (OCR & Vault Status)
     function showSettingsModal() {
       const modal = document.getElementById("statusModal");
@@ -3715,6 +3771,15 @@
             <div><strong>Total Documents:</strong> <span>${masterDocuments.length} files (${statsDataCache ? formatBytes(statsDataCache.total_size_bytes) : '0 B'})</span></div>
             <div><strong>Total Pages Indexed:</strong> <span>${statsDataCache ? statsDataCache.total_pages : 0} pages</span></div>
             <div><strong>OCR Completed:</strong> <span>${statsDataCache ? statsDataCache.ocr_completed_count : 0} documents</span></div>
+          </div>
+
+          <div style="background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div><strong>Vault Auto-Scan:</strong> <span style="color: #059669; font-weight: 600;">Active (Background Watcher)</span></div>
+              <button onclick="triggerVaultScan()" id="btnScanVaultNow" style="padding: 5px 12px; background: #059669; color: white; border: none; border-radius: 5px; font-weight: 600; font-size: 12px; cursor: pointer; transition: background 0.15s ease;">Scan Vault Now</button>
+            </div>
+            <div style="font-size: 11.5px; color: #64748b;">Automatically tracks files pasted into <code style="font-family: monospace; color: #334155;">OneEAD_Archive\\documents</code>, extracts OCR text, and syncs to WeKnora.</div>
+            <div id="scanVaultModalStatus" style="display: none; font-size: 12px; font-weight: 600; margin-top: 4px;"></div>
           </div>
 
           <div style="background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
@@ -3975,6 +4040,35 @@
         document.querySelectorAll(".pngx-dropdown-menu").forEach(d => d.classList.remove("show"));
       }
     });
+
+    // Auto-refresh when user switches back to browser from Windows Explorer
+    window.addEventListener("focus", () => {
+      loadMasterData();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        loadMasterData();
+      }
+    });
+
+    // Lightweight live sync polling (every 6 seconds):
+    // Checks if vault documents or OCR stats changed on disk, and seamlessly reloads the view.
+    setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch("/api/paperless-ngx/stats");
+        if (!res.ok) return;
+        const stats = await res.json();
+        if (
+          !statsDataCache ||
+          stats.document_count !== masterDocuments.length ||
+          stats.ocr_completed_count !== (statsDataCache.ocr_completed_count || 0)
+        ) {
+          await loadMasterData();
+        }
+      } catch {}
+    }, 6000);
 
     // Initialize on page load
     window.addEventListener("DOMContentLoaded", () => {
