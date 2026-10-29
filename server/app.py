@@ -40,29 +40,15 @@ def create_app() -> FastAPI:
     modules = discover_modules()
 
     # Session authentication barrier: verifies caller possession of the local session token
-    # or SameSite=Strict cookie to prevent cross-site/drive-by localhost attacks.
+    # or SameSite=Lax cookie to prevent cross-site/drive-by localhost attacks.
     @app.middleware("http")
     async def _session_auth_middleware(request: Request, call_next):
         # 1. First-time authentication via query parameter (?auth=<token>)
         auth_param = request.query_params.get(AUTH_PARAM_NAME)
+        has_valid_auth_param = False
         if auth_param is not None:
             if verify_portal_token(auth_param):
-                remaining_params = [
-                    f"{k}={v}" for k, v in request.query_params.items() if k != AUTH_PARAM_NAME
-                ]
-                clean_path = request.url.path
-                if remaining_params:
-                    clean_path += "?" + "&".join(remaining_params)
-                redirect_res = RedirectResponse(url=clean_path, status_code=303)
-                redirect_res.set_cookie(
-                    key=SESSION_COOKIE_NAME,
-                    value=auth_param.strip(),
-                    max_age=31536000,  # 1 year session persistence on local machine
-                    httponly=True,
-                    samesite="strict",
-                    path="/",
-                )
-                return redirect_res
+                has_valid_auth_param = True
             else:
                 return HTMLResponse(
                     render_lock_screen_html(error_message="Invalid session authentication token."),
@@ -75,10 +61,14 @@ def create_app() -> FastAPI:
         if path in ("/favicon.ico", "/favicon.svg") or path.startswith("/shared/lock/"):
             return await call_next(request)
 
-        # 3. Verify session token from cookie, header, or query param
+        # 3. Verify session token from query param, cookie, or header
         cookie_tok = request.cookies.get(SESSION_COOKIE_NAME)
         header_tok = request.headers.get(AUTH_HEADER_NAME)
-        is_authenticated = verify_portal_token(cookie_tok) or verify_portal_token(header_tok)
+        is_authenticated = (
+            has_valid_auth_param
+            or verify_portal_token(cookie_tok)
+            or verify_portal_token(header_tok)
+        )
 
         if not is_authenticated:
             if path.startswith("/api/"):
@@ -89,9 +79,23 @@ def create_app() -> FastAPI:
                     },
                     status_code=401,
                 )
-            return HTMLResponse(render_lock_screen_html(), status_code=401)
+            # Render lock screen with 200 OK for browser HTML so startup doesn't trigger console 401 warnings
+            return HTMLResponse(render_lock_screen_html(), status_code=200)
 
-        return await call_next(request)
+        response = await call_next(request)
+
+        # Attach persistent session cookie when authenticating via ?auth=
+        if has_valid_auth_param and auth_param:
+            response.set_cookie(
+                key=SESSION_COOKIE_NAME,
+                value=auth_param.strip(),
+                max_age=31536000,  # 1 year session persistence on local machine
+                httponly=True,
+                samesite="lax",
+                path="/",
+            )
+
+        return response
 
     # Serve HTML/JS/API with strict no-cache, but allow client-side caching of thumbnails
     # and static media assets so re-rendering cards never re-downloads images.

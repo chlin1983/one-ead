@@ -42,6 +42,16 @@ let draggedModuleId = null;
 let isDraggingActive = false;
 
 async function init() {
+  // If loaded with ?auth=..., clean the URL query parameter so the address bar stays clean
+  if (window.location.search && window.location.search.includes("auth=")) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      const cleanPath = url.pathname + (url.search ? url.search : "") + (url.hash ? url.hash : "");
+      window.history.replaceState(null, document.title, cleanPath);
+    } catch (_) {}
+  }
+
   applyStoredTheme();
   wireChrome();
   try {

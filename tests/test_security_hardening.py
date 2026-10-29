@@ -477,9 +477,9 @@ def test_unauthenticated_requests_blocked(unauthenticated_client):
     res_post = unauthenticated_client.post("/api/modules/order", json={"order": []})
     assert res_post.status_code == 401
 
-    # Unauthenticated browser visits to root must return the lock screen (401)
+    # Unauthenticated browser visits to root must return the lock screen (200 OK)
     res_root = unauthenticated_client.get("/")
-    assert res_root.status_code == 401
+    assert res_root.status_code == 200
     assert "One EAD Session Locked" in res_root.text
 
     # Favicon and public assets must remain accessible
@@ -491,14 +491,13 @@ def test_unauthenticated_requests_blocked(unauthenticated_client):
 def test_auth_query_parameter_handshake(unauthenticated_client):
     token = get_portal_token()
 
-    # Valid token via ?auth=<token> initiates handshake, sets HttpOnly SameSite=Strict cookie,
-    # and redirects to clean path
-    res = unauthenticated_client.get(f"/?auth={token}", follow_redirects=False)
-    assert res.status_code == 303
-    assert res.headers.get("location") == "/"
+    # Valid token via ?auth=<token> succeeds directly (200 OK), sets HttpOnly SameSite=Lax cookie,
+    # avoiding unnecessary 303 redirect roundtrips and race conditions
+    res = unauthenticated_client.get(f"/?auth={token}")
+    assert res.status_code == 200
     cookie_header = res.headers.get("set-cookie", "")
     assert SESSION_COOKIE_NAME in cookie_header
-    assert "samesite=strict" in cookie_header.lower()
+    assert "samesite=lax" in cookie_header.lower()
     assert "httponly" in cookie_header.lower()
 
     # Invalid token must be rejected with 401 and lock screen
