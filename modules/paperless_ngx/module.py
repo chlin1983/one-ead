@@ -120,7 +120,8 @@ def download_document(doc_id: str):
         raise HTTPException(404, "Document not found")
     file_path = manager.get_documents_dir() / doc["filename"]
     if not file_path.is_file():
-        raise HTTPException(404, "File missing from vault storage")
+        manager.delete_document(doc_id)
+        raise HTTPException(404, f"File '{doc['original_name']}' was removed from external vault. Database record cleaned.")
     return FileResponse(
         path=str(file_path),
         filename=doc["original_name"],
@@ -135,7 +136,8 @@ def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None)
         raise HTTPException(404, "Document not found")
     file_path = manager.get_documents_dir() / doc["filename"]
     if not file_path.is_file():
-        raise HTTPException(404, "File missing from vault storage")
+        manager.delete_document(doc_id)
+        raise HTTPException(404, f"File '{doc['original_name']}' was removed from external vault. Database record cleaned.")
 
     # Pipeline A: Get or generate high-fidelity PDF preview for right-panel inline viewing
     preview_path = manager.get_or_create_preview_pdf(doc_id)
@@ -264,6 +266,12 @@ def sync_to_weknora(doc_id: str) -> dict:
         raise HTTPException(500, f"Failed to sync to WeKnora: {exc}")
 
 
+@router.post("/scan")
+def scan_vault(auto_ocr: bool = True, lang: str = "eng") -> dict:
+    """Manually triggers an immediate scan of ~/Documents/OneEAD_Archive/documents."""
+    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang)
+
+
 MODULE = PortalModule(
     id="paperless-ngx",
     title="Paperless-ngx",
@@ -275,3 +283,11 @@ MODULE = PortalModule(
     web_dir="web",
     router=router,
 )
+
+# Automatically start background vault watcher on module load
+try:
+    manager.start_vault_watcher(interval_sec=20)
+except Exception as _watcher_err:
+    import logging
+    logging.getLogger("paperless_ngx").warning("Failed to start vault watcher: %s", _watcher_err)
+

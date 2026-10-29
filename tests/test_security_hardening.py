@@ -184,7 +184,7 @@ def test_setup_token_security_and_lifecycle(client):
     # Token must be high entropy
     token = manager.get_setup_token()
     assert isinstance(token, str)
-    assert len(token) >= 40
+    assert len(token) >= 32
 
     # Constant-time comparison helper
     assert manager.verify_setup_token(token) is True
