@@ -15,7 +15,7 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
-from fastapi import Body, FastAPI, Request, Response
+from fastapi import Body, FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -24,6 +24,10 @@ from server.security import (
     AUTH_HEADER_NAME,
     AUTH_PARAM_NAME,
     SESSION_COOKIE_NAME,
+    TICKET_PARAM_NAME,
+    consume_login_ticket,
+    get_portal_token,
+    install_credential_redacting_logger,
     render_lock_screen_html,
     verify_portal_token,
 )
@@ -36,14 +40,105 @@ SHARED_DIR = Path(__file__).resolve().parent.parent / "shared"
 
 
 def create_app() -> FastAPI:
+    # Ensure all server and uvicorn loggers redact auth tokens/tickets
+    install_credential_redacting_logger()
+
     app = FastAPI(title="One EAD", version="0.1.0")
     modules = discover_modules()
 
-    # Session authentication barrier: verifies caller possession of the local session token
-    # or SameSite=Lax cookie to prevent cross-site/drive-by localhost attacks.
+    # Dedicated single-use ticket verification endpoint.
+    # Exchanging the ticket immediately sets the persistent session cookie and
+    # performs a 303 redirect to /, ensuring the URL in browser history and address bar is clean.
+    @app.get("/auth/verify")
+    async def auth_verify_ticket(request: Request):
+        ticket = request.query_params.get(TICKET_PARAM_NAME) or request.query_params.get("ticket")
+        if not ticket or not consume_login_ticket(ticket):
+            return HTMLResponse(
+                render_lock_screen_html(
+                    error_message="Invalid or expired login ticket. Please re-launch from start.bat or enter your session token."
+                ),
+                status_code=401,
+                headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
+            )
+
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=get_portal_token(),
+            max_age=31536000,  # 1 year session persistence on local machine
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return response
+
+    # Secure POST login endpoint for manual unlock.
+    # Accepts token in the request body (never in the URL) and redirects with session cookie.
+    @app.post("/auth/login")
+    async def auth_post_login(request: Request):
+        form = await request.form()
+        candidate = form.get("token") or form.get("auth") or ""
+        if not isinstance(candidate, str) or not verify_portal_token(candidate):
+            return HTMLResponse(
+                render_lock_screen_html(error_message="Invalid session authentication token."),
+                status_code=401,
+                headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
+            )
+
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=get_portal_token(),
+            max_age=31536000,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return response
+
+    # Session authentication barrier: verifies caller possession of the local session token,
+    # valid single-use ticket, or SameSite=Lax cookie to prevent cross-site/drive-by localhost attacks.
     @app.middleware("http")
     async def _session_auth_middleware(request: Request, call_next):
-        # 1. First-time authentication via query parameter (?auth=<token>)
+        path = request.url.path
+
+        # 1. Public endpoints and static assets required before or during authentication
+        if (
+            path in ("/favicon.ico", "/favicon.svg", "/auth/verify", "/auth/login")
+            or path.startswith("/shared/lock/")
+        ):
+            response = await call_next(request)
+            response.headers["Referrer-Policy"] = "no-referrer"
+            return response
+
+        # 2. Check for single-use ticket parameter on root /?ticket=<ticket>
+        ticket_param = request.query_params.get(TICKET_PARAM_NAME)
+        if ticket_param is not None:
+            if consume_login_ticket(ticket_param):
+                response = RedirectResponse(url="/", status_code=303)
+                response.set_cookie(
+                    key=SESSION_COOKIE_NAME,
+                    value=get_portal_token(),
+                    max_age=31536000,
+                    httponly=True,
+                    samesite="lax",
+                    path="/",
+                )
+                response.headers["Referrer-Policy"] = "no-referrer"
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+                return response
+            else:
+                return HTMLResponse(
+                    render_lock_screen_html(error_message="Invalid or expired login ticket."),
+                    status_code=401,
+                    headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
+                )
+
+        # 3. First-time authentication via query parameter (?auth=<token>) - maintained for backward compatibility
         auth_param = request.query_params.get(AUTH_PARAM_NAME)
         has_valid_auth_param = False
         if auth_param is not None:
@@ -53,15 +148,10 @@ def create_app() -> FastAPI:
                 return HTMLResponse(
                     render_lock_screen_html(error_message="Invalid session authentication token."),
                     status_code=401,
+                    headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
                 )
 
-        path = request.url.path
-
-        # 2. Public browser assets required before or during authentication
-        if path in ("/favicon.ico", "/favicon.svg") or path.startswith("/shared/lock/"):
-            return await call_next(request)
-
-        # 3. Verify session token from query param, cookie, or header
+        # 4. Verify session token from cookie, header, or query param
         cookie_tok = request.cookies.get(SESSION_COOKIE_NAME)
         header_tok = request.headers.get(AUTH_HEADER_NAME)
         is_authenticated = (
@@ -78,9 +168,14 @@ def create_app() -> FastAPI:
                         "message": "Unauthorized: Valid One EAD session authentication required.",
                     },
                     status_code=401,
+                    headers={"Referrer-Policy": "no-referrer"},
                 )
             # Render lock screen with 200 OK for browser HTML so startup doesn't trigger console 401 warnings
-            return HTMLResponse(render_lock_screen_html(), status_code=200)
+            return HTMLResponse(
+                render_lock_screen_html(),
+                status_code=200,
+                headers={"Referrer-Policy": "no-referrer"},
+            )
 
         response = await call_next(request)
 
@@ -94,6 +189,11 @@ def create_app() -> FastAPI:
                 samesite="lax",
                 path="/",
             )
+
+        # Apply strict Referrer-Policy and security headers
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
 
         return response
 
@@ -164,7 +264,6 @@ def create_app() -> FastAPI:
                     StaticFiles(directory=str(web_path), html=True),
                     name="module-mems-mic-explorer-alias",
                 )
-
 
     # Shared assets (vendored libraries, common styles) available to all modules.
     app.mount("/shared", StaticFiles(directory=str(SHARED_DIR)), name="shared")

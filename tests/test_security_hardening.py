@@ -33,7 +33,12 @@ from server.security import (
     AUTH_HEADER_NAME,
     AUTH_PARAM_NAME,
     SESSION_COOKIE_NAME,
+    TICKET_PARAM_NAME,
+    CredentialRedactingFilter,
+    create_login_ticket,
+    consume_login_ticket,
     get_portal_token,
+    redact_sensitive_url,
     verify_portal_token,
 )
 from modules.weknora import manager
@@ -530,4 +535,104 @@ def test_portal_token_entropy_and_validation():
     assert verify_portal_token("invalid-candidate") is False
     assert verify_portal_token("") is False
     assert verify_portal_token(None) is False
+
+
+def test_one_time_ticket_exchange(unauthenticated_client):
+    """Verifies single-use ticket exchange at /auth/verify?ticket=... sets cookie and redirects."""
+    ticket = create_login_ticket()
+    assert isinstance(ticket, str)
+    assert len(ticket) >= 32
+
+    # First exchange succeeds: 303 redirect to /, sets HttpOnly SameSite=Lax cookie, no-referrer
+    res = unauthenticated_client.get(f"/auth/verify?ticket={ticket}", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/"
+    cookie_header = res.headers.get("set-cookie", "")
+    assert SESSION_COOKIE_NAME in cookie_header
+    assert "httponly" in cookie_header.lower()
+    assert "samesite=lax" in cookie_header.lower()
+    assert res.headers.get("referrer-policy") == "no-referrer"
+    assert "no-store" in res.headers.get("cache-control", "").lower()
+
+    # Re-using the same ticket must be rejected immediately (strictly single-use)
+    res_reuse = unauthenticated_client.get(f"/auth/verify?ticket={ticket}", follow_redirects=False)
+    assert res_reuse.status_code == 401
+    assert "Invalid or expired login ticket" in res_reuse.text
+
+    # Invalid / unknown ticket must be rejected
+    res_fake = unauthenticated_client.get("/auth/verify?ticket=fake-ticket-12345", follow_redirects=False)
+    assert res_fake.status_code == 401
+
+
+def test_one_time_ticket_root_exchange(unauthenticated_client):
+    """Verifies single-use ticket exchange on root /?ticket=... sets cookie and redirects."""
+    ticket = create_login_ticket()
+    res = unauthenticated_client.get(f"/?ticket={ticket}", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/"
+    assert SESSION_COOKIE_NAME in res.headers.get("set-cookie", "")
+
+    # Re-using fails
+    res_reuse = unauthenticated_client.get(f"/?ticket={ticket}", follow_redirects=False)
+    assert res_reuse.status_code == 401
+
+
+def test_post_based_login_authentication(unauthenticated_client):
+    """Verifies form-based POST login sets cookie without exposing token in URL."""
+    token = get_portal_token()
+
+    # Valid POST login redirects to / with cookie
+    res = unauthenticated_client.post("/auth/login", data={"token": token}, follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/"
+    assert SESSION_COOKIE_NAME in res.headers.get("set-cookie", "")
+    assert res.headers.get("referrer-policy") == "no-referrer"
+
+    # Invalid POST token is rejected
+    res_bad = unauthenticated_client.post("/auth/login", data={"token": "wrong-token"}, follow_redirects=False)
+    assert res_bad.status_code == 401
+    assert "Invalid session authentication token" in res_bad.text
+
+
+def test_strict_referrer_policy_and_security_headers(client, unauthenticated_client):
+    """Verifies Referrer-Policy: no-referrer and security headers across endpoints."""
+    # Authenticated API
+    res_api = client.get("/api/modules")
+    assert res_api.headers.get("referrer-policy") == "no-referrer"
+    assert res_api.headers.get("x-content-type-options") == "nosniff"
+
+    # Unauthenticated lock screen
+    res_lock = unauthenticated_client.get("/")
+    assert res_lock.headers.get("referrer-policy") == "no-referrer"
+
+
+def test_credential_redaction_logging():
+    """Verifies credentials and tickets are redacted from URL strings and logging records."""
+    raw_auth_url = "http://127.0.0.1:8100/?auth=secret_token_12345"
+    redacted_auth = redact_sensitive_url(raw_auth_url)
+    assert "secret_token_12345" not in redacted_auth
+    assert "auth=[REDACTED]" in redacted_auth
+
+    raw_ticket_url = "http://127.0.0.1:8100/auth/verify?ticket=single_use_ticket_abc&foo=bar"
+    redacted_ticket = redact_sensitive_url(raw_ticket_url)
+    assert "single_use_ticket_abc" not in redacted_ticket
+    assert "ticket=[REDACTED]" in redacted_ticket
+    assert "foo=bar" in redacted_ticket
+
+    # Test CredentialRedactingFilter
+    import logging
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="GET /?auth=super_secret HTTP/1.1",
+        args=(),
+        exc_info=None,
+    )
+    flt = CredentialRedactingFilter()
+    flt.filter(record)
+    assert "super_secret" not in record.msg
+    assert "auth=[REDACTED]" in record.msg
+
 
