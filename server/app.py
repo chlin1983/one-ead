@@ -39,6 +39,9 @@ SHELL_DIR = Path(__file__).resolve().parent.parent / "shell"
 SHARED_DIR = Path(__file__).resolve().parent.parent / "shared"
 
 
+from server.security import is_same_origin_request  # noqa: E402
+
+
 def create_app() -> FastAPI:
     # Ensure all server and uvicorn loggers redact auth tokens/tickets
     install_credential_redacting_logger()
@@ -105,6 +108,14 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def _session_auth_middleware(request: Request, call_next):
         path = request.url.path
+
+        # 0. CSRF defence: reject untrusted cross-origin state-changing requests
+        if not is_same_origin_request(request.method, request.headers):
+            return JSONResponse(
+                {"status": "error", "message": "Forbidden: cross-origin request blocked."},
+                status_code=403,
+                headers={"Referrer-Policy": "no-referrer"},
+            )
 
         # 1. Public endpoints and static assets required before or during authentication
         if (

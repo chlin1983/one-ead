@@ -333,3 +333,31 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
   </div>
 </body>
 </html>"""
+
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def is_same_origin_request(method: str, headers) -> bool:
+    """CSRF check for state-changing requests using Fetch Metadata, Origin and Referer.
+
+    Browsers always send Sec-Fetch-Site/Origin on cross-site writes, so a page served
+    from another port or host is rejected. Non-browser clients that send none of these
+    headers (curl, tests, scripts) are allowed; they still need the session token.
+    """
+    if (method or "").upper() in SAFE_METHODS:
+        return True
+    from urllib.parse import urlsplit
+
+    site = (headers.get("sec-fetch-site") or "").lower()
+    if site and site not in ("same-origin", "none"):
+        return False
+    host = (headers.get("host") or "").lower()
+    for name in ("origin", "referer"):
+        value = headers.get(name)
+        if value:
+            if value == "null":
+                return False
+            if urlsplit(value).netloc.lower() != host:
+                return False
+    return True
