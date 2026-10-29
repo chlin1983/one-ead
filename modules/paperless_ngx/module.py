@@ -137,22 +137,29 @@ def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None)
     if not file_path.is_file():
         raise HTTPException(404, "File missing from vault storage")
 
+    # Pipeline A: Get or generate high-fidelity PDF preview for right-panel inline viewing
+    preview_path = manager.get_or_create_preview_pdf(doc_id)
+    target_path = preview_path if (preview_path and preview_path.is_file()) else file_path
+
+    stem = Path(doc["original_name"]).stem
+    pdf_filename = f"{stem}.pdf"
+
     clean_q = (q or "").strip()
-    if clean_q and file_path.suffix.lower() == ".pdf":
+    if clean_q and target_path.suffix.lower() == ".pdf":
         cache_key = f"{doc_id}:{clean_q.lower()}"
         if cache_key in _highlight_cache:
             return Response(
                 content=_highlight_cache[cache_key],
                 media_type="application/pdf",
                 headers={
-                    "Content-Disposition": f"inline; filename=\"{doc['original_name']}\"",
+                    "Content-Disposition": f"inline; filename=\"{pdf_filename}\"",
                     "Cache-Control": "public, max-age=3600",
                 },
             )
 
         try:
             import pymupdf
-            pdf_doc = pymupdf.open(str(file_path))
+            pdf_doc = pymupdf.open(str(target_path))
             has_matches = False
             for page in pdf_doc:
                 rects = page.search_for(clean_q)
@@ -173,7 +180,7 @@ def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None)
                     content=pdf_bytes,
                     media_type="application/pdf",
                     headers={
-                        "Content-Disposition": f"inline; filename=\"{doc['original_name']}\"",
+                        "Content-Disposition": f"inline; filename=\"{pdf_filename}\"",
                         "Cache-Control": "public, max-age=3600",
                     },
                 )
@@ -182,9 +189,16 @@ def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None)
             import logging
             logging.getLogger("paperless_ngx").warning("Failed highlighting PDF on view: %s", exc)
 
+    if target_path.suffix.lower() == ".pdf":
+        return FileResponse(
+            path=str(target_path),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=\"{pdf_filename}\""},
+        )
+
     return FileResponse(
-        path=str(file_path),
-        media_type=doc.get("mime_type", "application/pdf"),
+        path=str(target_path),
+        media_type=doc.get("mime_type", "application/octet-stream"),
         headers={"Content-Disposition": f"inline; filename=\"{doc['original_name']}\""},
     )
 

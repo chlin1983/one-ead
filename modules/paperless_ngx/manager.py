@@ -51,17 +51,23 @@ def get_thumbnails_dir() -> Path:
     return get_vault_path() / "thumbnails"
 
 
+def get_previews_dir() -> Path:
+    return get_vault_path() / "previews"
+
+
 def init_vault() -> None:
     """Ensures vault folders and SQLite FTS5 tables exist."""
     vault = get_vault_path()
     docs_dir = get_documents_dir()
     ocr_dir = get_ocr_cache_dir()
     thumbs_dir = get_thumbnails_dir()
+    previews_dir = get_previews_dir()
 
     vault.mkdir(parents=True, exist_ok=True)
     docs_dir.mkdir(parents=True, exist_ok=True)
     ocr_dir.mkdir(parents=True, exist_ok=True)
     thumbs_dir.mkdir(parents=True, exist_ok=True)
+    previews_dir.mkdir(parents=True, exist_ok=True)
 
     db_path = get_db_path()
     with sqlite3.connect(str(db_path)) as con:
@@ -453,6 +459,34 @@ def open_vault_in_explorer(subfolder: str = "", doc_id: str = "") -> Dict[str, A
         return {"ok": False, "error": str(exc)}
 
 
+def get_or_create_preview_pdf(doc_id: str) -> Optional[Path]:
+    """Retrieves or generates a high-fidelity PDF preview for any document format (PPTX, DOCX, XLSX, PNG, etc.)."""
+    init_vault()
+    doc = get_document(doc_id)
+    if not doc:
+        return None
+
+    doc_path = get_documents_dir() / doc["filename"]
+    if not doc_path.is_file():
+        return None
+
+    if doc_path.suffix.lower() == ".pdf":
+        return doc_path
+
+    preview_path = get_previews_dir() / f"{doc_id}.pdf"
+    if preview_path.is_file() and preview_path.stat().st_size > 0:
+        return preview_path
+
+    try:
+        ok = ocr_engine.convert_to_pdf(doc_path, preview_path)
+        if ok and preview_path.is_file() and preview_path.stat().st_size > 0:
+            return preview_path
+    except Exception as exc:
+        logger.warning("Preview PDF generation failed for %s (%s): %s", doc_id, doc["filename"], exc)
+
+    return None
+
+
 def save_uploaded_document(
     filename: str,
     file_bytes: bytes,
@@ -484,6 +518,25 @@ def save_uploaded_document(
     with open(dest_path, "wb") as f:
         f.write(file_bytes)
 
+    ext = Path(filename).suffix.lower()
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls": "application/vnd.ms-excel",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".bmp": "image/bmp",
+        ".webp": "image/webp",
+        ".txt": "text/plain",
+        ".csv": "text/csv",
+    }
+    detected_mime = mime_map.get(ext, "application/octet-stream")
+
     with get_db_connection() as con:
         cur = con.cursor()
         cur.execute(
@@ -499,7 +552,7 @@ def save_uploaded_document(
                 filename,
                 file_size,
                 file_hash,
-                "application/pdf" if filename.lower().endswith(".pdf") else "application/octet-stream",
+                detected_mime,
                 clean_cat,
                 now_str,
                 now_str,
@@ -514,14 +567,14 @@ def save_uploaded_document(
         )
         con.commit()
 
-    if auto_ocr and filename.lower().endswith(".pdf"):
+    if auto_ocr:
         process_document_ocr(doc_id, lang=lang)
 
     return get_document(doc_id)
 
 
 def process_document_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool = True) -> Dict[str, Any]:
-    """Runs OCR and text extraction for a document in the vault, then auto-syncs to WeKnora."""
+    """Runs dual-pipeline OCR and text extraction for any document type in the vault."""
     doc = get_document(doc_id)
     if not doc:
         raise ValueError(f"Document {doc_id} not found.")
@@ -534,13 +587,21 @@ def process_document_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool
     cache_path = ocr_dir / f"{doc_id}.md"
 
     try:
-        markdown_text, page_count, ocr_pages = ocr_engine.extract_and_ocr_pdf(
-            pdf_path=doc_path,
+        # Pipeline A: Generate preview PDF for non-PDFs (PPTX, DOCX, XLSX, Images)
+        preview_pdf = get_or_create_preview_pdf(doc_id)
+
+        # Pipeline B: Multi-format text extraction & OCR
+        markdown_text, page_count, ocr_pages = ocr_engine.extract_and_ocr_document(
+            doc_path=doc_path,
+            preview_pdf_path=preview_pdf,
             lang=lang,
         )
 
         with open(cache_path, "w", encoding="utf-8") as f:
             f.write(markdown_text)
+
+        # Pre-warm thumbnail
+        get_or_create_thumbnail(doc_id)
 
         status = "completed" if (ocr_pages > 0 or page_count > 0) else "digital_only"
         now_str = datetime.now().isoformat(timespec="seconds")
@@ -626,20 +687,18 @@ def find_all_query_pages(doc_id: str, query: str) -> List[int]:
     q_lower = clean_q.lower()
     matching_pages = set()
 
-    # 1. Check PDF directly via PyMuPDF (fitz)
+    # 1. Check PDF directly via PyMuPDF (fitz) on original or converted preview
     try:
-        doc_info = get_document(doc_id)
-        if doc_info and doc_info.get("filename"):
-            pdf_path = get_documents_dir() / doc_info["filename"]
-            if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
-                import pymupdf
-                pdf_doc = pymupdf.open(str(pdf_path))
-                for page_idx in range(len(pdf_doc)):
-                    page = pdf_doc[page_idx]
-                    rects = page.search_for(clean_q)
-                    if rects:
-                        matching_pages.add(page_idx + 1)
-                pdf_doc.close()
+        preview_pdf = get_or_create_preview_pdf(doc_id)
+        if preview_pdf and preview_pdf.is_file():
+            import pymupdf
+            pdf_doc = pymupdf.open(str(preview_pdf))
+            for page_idx in range(len(pdf_doc)):
+                page = pdf_doc[page_idx]
+                rects = page.search_for(clean_q)
+                if rects:
+                    matching_pages.add(page_idx + 1)
+            pdf_doc.close()
     except Exception as exc:
         logger.debug("Failed searching PDF for query pages: %s", exc)
 
@@ -761,7 +820,7 @@ def get_document_markdown(doc_id: str) -> str:
 
 
 def get_or_create_thumbnail(doc_id: str, dpi: int = 75) -> Optional[Path]:
-    """Renders or retrieves cached first-page PNG thumbnail for a document."""
+    """Renders or retrieves cached first-page PNG thumbnail for any document type."""
     init_vault()
     thumb_path = get_thumbnails_dir() / f"{doc_id}.png"
     if thumb_path.is_file():
@@ -775,14 +834,31 @@ def get_or_create_thumbnail(doc_id: str, dpi: int = 75) -> Optional[Path]:
     if not doc_path.is_file():
         return None
 
-    if doc_path.suffix.lower() == ".pdf":
+    ext = doc_path.suffix.lower()
+
+    # Direct image thumbnail
+    if ext in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif"):
+        try:
+            from PIL import Image
+            with Image.open(str(doc_path)) as im:
+                im.thumbnail((320, 420))
+                im.convert("RGB").save(str(thumb_path), format="PNG")
+                return thumb_path
+        except Exception as exc:
+            logger.warning("Direct image thumbnail failed for %s: %s", doc_id, exc)
+
+    # PDF or Office documents (PPTX, DOCX, XLSX): render from preview PDF
+    preview_pdf = get_or_create_preview_pdf(doc_id)
+    if preview_pdf and preview_pdf.is_file():
         try:
             import pymupdf
-            pdf = pymupdf.open(str(doc_path))
+            pdf = pymupdf.open(str(preview_pdf))
             if len(pdf) > 0:
                 pix = pdf[0].get_pixmap(dpi=dpi)
                 pix.save(str(thumb_path))
+                pdf.close()
                 return thumb_path
+            pdf.close()
         except Exception as exc:
             logger.warning("Thumbnail generation failed for %s: %s", doc_id, exc)
     return None
@@ -805,7 +881,7 @@ def update_document_tags(doc_id: str, tags: str) -> Optional[Dict[str, Any]]:
 
 
 def delete_document(doc_id: str) -> bool:
-    """Deletes a document from the vault, including its original file and OCR cache."""
+    """Deletes a document from the vault, including original, preview, thumbnail, and OCR cache."""
     doc = get_document(doc_id)
     if not doc:
         return False
@@ -814,6 +890,20 @@ def delete_document(doc_id: str) -> bool:
     if doc_path.is_file():
         try:
             doc_path.unlink()
+        except Exception:
+            pass
+
+    preview_path = get_previews_dir() / f"{doc_id}.pdf"
+    if preview_path.is_file():
+        try:
+            preview_path.unlink()
+        except Exception:
+            pass
+
+    thumb_path = get_thumbnails_dir() / f"{doc_id}.png"
+    if thumb_path.is_file():
+        try:
+            thumb_path.unlink()
         except Exception:
             pass
 
