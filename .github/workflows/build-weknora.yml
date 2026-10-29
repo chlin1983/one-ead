@@ -18,6 +18,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout One EAD Repository
@@ -64,6 +66,24 @@ jobs:
           Compress-Archive -Path "$pkgDir\*" -DestinationPath "weknora-lite-windows-amd64.zip" -Force
         shell: powershell
 
+      - name: Generate SHA256SUMS.txt
+        run: |
+          $files = @("modules\weknora\WeKnora-lite.exe", "weknora-lite-windows-amd64.zip")
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
+            "$h  $(Split-Path $f -Leaf)"
+          }
+          $lines | Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+        shell: powershell
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            modules/weknora/WeKnora-lite.exe
+            weknora-lite-windows-amd64.zip
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -83,5 +103,6 @@ jobs:
           files: |
             modules/weknora/WeKnora-lite.exe
             weknora-lite-windows-amd64.zip
+            SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

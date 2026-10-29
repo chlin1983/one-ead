@@ -7,9 +7,12 @@ requiring Go, MinGW GCC, or Node.js compilers.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -19,7 +22,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 MODULE_DIR = Path(__file__).resolve().parent.parent
 BINARY_NAME = "WeKnora-lite.exe" if os.name == "nt" else "WeKnora-lite"
@@ -29,6 +32,80 @@ DEFAULT_REPO = "chlin1983/one-ead"
 # Direct release asset URLs (GitHub redirects /latest/download/<asset> to the actual release asset)
 DEFAULT_ASSET_ZIP = "weknora-lite-windows-amd64.zip"
 DEFAULT_ASSET_EXE = BINARY_NAME
+
+# --- Supply-chain integrity -------------------------------------------------
+# A prebuilt executable is only installed if its SHA-256 matches a digest pinned in
+# release_manifest.json (committed to git, i.e. reviewed) or supplied out-of-band via
+# WEKNORA_RELEASE_SHA256. There is no "latest" fallback and no unverified install.
+MANIFEST_PATH = MODULE_DIR / "release_manifest.json"
+ALLOWED_DOWNLOAD_HOSTS = frozenset({
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+})
+ALLOWED_REPOS = frozenset({DEFAULT_REPO})
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class IntegrityError(RuntimeError):
+    """Raised when a download is not from an approved source or fails verification."""
+
+
+def load_manifest() -> Dict[str, Any]:
+    try:
+        with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def validate_download_url(url: str, *, initial: bool = True) -> None:
+    """Allow only HTTPS URLs on approved hosts; the initial URL must be a release path."""
+    parsed = urllib.parse.urlsplit(url or "")
+    if parsed.scheme != "https":
+        raise IntegrityError(f"Refusing non-HTTPS download URL: {url}")
+    host = (parsed.hostname or "").lower()
+    if host not in ALLOWED_DOWNLOAD_HOSTS or parsed.port not in (None, 443) or parsed.username:
+        raise IntegrityError(f"Download host not approved: {host or url}")
+    if initial:
+        m = re.fullmatch(r"/([^/]+/[^/]+)/releases/download/[^/]+/[^/]+", parsed.path)
+        if host != "github.com" or not m or m.group(1) not in ALLOWED_REPOS:
+            raise IntegrityError(f"Download URL is not an approved release asset path: {url}")
+
+
+class _AllowlistRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_download_url(newurl, initial=False)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def expected_sha256(asset_name: str, tag: Optional[str]) -> str:
+    """Return the trusted digest for an asset, or raise IntegrityError (fail closed)."""
+    env = os.environ.get("WEKNORA_RELEASE_SHA256", "").strip().lower()
+    if env:
+        if not _SHA256_RE.match(env):
+            raise IntegrityError("WEKNORA_RELEASE_SHA256 is not a valid SHA-256 hex digest")
+        return env
+    manifest = load_manifest()
+    if tag and manifest.get("tag") and manifest["tag"] != tag:
+        raise IntegrityError(f"Tag {tag} does not match pinned release {manifest['tag']}")
+    digest = str((manifest.get("assets") or {}).get(asset_name, "")).strip().lower()
+    if not _SHA256_RE.match(digest):
+        raise IntegrityError(
+            f"No pinned SHA-256 for '{asset_name}' in {MANIFEST_PATH.name}. Refusing to install "
+            "an unverified binary. Add the digest from the release's SHA256SUMS.txt via a reviewed commit."
+        )
+    return digest
+
+
+def verify_sha256(path: Path, expected: str) -> None:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    if not hmac.compare_digest(h.hexdigest(), expected.lower()):
+        raise IntegrityError(f"SHA-256 mismatch: expected {expected}, got {h.hexdigest()}")
 
 
 class DownloadProgress:
@@ -56,22 +133,12 @@ class DownloadProgress:
 
 
 def get_candidate_urls(repo: str = DEFAULT_REPO, tag: Optional[str] = None) -> List[str]:
-    """Generates candidate download URLs in preferred order."""
-    custom_url = os.environ.get("WEKNORA_RELEASE_DOWNLOAD_URL", "").strip()
-    urls: List[str] = []
-    if custom_url:
-        urls.append(custom_url)
-
-    if tag:
-        base = f"https://github.com/{repo}/releases/download/{tag}"
-        urls.append(f"{base}/{DEFAULT_ASSET_ZIP}")
-        urls.append(f"{base}/{DEFAULT_ASSET_EXE}")
-    else:
-        latest_base = f"https://github.com/{repo}/releases/latest/download"
-        urls.append(f"{latest_base}/{DEFAULT_ASSET_ZIP}")
-        urls.append(f"{latest_base}/{DEFAULT_ASSET_EXE}")
-
-    return urls
+    """Candidate URLs for an exact pinned release (never "latest")."""
+    tag = tag or load_manifest().get("tag")
+    if not tag:
+        raise IntegrityError("No release tag pinned: set 'tag' in release_manifest.json or pass --tag")
+    base = f"https://github.com/{repo}/releases/download/{tag}"
+    return [f"{base}/{DEFAULT_ASSET_ZIP}", f"{base}/{DEFAULT_ASSET_EXE}"]
 
 
 def download_stream(
@@ -85,9 +152,11 @@ def download_stream(
         "User-Agent": "One-EAD-WeKnora-Downloader/1.0",
         "Accept": "*/*",
     }
+    validate_download_url(url)
     req = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(_AllowlistRedirect)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             total_size = int(resp.headers.get("Content-Length", 0))
             chunk_size = 128 * 1024  # 128 KB
             downloaded = 0
@@ -165,7 +234,10 @@ def download_weknora_binary(
             "skipped": True
         }
 
-    urls = [custom_url] if custom_url else get_candidate_urls(repo=repo, tag=tag)
+    try:
+        urls = [custom_url] if custom_url else get_candidate_urls(repo=repo, tag=tag)
+    except IntegrityError as exc:
+        return {"ok": False, "message": str(exc), "errors": [str(exc)]}
     progress = DownloadProgress(callback=progress_callback)
 
     errors: List[str] = []
@@ -180,7 +252,10 @@ def download_weknora_binary(
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / "download_payload.tmp"
+                asset_name = Path(urllib.parse.urlsplit(url).path).name
+                expected = expected_sha256(asset_name, tag)
                 download_stream(url, tmp_path, progress)
+                verify_sha256(tmp_path, expected)
 
                 # Check if downloaded file is zip or raw exe
                 is_zip = False
@@ -215,7 +290,8 @@ def download_weknora_binary(
                         "source": "github_release",
                         "release_url": url,
                         "edition": "lite",
-                        "downloaded": True
+                        "downloaded": True,
+                        "sha256_verified": True
                     }
                     with open(build_info_path, "w", encoding="utf-8") as f:
                         json.dump(info, f, indent=2)
