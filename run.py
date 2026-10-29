@@ -148,10 +148,11 @@ def main() -> None:
     except Exception as exc:
         print(f"[One EAD] Note: Could not auto-start WeKnora Lite: {exc}")
 
-    # Fetch local persistent portal authentication token
-    from server.security import get_portal_token
-    token = get_portal_token()
-    launch_url = f"http://{args.host}:{args.port}/?auth={token}"
+    # Create single-use exchange ticket so persistent token is NEVER exposed in URL or history
+    from server.security import create_login_ticket, install_credential_redacting_logger
+    install_credential_redacting_logger()
+    ticket = create_login_ticket()
+    launch_url = f"http://{args.host}:{args.port}/auth/verify?ticket={ticket}"
 
     print(f"One EAD -> {url}")
     if not args.no_browser:

@@ -2,12 +2,17 @@
 
 Provides local portal session authentication to protect local endpoints and data
 against drive-by cross-origin attacks (CSRF, DNS rebinding, and unauthorized LAN access).
+Implements a single-use ticket exchange to prevent token exposure in URLs and browser history.
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import secrets
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -17,9 +22,22 @@ TOKEN_FILE = DATA_DIR / ".portal_session_token"
 
 SESSION_COOKIE_NAME = "one_ead_session"
 AUTH_PARAM_NAME = "auth"
+TICKET_PARAM_NAME = "ticket"
 AUTH_HEADER_NAME = "X-OneEAD-Token"
 
 _CACHED_TOKEN: Optional[str] = None
+
+# Ephemeral single-use login tickets for secure browser launching
+# Maps ticket string -> expiration timestamp (epoch seconds)
+_TICKETS: dict[str, float] = {}
+_TICKETS_LOCK = threading.Lock()
+TICKET_TTL_SECONDS = 60.0  # 1-minute validity window for initial browser handshake
+
+# Pattern matching sensitive auth parameters in URLs and query strings
+SENSITIVE_PARAM_PATTERN = re.compile(
+    r'([?&](?:auth|ticket|token|code|key|secret)=)[^&\s"\']+',
+    re.IGNORECASE,
+)
 
 
 def get_portal_token() -> str:
@@ -48,7 +66,6 @@ def get_portal_token() -> str:
     new_token = secrets.token_urlsafe(32)
     try:
         TOKEN_FILE.write_text(new_token, encoding="utf-8")
-        # Try setting restrictive permissions on Unix/macOS if applicable
         if hasattr(os, "chmod"):
             try:
                 os.chmod(TOKEN_FILE, 0o600)
@@ -69,14 +86,90 @@ def verify_portal_token(candidate: Optional[str]) -> bool:
     return secrets.compare_digest(candidate.strip(), active)
 
 
+def _sign_ticket(nonce: str, expiry: str) -> str:
+    import hashlib
+    import hmac
+    msg = f"{nonce}.{expiry}".encode()
+    return hmac.new(get_portal_token().encode(), msg, hashlib.sha256).hexdigest()
+
+
+def create_login_ticket() -> str:
+    """Create a short-lived, single-use, HMAC-signed login ticket.
+
+    The reusable portal token is never placed in the URL. Being signed, the ticket
+    is valid in any server process (e.g. uvicorn reload workers); single-use is
+    enforced by the consuming process remembering used nonces.
+    """
+    nonce = secrets.token_urlsafe(16)
+    expiry = str(int(time.time() + TICKET_TTL_SECONDS))
+    return f"{nonce}.{expiry}.{_sign_ticket(nonce, expiry)}"
+
+
+def consume_login_ticket(ticket: Optional[str]) -> bool:
+    """Verify signature/expiry and consume a ticket. Replay is rejected."""
+    if not ticket or not isinstance(ticket, str):
+        return False
+    parts = ticket.strip().split(".")
+    if len(parts) != 3:
+        return False
+    nonce, expiry, sig = parts
+    if not secrets.compare_digest(sig, _sign_ticket(nonce, expiry)):
+        return False
+    try:
+        exp = float(expiry)
+    except ValueError:
+        return False
+    now = time.time()
+    with _TICKETS_LOCK:
+        for n in [n for n, e in _TICKETS.items() if e < now]:
+            _TICKETS.pop(n, None)
+        if now > exp or nonce in _TICKETS:
+            return False
+        _TICKETS[nonce] = exp
+    return True
+
+
+def redact_sensitive_url(url_or_query: str) -> str:
+    """Redacts credentials and one-time tickets from URLs or log strings."""
+    if not url_or_query:
+        return ""
+    return SENSITIVE_PARAM_PATTERN.sub(r'\1[REDACTED]', url_or_query)
+
+
+class CredentialRedactingFilter(logging.Filter):
+    """Logging filter that ensures URLs with auth tokens or tickets are never logged with credentials."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            new_args = []
+            for arg in record.args:
+                if isinstance(arg, str):
+                    new_args.append(redact_sensitive_url(arg))
+                else:
+                    new_args.append(arg)
+            record.args = tuple(new_args)
+        if isinstance(record.msg, str):
+            record.msg = redact_sensitive_url(record.msg)
+        return True
+
+
+def install_credential_redacting_logger() -> None:
+    """Installs credential redacting filters on uvicorn and root loggers."""
+    flt = CredentialRedactingFilter()
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error", ""):
+        log = logging.getLogger(name)
+        if not any(isinstance(f, CredentialRedactingFilter) for f in log.filters):
+            log.addFilter(flt)
+
+
 def render_lock_screen_html(error_message: Optional[str] = None) -> str:
-    """Renders a standalone, dark-themed session lock screen."""
+    """Renders a standalone, dark-themed session lock screen with a secure POST form."""
     err_html = f'<div class="lock-error">{error_message}</div>' if error_message else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>One EAD — Session Locked</title>
   <style>
     :root {{
@@ -166,7 +259,7 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
       display: flex;
       gap: 8px;
     }}
-    input[type="text"] {{
+    input[type="password"], input[type="text"] {{
       flex: 1;
       background: #0d1117;
       border: 1px solid var(--border);
@@ -178,7 +271,7 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
       transition: border-color 0.15s ease;
       font-family: monospace;
     }}
-    input[type="text"]:focus {{
+    input[type="password"]:focus, input[type="text"]:focus {{
       border-color: var(--accent);
     }}
     button {{
@@ -227,15 +320,15 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
     <h1>One EAD Session Locked</h1>
     <p>This workstation is protected by local security hardening to prevent unauthorized cross-origin access.</p>
     {err_html}
-    <form action="/" method="GET">
-      <label for="auth">Session Authentication Token</label>
+    <form action="/auth/login" method="POST">
+      <label for="token">Session Authentication Token</label>
       <div class="input-row">
-        <input type="text" id="auth" name="auth" placeholder="Paste your session token here..." required autofocus autocomplete="off" />
+        <input type="password" id="token" name="token" placeholder="Paste your session token here..." required autofocus autocomplete="off" />
         <button type="submit">Unlock</button>
       </div>
     </form>
     <div class="tip-box">
-      <strong>Zero-Friction Tip:</strong> Double-clicking <code>start.bat</code> will automatically authenticate your browser and open the portal. No typing required.
+      <strong>Zero-Friction Tip:</strong> Launching from <code>run.py</code> or <code>start.bat</code> uses a single-use exchange ticket to automatically authenticate your browser without exposing your session token in the URL.
     </div>
   </div>
 </body>
