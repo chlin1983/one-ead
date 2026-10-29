@@ -148,9 +148,14 @@ def main() -> None:
     except Exception as exc:
         print(f"[One EAD] Note: Could not auto-start WeKnora Lite: {exc}")
 
+    # Fetch local persistent portal authentication token
+    from server.security import get_portal_token
+    token = get_portal_token()
+    launch_url = f"http://{args.host}:{args.port}/?auth={token}"
+
     print(f"One EAD -> {url}")
     if not args.no_browser:
-        _open_browser(url)
+        _open_browser(launch_url)
 
     if args.reload:
         # Reload needs an import string so the worker subprocess can re-import.

@@ -15,11 +15,18 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
-from fastapi import Body, FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import Body, FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.registry import discover_modules, save_saved_order
+from server.security import (
+    AUTH_HEADER_NAME,
+    AUTH_PARAM_NAME,
+    SESSION_COOKIE_NAME,
+    render_lock_screen_html,
+    verify_portal_token,
+)
 
 mimetypes.add_type("application/wasm", ".wasm")
 mimetypes.add_type("text/javascript", ".js")
@@ -31,6 +38,60 @@ SHARED_DIR = Path(__file__).resolve().parent.parent / "shared"
 def create_app() -> FastAPI:
     app = FastAPI(title="One EAD", version="0.1.0")
     modules = discover_modules()
+
+    # Session authentication barrier: verifies caller possession of the local session token
+    # or SameSite=Strict cookie to prevent cross-site/drive-by localhost attacks.
+    @app.middleware("http")
+    async def _session_auth_middleware(request: Request, call_next):
+        # 1. First-time authentication via query parameter (?auth=<token>)
+        auth_param = request.query_params.get(AUTH_PARAM_NAME)
+        if auth_param is not None:
+            if verify_portal_token(auth_param):
+                remaining_params = [
+                    f"{k}={v}" for k, v in request.query_params.items() if k != AUTH_PARAM_NAME
+                ]
+                clean_path = request.url.path
+                if remaining_params:
+                    clean_path += "?" + "&".join(remaining_params)
+                redirect_res = RedirectResponse(url=clean_path, status_code=303)
+                redirect_res.set_cookie(
+                    key=SESSION_COOKIE_NAME,
+                    value=auth_param.strip(),
+                    max_age=31536000,  # 1 year session persistence on local machine
+                    httponly=True,
+                    samesite="strict",
+                    path="/",
+                )
+                return redirect_res
+            else:
+                return HTMLResponse(
+                    render_lock_screen_html(error_message="Invalid session authentication token."),
+                    status_code=401,
+                )
+
+        path = request.url.path
+
+        # 2. Public browser assets required before or during authentication
+        if path in ("/favicon.ico", "/favicon.svg") or path.startswith("/shared/lock/"):
+            return await call_next(request)
+
+        # 3. Verify session token from cookie, header, or query param
+        cookie_tok = request.cookies.get(SESSION_COOKIE_NAME)
+        header_tok = request.headers.get(AUTH_HEADER_NAME)
+        is_authenticated = verify_portal_token(cookie_tok) or verify_portal_token(header_tok)
+
+        if not is_authenticated:
+            if path.startswith("/api/"):
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Unauthorized: Valid One EAD session authentication required.",
+                    },
+                    status_code=401,
+                )
+            return HTMLResponse(render_lock_screen_html(), status_code=401)
+
+        return await call_next(request)
 
     # Serve HTML/JS/API with strict no-cache, but allow client-side caching of thumbnails
     # and static media assets so re-rendering cards never re-downloads images.

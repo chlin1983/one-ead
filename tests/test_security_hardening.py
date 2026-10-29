@@ -11,6 +11,7 @@ Verifies:
 8. Successful application of the 6 GB preset.
 9. Correct and mismatched upstream pins.
 10. CSP preservation after proxying.
+11. Global portal session token and authentication barrier.
 """
 
 from __future__ import annotations
@@ -28,12 +29,26 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
 from server.app import create_app
+from server.security import (
+    AUTH_HEADER_NAME,
+    AUTH_PARAM_NAME,
+    SESSION_COOKIE_NAME,
+    get_portal_token,
+    verify_portal_token,
+)
 from modules.weknora import manager
 from modules.weknora.module import is_valid_local_origin, _is_loopback_ip
 
 
 @pytest.fixture
 def client():
+    app = create_app()
+    token = get_portal_token()
+    return TestClient(app, base_url="http://127.0.0.1:8100", cookies={SESSION_COOKIE_NAME: token})
+
+
+@pytest.fixture
+def unauthenticated_client():
     app = create_app()
     return TestClient(app, base_url="http://127.0.0.1:8100")
 
@@ -446,3 +461,74 @@ async def test_csp_preservation_after_proxying(client):
 async def aiter(iterable):
     for item in iterable:
         yield item
+
+
+# ==============================================================================
+# 11. Global Portal Session Token and Authentication Barrier
+# ==============================================================================
+
+def test_unauthenticated_requests_blocked(unauthenticated_client):
+    # Unauthenticated API calls must be rejected with 401 Unauthorized
+    res_api = unauthenticated_client.get("/api/modules")
+    assert res_api.status_code == 401
+    assert "Unauthorized" in res_api.json().get("message", "")
+
+    # Unauthenticated state-modifying requests must be rejected with 401
+    res_post = unauthenticated_client.post("/api/modules/order", json={"order": []})
+    assert res_post.status_code == 401
+
+    # Unauthenticated browser visits to root must return the lock screen (401)
+    res_root = unauthenticated_client.get("/")
+    assert res_root.status_code == 401
+    assert "One EAD Session Locked" in res_root.text
+
+    # Favicon and public assets must remain accessible
+    res_favicon = unauthenticated_client.get("/favicon.ico")
+    # Even if 404 (file not present), it must NOT be blocked with 401
+    assert res_favicon.status_code != 401
+
+
+def test_auth_query_parameter_handshake(unauthenticated_client):
+    token = get_portal_token()
+
+    # Valid token via ?auth=<token> initiates handshake, sets HttpOnly SameSite=Strict cookie,
+    # and redirects to clean path
+    res = unauthenticated_client.get(f"/?auth={token}", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers.get("location") == "/"
+    cookie_header = res.headers.get("set-cookie", "")
+    assert SESSION_COOKIE_NAME in cookie_header
+    assert "samesite=strict" in cookie_header.lower()
+    assert "httponly" in cookie_header.lower()
+
+    # Invalid token must be rejected with 401 and lock screen
+    res_invalid = unauthenticated_client.get("/?auth=invalid-token-12345", follow_redirects=False)
+    assert res_invalid.status_code == 401
+    assert "Invalid session authentication token" in res_invalid.text
+
+
+def test_header_token_authentication(unauthenticated_client):
+    token = get_portal_token()
+
+    # Valid token via X-OneEAD-Token header succeeds
+    res_ok = unauthenticated_client.get("/api/modules", headers={AUTH_HEADER_NAME: token})
+    assert res_ok.status_code == 200
+    assert isinstance(res_ok.json(), list)
+
+    # Invalid token via header fails
+    res_bad = unauthenticated_client.get("/api/modules", headers={AUTH_HEADER_NAME: "wrong-token"})
+    assert res_bad.status_code == 401
+
+
+def test_portal_token_entropy_and_validation():
+    token = get_portal_token()
+    assert isinstance(token, str)
+    assert len(token) >= 32
+
+    # Verification helper tests
+    assert verify_portal_token(token) is True
+    assert verify_portal_token(f"  {token}  ") is True
+    assert verify_portal_token("invalid-candidate") is False
+    assert verify_portal_token("") is False
+    assert verify_portal_token(None) is False
+
