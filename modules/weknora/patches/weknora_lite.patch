@@ -1,5 +1,5 @@
 diff --git a/config/builtin_agents.yaml b/config/builtin_agents.yaml
-index 902279c..25d7f99 100644
+index 902279c8a..25d7f99f3 100644
 --- a/config/builtin_agents.yaml
 +++ b/config/builtin_agents.yaml
 @@ -26,9 +26,9 @@ builtin_agents:
@@ -34,7 +34,7 @@ index 902279c..25d7f99 100644
  
    - id: "builtin-smart-reasoning"
 diff --git a/config/config.yaml b/config/config.yaml
-index 06811ba..1eaedcb 100644
+index 06811ba23..1eaedcb91 100644
 --- a/config/config.yaml
 +++ b/config/config.yaml
 @@ -1,7 +1,7 @@
@@ -48,7 +48,7 @@ index 06811ba..1eaedcb 100644
  # Conversation service configuration
  # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
 diff --git a/config/prompt_templates/agent_system_prompt.yaml b/config/prompt_templates/agent_system_prompt.yaml
-index 229fda5..4f087b0 100644
+index 229fda50f..4f087b0ad 100644
 --- a/config/prompt_templates/agent_system_prompt.yaml
 +++ b/config/prompt_templates/agent_system_prompt.yaml
 @@ -42,7 +42,31 @@ templates:
@@ -96,7 +96,7 @@ index 229fda5..4f087b0 100644
 +      - Default response language: English.
        </system_status>
 diff --git a/config/prompt_templates/context_template.yaml b/config/prompt_templates/context_template.yaml
-index 4e9ed77..65410d5 100644
+index 4e9ed770d..65410d53d 100644
 --- a/config/prompt_templates/context_template.yaml
 +++ b/config/prompt_templates/context_template.yaml
 @@ -19,11 +19,19 @@ templates:
@@ -130,7 +130,7 @@ index 4e9ed77..65410d5 100644
        ## User request
        {{query}}
 diff --git a/config/prompt_templates/fallback.yaml b/config/prompt_templates/fallback.yaml
-index 30f3ec8..1be97a7 100644
+index 30f3ec868..1be97a700 100644
 --- a/config/prompt_templates/fallback.yaml
 +++ b/config/prompt_templates/fallback.yaml
 @@ -22,17 +22,17 @@ templates:
@@ -197,7 +197,7 @@ index 30f3ec8..1be97a7 100644
        ## User's question:
        {{query}}
 diff --git a/config/prompt_templates/intent_prompts.yaml b/config/prompt_templates/intent_prompts.yaml
-index 529d5a8..433c93b 100644
+index 529d5a855..433c93bf2 100644
 --- a/config/prompt_templates/intent_prompts.yaml
 +++ b/config/prompt_templates/intent_prompts.yaml
 @@ -25,7 +25,12 @@ templates:
@@ -297,7 +297,7 @@ index 529d5a8..433c93b 100644
 +      - Default response language: English.
  
 diff --git a/config/prompt_templates/system_prompt.yaml b/config/prompt_templates/system_prompt.yaml
-index a58739f..4d60e58 100644
+index a58739fc8..4d60e5880 100644
 --- a/config/prompt_templates/system_prompt.yaml
 +++ b/config/prompt_templates/system_prompt.yaml
 @@ -19,12 +19,38 @@ templates:
@@ -412,8 +412,41 @@ index a58739f..4d60e58 100644
 +      - Strictly NO Chinese/Mandarin characters or words anywhere in your thinking process or output.
 +      - Even if reference materials, citations, or conversation history contain Chinese, analyze, summarize, and reply strictly in English.
 +      - Default response language: English.
+diff --git a/frontend/index.html b/frontend/index.html
+index f067d8377..b095f6a5e 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -16,6 +16,16 @@
+ </head>
+ <body>
+ <script>
++(function(){
++  try {
++    var cur = localStorage.getItem('locale');
++    if (!cur || cur === 'zh-CN' || cur === 'zh-TW') {
++      localStorage.setItem('locale', 'en-US');
++    }
++  } catch(e) {}
++})();
++</script>
++<script>
+ (function(){
+   var t=localStorage.getItem('WeKnora_theme')||'light';
+   if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+diff --git a/frontend/public/config.js b/frontend/public/config.js
+index 0ea0850b8..bae0e028e 100644
+--- a/frontend/public/config.js
++++ b/frontend/public/config.js
+@@ -5,5 +5,6 @@ window.__RUNTIME_CONFIG__ = {
+   // Optional: serve embed on a dedicated origin, e.g. 'https://embed.example.com'
+   EMBED_BASE_URL: '',
+   // Optional: default UI locale for first-time visitors (zh-CN | zh-TW | en-US | ru-RU | ko-KR | ja-JP)
+-  DEFAULT_LOCALE: '',
++  DEFAULT_LOCALE: 'en-US',
+ };
++
 diff --git a/frontend/src/api/auth/index.ts b/frontend/src/api/auth/index.ts
-index 5e92a06..3032f15 100644
+index 5e92a06bd..3032f1576 100644
 --- a/frontend/src/api/auth/index.ts
 +++ b/frontend/src/api/auth/index.ts
 @@ -310,9 +310,9 @@ export function autoSetup(): Promise<LoginResponse> {
@@ -430,7 +463,7 @@ index 5e92a06..3032f15 100644
      } catch (error: any) {
        return {
 diff --git a/frontend/src/assets/theme/theme.css b/frontend/src/assets/theme/theme.css
-index 678ebd6..917f498 100644
+index 678ebd632..917f498f6 100644
 --- a/frontend/src/assets/theme/theme.css
 +++ b/frontend/src/assets/theme/theme.css
 @@ -221,18 +221,18 @@ select:-webkit-autofill {
@@ -459,7 +492,7 @@ index 678ebd6..917f498 100644
  
  /* 全局旋转动画：spinner / 刷新图标统一用 `animation: wk-spin 0.8s linear infinite` */
 diff --git a/frontend/src/components/ChatReferencesDrawer.vue b/frontend/src/components/ChatReferencesDrawer.vue
-index 3efbdd0..20f5139 100644
+index 3efbdd015..20f51399b 100644
 --- a/frontend/src/components/ChatReferencesDrawer.vue
 +++ b/frontend/src/components/ChatReferencesDrawer.vue
 @@ -1,5 +1,5 @@
@@ -770,7 +803,7 @@ index 3efbdd0..20f5139 100644
  }
  
 diff --git a/frontend/src/components/UserMenu.vue b/frontend/src/components/UserMenu.vue
-index e57f028..1731075 100644
+index e57f02891..173107579 100644
 --- a/frontend/src/components/UserMenu.vue
 +++ b/frontend/src/components/UserMenu.vue
 @@ -129,13 +129,11 @@
@@ -793,7 +826,7 @@ index e57f028..1731075 100644
      </Transition>
  
 diff --git a/frontend/src/components/css/chat-markdown.less b/frontend/src/components/css/chat-markdown.less
-index 82a7ff8..eba16c8 100644
+index 82a7ff880..eba16c85a 100644
 --- a/frontend/src/components/css/chat-markdown.less
 +++ b/frontend/src/components/css/chat-markdown.less
 @@ -737,5 +737,88 @@
@@ -886,7 +919,7 @@ index 82a7ff8..eba16c8 100644
    .chat-markdown-hljs();
  }
 diff --git a/frontend/src/components/css/chat-message-shared.less b/frontend/src/components/css/chat-message-shared.less
-index 2d83f18..914408d 100644
+index 2d83f18e5..914408de6 100644
 --- a/frontend/src/components/css/chat-message-shared.less
 +++ b/frontend/src/components/css/chat-message-shared.less
 @@ -172,6 +172,34 @@
@@ -925,7 +958,7 @@ index 2d83f18..914408d 100644
    display: inline-flex;
    align-items: center;
 diff --git a/frontend/src/components/document-preview.vue b/frontend/src/components/document-preview.vue
-index f6cacff..32e3fff 100644
+index f6cacff2d..32e3fffee 100644
 --- a/frontend/src/components/document-preview.vue
 +++ b/frontend/src/components/document-preview.vue
 @@ -89,6 +89,13 @@ const mermaidSvg = ref('');
@@ -1058,7 +1091,7 @@ index f6cacff..32e3fff 100644
      border-radius: @border-radius;
    }
 diff --git a/frontend/src/components/source-preview/PdfSourceViewer.vue b/frontend/src/components/source-preview/PdfSourceViewer.vue
-index 2d12554..9b8d332 100644
+index 2d12554d8..9b8d3329a 100644
 --- a/frontend/src/components/source-preview/PdfSourceViewer.vue
 +++ b/frontend/src/components/source-preview/PdfSourceViewer.vue
 @@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
@@ -1271,7 +1304,7 @@ index 2d12554..9b8d332 100644
      &.is-active {
        box-shadow: inset 3px 0 var(--app-source-highlight-border);
 diff --git a/frontend/src/components/source-preview/pdfjsLoader.ts b/frontend/src/components/source-preview/pdfjsLoader.ts
-index b4cbb37..7c58f88 100644
+index b4cbb37e6..7c58f88b3 100644
 --- a/frontend/src/components/source-preview/pdfjsLoader.ts
 +++ b/frontend/src/components/source-preview/pdfjsLoader.ts
 @@ -13,7 +13,11 @@ let loading: Promise<PdfJs> | null = null
@@ -1306,7 +1339,7 @@ index b4cbb37..7c58f88 100644
 +}
 +
 diff --git a/frontend/src/i18n/locales/en-US.ts b/frontend/src/i18n/locales/en-US.ts
-index 2727fd0..3ccbaae 100755
+index 2727fd005..3ccbaaecb 100755
 --- a/frontend/src/i18n/locales/en-US.ts
 +++ b/frontend/src/i18n/locales/en-US.ts
 @@ -4137,6 +4137,8 @@ export default {
@@ -1319,7 +1352,7 @@ index 2727fd0..3ccbaae 100755
      referenceSourceLocating: 'Locating the cited passage…',
      referenceSourceExact: "Located the source passage",
 diff --git a/frontend/src/i18n/locales/zh-CN.ts b/frontend/src/i18n/locales/zh-CN.ts
-index 384d522..03df980 100755
+index 384d52203..03df98031 100755
 --- a/frontend/src/i18n/locales/zh-CN.ts
 +++ b/frontend/src/i18n/locales/zh-CN.ts
 @@ -4225,6 +4225,8 @@ export default {
@@ -1332,7 +1365,7 @@ index 384d522..03df980 100755
      referenceSourceLocating: '正在定位引用位置…',
      referenceSourceExact: "已精确定位原文片段",
 diff --git a/frontend/src/i18n/locales/zh-TW.ts b/frontend/src/i18n/locales/zh-TW.ts
-index d8c5875..272bf8b 100644
+index d8c5875bb..272bf8b1a 100644
 --- a/frontend/src/i18n/locales/zh-TW.ts
 +++ b/frontend/src/i18n/locales/zh-TW.ts
 @@ -4225,6 +4225,8 @@ export default {
@@ -1344,8 +1377,21 @@ index d8c5875..272bf8b 100644
      referenceSourceRelocate: '重新定位',
      referenceSourceLocating: '正在定位引用位置…',
      referenceSourceExact: "已精確定位原文片段",
+diff --git a/frontend/src/i18n/resolveDefaultLocale.ts b/frontend/src/i18n/resolveDefaultLocale.ts
+index f7d67720b..6f12e79ac 100644
+--- a/frontend/src/i18n/resolveDefaultLocale.ts
++++ b/frontend/src/i18n/resolveDefaultLocale.ts
+@@ -1,7 +1,7 @@
+ export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en-US', 'ru-RU', 'ko-KR', 'ja-JP'] as const
+ export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
+ 
+-export const BUILT_IN_DEFAULT: SupportedLocale = 'zh-CN'
++export const BUILT_IN_DEFAULT: SupportedLocale = 'en-US'
+ 
+ function isSupportedLocale(value: string): value is SupportedLocale {
+   return (SUPPORTED_LOCALES as readonly string[]).includes(value)
 diff --git a/frontend/src/router/index.ts b/frontend/src/router/index.ts
-index dd6d065..26c7b84 100644
+index dd6d065b9..26c7b8491 100644
 --- a/frontend/src/router/index.ts
 +++ b/frontend/src/router/index.ts
 @@ -351,7 +351,8 @@ router.beforeEach(async (to, from, next) => {
@@ -1359,7 +1405,7 @@ index dd6d065..26c7b84 100644
          localStorage.removeItem('weknora_auto_setup_failed')
          try {
 diff --git a/frontend/src/stores/menu.ts b/frontend/src/stores/menu.ts
-index b8e6110..cd3ad35 100644
+index b8e611019..cd3ad3598 100644
 --- a/frontend/src/stores/menu.ts
 +++ b/frontend/src/stores/menu.ts
 @@ -66,7 +66,7 @@ export const useMenuStore = defineStore('menuStore', () => {
@@ -1372,7 +1418,7 @@ index b8e6110..cd3ad35 100644
    // 共享空间 (organizations) 仅对当前空间的 admin / owner 暴露入口。
    // viewer / contributor 即便在共享空间里拥有资源，也无需自行管理共享关系，
 diff --git a/frontend/src/utils/chatMarkdownRenderer.test.ts b/frontend/src/utils/chatMarkdownRenderer.test.ts
-index f97dd80..66871e5 100644
+index f97dd8005..66871e5ca 100644
 --- a/frontend/src/utils/chatMarkdownRenderer.test.ts
 +++ b/frontend/src/utils/chatMarkdownRenderer.test.ts
 @@ -578,6 +578,18 @@ test('joinCitationTagsToPreviousLine does not merge citations onto an unlabeled
@@ -1395,7 +1441,7 @@ index f97dd80..66871e5 100644
    const out = applyStreamingTailFade('<p>Great, that narrows it down a lot. Two more quick</p>')
    assert.match(out, /<span class="stream-fade-tail">[^<]*Two more quick<\/span><\/p>$/)
 diff --git a/frontend/src/utils/citationMarkdown.ts b/frontend/src/utils/citationMarkdown.ts
-index dd33782..623fc15 100644
+index dd33782e7..623fc1587 100644
 --- a/frontend/src/utils/citationMarkdown.ts
 +++ b/frontend/src/utils/citationMarkdown.ts
 @@ -228,10 +228,18 @@ export function restoreCitationHtmlPlaceholders(html: string, htmlSnippets: stri
@@ -1441,7 +1487,7 @@ index dd33782..623fc15 100644
        }
        return `${beforePart} ${kbStart.trimStart()}`
 diff --git a/frontend/src/utils/referenceSources.ts b/frontend/src/utils/referenceSources.ts
-index 311ce42..b01723e 100644
+index 311ce4230..b01723e4a 100644
 --- a/frontend/src/utils/referenceSources.ts
 +++ b/frontend/src/utils/referenceSources.ts
 @@ -107,11 +107,11 @@ export function formatReferenceSnippet(text: string | undefined): string {
@@ -1459,7 +1505,7 @@ index 311ce42..b01723e 100644
  }
  
 diff --git a/frontend/src/views/auth/Login.vue b/frontend/src/views/auth/Login.vue
-index 12324a8..206c076 100755
+index 12324a892..206c07604 100755
 --- a/frontend/src/views/auth/Login.vue
 +++ b/frontend/src/views/auth/Login.vue
 @@ -808,16 +808,19 @@ onMounted(async () => {
@@ -1613,7 +1659,7 @@ index 12324a8..206c076 100755
  
      svg:last-child {
 diff --git a/frontend/src/views/chat/components/AgentStreamDisplay.vue b/frontend/src/views/chat/components/AgentStreamDisplay.vue
-index da5f3c9..def9d88 100644
+index da5f3c924..def9d8827 100644
 --- a/frontend/src/views/chat/components/AgentStreamDisplay.vue
 +++ b/frontend/src/views/chat/components/AgentStreamDisplay.vue
 @@ -441,6 +441,16 @@
@@ -1690,7 +1736,7 @@ index da5f3c9..def9d88 100644
    const raw = typeof output === 'string' ? output : '';
    return raw
 diff --git a/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs b/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
-index fd61a65..3de6798 100644
+index fd61a65f4..3de67982e 100644
 --- a/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
 +++ b/frontend/src/views/chat/components/answerToolbarCompletion.test.mjs
 @@ -93,3 +93,17 @@ test('follow-up suggestions wait until the answer is fully rendered', () => {
@@ -1712,7 +1758,7 @@ index fd61a65..3de6798 100644
 +})
 +
 diff --git a/frontend/src/views/chat/components/botmsg.vue b/frontend/src/views/chat/components/botmsg.vue
-index c794b18..7d4f0ac 100644
+index c794b1813..7d4f0aca7 100644
 --- a/frontend/src/views/chat/components/botmsg.vue
 +++ b/frontend/src/views/chat/components/botmsg.vue
 @@ -87,6 +87,16 @@
@@ -1795,7 +1841,7 @@ index c794b18..7d4f0ac 100644
  // Skill artifact download (drawer in embedded mode; sandbox panel otherwise)
  // -----------------------------------------------------------------------------
 diff --git a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue b/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
-index eb5073c..eddae6a 100644
+index eb5073c39..eddae6ad0 100644
 --- a/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
 +++ b/frontend/src/views/knowledge/KnowledgeBaseEditorModal.vue
 @@ -979,7 +979,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
@@ -1808,7 +1854,7 @@ index eb5073c..eddae6a 100644
        customInstructions: ''
      },
 diff --git a/frontend/src/views/knowledge/components/UploadConfirmDialog.vue b/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
-index ba04d3b..d5e2e5f 100644
+index ba04d3b3e..d5e2e5f99 100644
 --- a/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
 +++ b/frontend/src/views/knowledge/components/UploadConfirmDialog.vue
 @@ -1286,7 +1286,7 @@ function initFromKbInfo(kb: any) {
@@ -1821,7 +1867,7 @@ index ba04d3b..d5e2e5f 100644
        customInstructions: kb.question_generation_config?.custom_instructions || '',
      },
 diff --git a/internal/agent/tools/data_analysis.go b/internal/agent/tools/data_analysis.go
-index 46cfb44..3a6e490 100644
+index 46cfb4483..3a6e490e0 100644
 --- a/internal/agent/tools/data_analysis.go
 +++ b/internal/agent/tools/data_analysis.go
 @@ -218,7 +218,7 @@ func (t *DataAnalysisTool) markTableLoaded(tableName string) {
@@ -1857,7 +1903,7 @@ index 46cfb44..3a6e490 100644
  
  	// Normalize file type to lowercase for comparison
 diff --git a/internal/application/service/extract.go b/internal/application/service/extract.go
-index 2697fd6..d3a9c36 100644
+index 2697fd6b5..d3a9c3606 100644
 --- a/internal/application/service/extract.go
 +++ b/internal/application/service/extract.go
 @@ -643,6 +643,9 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
@@ -1871,7 +1917,7 @@ index 2697fd6..d3a9c36 100644
  	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
  	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
 diff --git a/internal/container/container.go b/internal/container/container.go
-index 87c3ff0..2e50968 100644
+index 87c3ff055..2e50968e7 100644
 --- a/internal/container/container.go
 +++ b/internal/container/container.go
 @@ -21,7 +21,6 @@ import (
@@ -1959,83 +2005,8 @@ index 87c3ff0..2e50968 100644
  // registerWebSearchProviders registers all web search provider types to the registry.
  // Each provider type is registered with its factory function that accepts parameters.
  // Provider instances are created on-demand when tenants configure them.
-diff --git a/internal/container/duckdb_full.go b/internal/container/duckdb_full.go
-new file mode 100644
-index 0000000..62bbe51
---- /dev/null
-+++ b/internal/container/duckdb_full.go
-@@ -0,0 +1,48 @@
-+//go:build !lite
-+
-+package container
-+
-+import (
-+	"context"
-+	"database/sql"
-+	"fmt"
-+	"os"
-+	"strings"
-+
-+	_ "github.com/duckdb/duckdb-go/v2"
-+
-+	"github.com/Tencent/WeKnora/internal/logger"
-+)
-+
-+func NewDuckDB() (*sql.DB, error) {
-+	if strings.EqualFold(os.Getenv("DUCKDB_ENABLE"), "false") ||
-+		strings.EqualFold(os.Getenv("EDITION"), "lite") ||
-+		strings.EqualFold(os.Getenv("DUCKDB_DISABLE"), "true") {
-+		logger.Infof(context.Background(), "[DuckDB] Disabled in Lite mode")
-+		return nil, nil
-+	}
-+
-+	sqlDB, err := sql.Open("duckdb", ":memory:")
-+	if err != nil {
-+		return nil, fmt.Errorf("failed to open duckdb: %w", err)
-+	}
-+
-+	if strings.EqualFold(os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD"), "true") ||
-+		os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD") == "1" {
-+		logger.Infof(context.Background(),
-+			"[DuckDB] Skipping spatial/excel extension install/load "+
-+				"(DUCKDB_SKIP_EXTENSION_LOAD is set; xlsx ingest may fail without them)")
-+	} else {
-+		bgCtx := context.Background()
-+		for _, ext := range []string{"spatial", "excel"} {
-+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
-+				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
-+			}
-+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
-+				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
-+			}
-+		}
-+	}
-+
-+	return sqlDB, nil
-+}
-diff --git a/internal/container/duckdb_lite.go b/internal/container/duckdb_lite.go
-new file mode 100644
-index 0000000..2307912
---- /dev/null
-+++ b/internal/container/duckdb_lite.go
-@@ -0,0 +1,15 @@
-+//go:build lite
-+
-+package container
-+
-+import (
-+	"context"
-+	"database/sql"
-+
-+	"github.com/Tencent/WeKnora/internal/logger"
-+)
-+
-+func NewDuckDB() (*sql.DB, error) {
-+	logger.Infof(context.Background(), "[DuckDB] Disabled in Lite mode")
-+	return nil, nil
-+}
 diff --git a/internal/handler/auth.go b/internal/handler/auth.go
-index d17248d..b96cf40 100644
+index d17248d62..b96cf40ac 100644
 --- a/internal/handler/auth.go
 +++ b/internal/handler/auth.go
 @@ -7,8 +7,8 @@ import (
@@ -2081,7 +2052,7 @@ index d17248d..b96cf40 100644
  			Password: randomPassword,
  		})
 diff --git a/internal/infrastructure/docparser/builtin_converter.go b/internal/infrastructure/docparser/builtin_converter.go
-index 0cf3860..c5a1ad2 100644
+index 0cf3860a5..c5a1ad23c 100644
 --- a/internal/infrastructure/docparser/builtin_converter.go
 +++ b/internal/infrastructure/docparser/builtin_converter.go
 @@ -1,10 +1,13 @@
@@ -2189,7 +2160,7 @@ index 0cf3860..c5a1ad2 100644
  // the raw bytes in ImageRefs, matching Python ImageParser behaviour.
  func imageToResult(fileName string, data []byte) *types.ReadResult {
 diff --git a/internal/infrastructure/docparser/engine_registry.go b/internal/infrastructure/docparser/engine_registry.go
-index 9987921..ee76147 100644
+index 998792182..ee76147b8 100644
 --- a/internal/infrastructure/docparser/engine_registry.go
 +++ b/internal/infrastructure/docparser/engine_registry.go
 @@ -72,10 +72,14 @@ func NewReader(
@@ -2210,7 +2181,7 @@ index 9987921..ee76147 100644
  
  // remoteReader returns the docreader client, or an error when the service is
 diff --git a/internal/infrastructure/docparser/engines.go b/internal/infrastructure/docparser/engines.go
-index d3b28f8..3a3816f 100644
+index d3b28f8f4..3a3816f93 100644
 --- a/internal/infrastructure/docparser/engines.go
 +++ b/internal/infrastructure/docparser/engines.go
 @@ -84,16 +84,21 @@ func (e *builtinEngine) FileTypes(_ bool) []string {
@@ -2251,7 +2222,7 @@ index d3b28f8..3a3816f 100644
  		"mp3", "wav", "m4a", "flac", "ogg",
  	}
 diff --git a/internal/middleware/logger.go b/internal/middleware/logger.go
-index ae87075..87465f5 100644
+index ae870757d..87465f5e2 100644
 --- a/internal/middleware/logger.go
 +++ b/internal/middleware/logger.go
 @@ -183,7 +183,7 @@ func Logger() gin.HandlerFunc {
@@ -2264,7 +2235,7 @@ index ae87075..87465f5 100644
  			return
  		}
 diff --git a/internal/router/static.go b/internal/router/static.go
-index 2acb63f..655f870 100644
+index 2acb63f08..655f87055 100644
 --- a/internal/router/static.go
 +++ b/internal/router/static.go
 @@ -2,6 +2,7 @@ package router

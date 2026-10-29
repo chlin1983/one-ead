@@ -5,5 +5,6 @@ window.__RUNTIME_CONFIG__ = {
   // Optional: serve embed on a dedicated origin, e.g. 'https://embed.example.com'
   EMBED_BASE_URL: '',
   // Optional: default UI locale for first-time visitors (zh-CN | zh-TW | en-US | ru-RU | ko-KR | ja-JP)
-  DEFAULT_LOCALE: '',
+  DEFAULT_LOCALE: 'en-US',
 };
+

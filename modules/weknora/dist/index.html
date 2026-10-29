@@ -26,7 +26,17 @@
   <link rel="stylesheet" crossorigin href="/assets/tdesign-icon-offline-DWEINjpD.css">
   <link rel="stylesheet" crossorigin href="/assets/main-DKiYNd-m.css">
 </head>
-<body>
+<body>
+<script>
+(function(){
+  try {
+    var cur = localStorage.getItem('locale');
+    if (!cur || cur === 'zh-CN' || cur === 'zh-TW') {
+      localStorage.setItem('locale', 'en-US');
+    }
+  } catch(e) {}
+})();
+</script>
 <script>
 (function(){
   var t=localStorage.getItem('WeKnora_theme')||'light';
@@ -84,7 +94,8 @@
   var el=document.getElementById('app');
   if(el){ el.style.background=bg; el.style.minHeight='100%'; }
 })();
-</script>
+</script>
+
 </body>
 </html>
 
