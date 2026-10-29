@@ -200,15 +200,31 @@
           </div>
 
           <div class="build-actions">
+            <button class="btn primary" id="btnDownloadBinary" style="display: inline-flex; align-items: center; gap: 8px;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Download Prebuilt Binary</span>
+            </button>
             <button class="btn" id="btnBuildFrontend">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
               <span>Build Frontend SPA Assets</span>
             </button>
             <div class="scripts-hint">
-              <span>Windows Build Scripts Ready:</span>
+              <span>Fresh Clone Quick Commands:</span>
+              <code>python modules\weknora\scripts\download_binary.py</code>
               <code>modules\weknora\scripts\build_lite.bat</code>
-              <code>modules\weknora\scripts\run_lite.bat</code>
             </div>
+          </div>
+
+          <!-- Download Progress Container -->
+          <div id="downloadProgressWrap" style="display: none; margin-top: 14px; padding: 12px 14px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px;">
+              <span id="downloadStatusMsg" style="font-weight: 500; color: inherit;">Connecting to GitHub Releases…</span>
+              <span id="downloadPct" style="font-weight: 600; color: #2563eb;">0%</span>
+            </div>
+            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.1); border-radius: 3px; overflow: hidden;">
+              <div id="downloadProgressBar" style="width: 0%; height: 100%; background: #2563eb; transition: width 0.2s ease;"></div>
+            </div>
+            <div id="downloadDetail" style="margin-top: 5px; font-size: 11px; opacity: 0.75;"></div>
           </div>
         </section>
       </div>

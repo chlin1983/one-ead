@@ -32,6 +32,12 @@ const el = {
   txtGo: document.getElementById("txtGo"),
   iconCgo: document.getElementById("iconCgo"),
   txtCgo: document.getElementById("txtCgo"),
+  btnDownloadBinary: document.getElementById("btnDownloadBinary"),
+  downloadProgressWrap: document.getElementById("downloadProgressWrap"),
+  downloadStatusMsg: document.getElementById("downloadStatusMsg"),
+  downloadPct: document.getElementById("downloadPct"),
+  downloadProgressBar: document.getElementById("downloadProgressBar"),
+  downloadDetail: document.getElementById("downloadDetail"),
   btnBuildFrontend: document.getElementById("btnBuildFrontend"),
   configDrawer: document.getElementById("configDrawer"),
   btnCloseConfig: document.getElementById("btnCloseConfig"),
@@ -122,13 +128,44 @@ function renderStatus(s) {
     el.dashboardWrap.hidden = false;
   }
 
-  // Binary status
-  if (isInstalled) {
+  // Binary status & Prebuilt Downloader status
+  const dl = s.download || {};
+  if (dl.downloading) {
+    el.binaryStatusPill.textContent = "Downloading Prebuilt...";
+    el.binaryStatusPill.style.color = "#2563eb";
+    if (el.downloadProgressWrap) el.downloadProgressWrap.style.display = "block";
+    if (el.btnDownloadBinary) el.btnDownloadBinary.disabled = true;
+    if (el.downloadStatusMsg) el.downloadStatusMsg.textContent = dl.message || "Downloading prebuilt binary...";
+    const pct = (dl.progress_percent || 0).toFixed(0);
+    if (el.downloadPct) el.downloadPct.textContent = `${pct}%`;
+    if (el.downloadProgressBar) el.downloadProgressBar.style.width = `${pct}%`;
+    if (el.downloadDetail && dl.total_bytes > 0) {
+      const downMb = (dl.downloaded_bytes / (1024 * 1024)).toFixed(1);
+      const totMb = (dl.total_bytes / (1024 * 1024)).toFixed(1);
+      el.downloadDetail.textContent = `${downMb} MB / ${totMb} MB`;
+    }
+  } else if (dl.error) {
+    el.binaryStatusPill.textContent = "Download Error";
+    el.binaryStatusPill.style.color = "#e5484d";
+    if (el.downloadProgressWrap) el.downloadProgressWrap.style.display = "block";
+    if (el.btnDownloadBinary) el.btnDownloadBinary.disabled = false;
+    if (el.downloadStatusMsg) {
+      el.downloadStatusMsg.textContent = `Download failed: ${dl.error}`;
+      el.downloadStatusMsg.style.color = "#e5484d";
+    }
+  } else if (isInstalled) {
     el.binaryStatusPill.textContent = "Binary Ready";
     el.binaryStatusPill.style.color = "#059648";
+    if (el.downloadProgressWrap) el.downloadProgressWrap.style.display = "none";
+    if (el.btnDownloadBinary) el.btnDownloadBinary.style.display = "none";
   } else {
-    el.binaryStatusPill.textContent = "Binary Missing (Compile Needed)";
+    el.binaryStatusPill.textContent = "Binary Missing (Compile or Download)";
     el.binaryStatusPill.style.color = "#e5484d";
+    if (el.downloadProgressWrap) el.downloadProgressWrap.style.display = "none";
+    if (el.btnDownloadBinary) {
+      el.btnDownloadBinary.style.display = "inline-flex";
+      el.btnDownloadBinary.disabled = false;
+    }
   }
 
   // Build Readiness Items
@@ -373,10 +410,35 @@ function closeDrawer(name) {
   state.activeDrawer = null;
 }
 
+async function downloadBinary() {
+  if (!confirm("Download prebuilt WeKnora Lite binary from GitHub Releases?")) return;
+  if (el.btnDownloadBinary) el.btnDownloadBinary.disabled = true;
+  if (el.downloadProgressWrap) el.downloadProgressWrap.style.display = "block";
+  if (el.downloadStatusMsg) {
+    el.downloadStatusMsg.textContent = "Connecting to GitHub Releases...";
+    el.downloadStatusMsg.style.color = "inherit";
+  }
+  if (el.downloadProgressBar) el.downloadProgressBar.style.width = "0%";
+  try {
+    const res = await fetch(`${API_BASE}/download/binary`, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      alert("Could not start download: " + data.message);
+      if (el.btnDownloadBinary) el.btnDownloadBinary.disabled = false;
+    } else {
+      fetchStatus();
+    }
+  } catch (err) {
+    alert("Error requesting download: " + err.message);
+    if (el.btnDownloadBinary) el.btnDownloadBinary.disabled = false;
+  }
+}
+
 // Bind Events
 el.btnStart.addEventListener("click", startService);
 el.btnStop.addEventListener("click", stopService);
 el.btnRestart.addEventListener("click", restartService);
+if (el.btnDownloadBinary) el.btnDownloadBinary.addEventListener("click", downloadBinary);
 el.btnBuildFrontend.addEventListener("click", buildFrontend);
 el.btnSaveConfig.addEventListener("click", saveConfig);
 el.btnApply6gbPreset.addEventListener("click", apply6gbPreset);

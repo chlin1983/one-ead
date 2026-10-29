@@ -214,6 +214,21 @@ def trigger_frontend_build(request: Request) -> dict:
     return {"ok": True, "message": "Frontend build started in background"}
 
 
+@router.post("/download/binary")
+def trigger_binary_download(request: Request, payload: Optional[dict] = Body(None)) -> dict:
+    _verify_local_request(request)
+    custom_url = payload.get("url") if payload else None
+    force = bool(payload.get("force")) if payload else False
+    return manager.start_binary_download(custom_url=custom_url, force=force)
+
+
+@router.get("/download/status")
+def get_download_status(request: Request) -> dict:
+    _verify_local_request(request)
+    return manager.get_download_status()
+
+
+
 @router.get("/ollama/check")
 def check_ollama(request: Request, url: str = "") -> dict:
     _verify_local_request(request)

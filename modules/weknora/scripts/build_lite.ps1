@@ -77,7 +77,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             $WebDir = "$RepoDir\web"
             if (Test-Path $WebDir) { Remove-Item -Recurse -Force $WebDir }
             Copy-Item -Recurse -Force "$RepoDir\frontend\dist" $WebDir
-            Write-Host "[OK] Frontend assets generated at web/" -ForegroundColor Green
+            $DistDir = "$ModuleDir\dist"
+            if (-not (Test-Path $DistDir)) { New-Item -ItemType Directory -Path $DistDir -Force | Out-Null }
+            Copy-Item -Recurse -Force "$RepoDir\frontend\dist\*" $DistDir
+            Write-Host "[OK] Frontend assets generated at web/ and dist/" -ForegroundColor Green
         }
     }
 } else {

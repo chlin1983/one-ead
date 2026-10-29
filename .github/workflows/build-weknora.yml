@@ -1,0 +1,87 @@
+name: Build WeKnora Lite Prebuilt Binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to create/attach binary to (e.g. v1.0.0-weknora-lite)'
+        required: false
+        default: 'v1.0.0-weknora-lite'
+  push:
+    tags:
+      - 'v*'
+      - 'weknora-*'
+
+jobs:
+  build-windows:
+    name: Build WeKnora Lite (Windows amd64)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout One EAD Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.23
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up MinGW GCC (CGO for SQLite & vector extensions)
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Clone Upstream WeKnora at Pinned Revision
+        run: |
+          git clone https://github.com/Tencent/WeKnora.git modules/weknora/WeKnora
+          cd modules/weknora/WeKnora
+          git checkout 2fbfb4471581cd5e7d731bc7a2d443fe7d8e95b5
+        shell: bash
+
+      - name: Run Windows Lite Build Script
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          cmd /c "modules\weknora\scripts\build_lite.bat"
+        shell: powershell
+
+      - name: Package Prebuilt Binary and Static Frontend Assets
+        run: |
+          $pkgDir = "modules\weknora\dist_pkg"
+          New-Item -ItemType Directory -Path "$pkgDir\dist" -Force | Out-Null
+          Copy-Item "modules\weknora\WeKnora-lite.exe" "$pkgDir\"
+          if (Test-Path "modules\weknora\WeKnora\web") {
+            Copy-Item -Recurse "modules\weknora\WeKnora\web\*" "$pkgDir\dist\"
+          }
+          Compress-Archive -Path "$pkgDir\*" -DestinationPath "weknora-lite-windows-amd64.zip" -Force
+        shell: powershell
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: weknora-lite-windows-amd64
+          path: |
+            modules/weknora/WeKnora-lite.exe
+            weknora-lite-windows-amd64.zip
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || (github.event.inputs.release_tag != '')
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: WeKnora Lite Prebuilt (${{ github.event.inputs.release_tag || github.ref_name }})
+          draft: false
+          prerelease: false
+          files: |
+            modules/weknora/WeKnora-lite.exe
+            weknora-lite-windows-amd64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

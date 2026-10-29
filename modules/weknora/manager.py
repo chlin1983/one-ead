@@ -96,8 +96,19 @@ _build_status = {
     "log": collections.deque(maxlen=300)
 }
 
+_download_status = {
+    "downloading": False,
+    "progress_percent": 0.0,
+    "downloaded_bytes": 0,
+    "total_bytes": 0,
+    "message": "",
+    "error": None,
+}
+_download_thread: Optional[threading.Thread] = None
+
 _watchdog_thread: Optional[threading.Thread] = None
 _watchdog_stop_event = threading.Event()
+
 
 
 def _run_math_watchdog() -> None:
@@ -618,7 +629,11 @@ def status() -> Dict[str, Any]:
     host = cfg.get("SERVER_HOST", "127.0.0.1")
     binary = get_active_binary()
     repo_exists = (REPO_DIR / "cmd" / "server" / "main.go").exists()
-    web_dist_exists = (REPO_DIR / "web" / "index.html").exists() or (REPO_DIR / "frontend" / "dist" / "index.html").exists()
+    web_dist_exists = (
+        (REPO_DIR / "web" / "index.html").exists()
+        or (REPO_DIR / "frontend" / "dist" / "index.html").exists()
+        or (MODULE_DIR / "dist" / "index.html").exists()
+    )
 
     with _lock:
         is_proc_alive = _process is not None and _process.poll() is None
@@ -668,6 +683,7 @@ def status() -> Dict[str, Any]:
             "message": _build_status["message"],
             "error": _build_status["error"]
         },
+        "download": get_download_status(),
         "watchdog": {
             "active": _watchdog_thread is not None and _watchdog_thread.is_alive(),
         },
@@ -741,10 +757,12 @@ def start_service() -> Dict[str, Any]:
         env["DUCKDB_SKIP_EXTENSION_LOAD"] = "1"
         env["AUTO_MIGRATE"] = "true"
         env["WEKNORA_LANGUAGE"] = cfg.get("WEKNORA_LANGUAGE", "en-US")
-        web_dir = REPO_DIR / "web"
-        if not web_dir.exists():
-            web_dir = MODULE_DIR / "web"
-        if web_dir.exists():
+        web_dir = None
+        for candidate in [REPO_DIR / "web", MODULE_DIR / "dist", REPO_DIR / "frontend" / "dist"]:
+            if candidate.exists() and (candidate / "index.html").exists():
+                web_dir = candidate
+                break
+        if web_dir:
             env["WEKNORA_WEB_DIR"] = str(web_dir)
         env["DOC_EXTRACTOR_SCRIPT"] = str(MODULE_DIR / "scripts" / "doc_extractor.py")
 
@@ -928,6 +946,80 @@ def run_frontend_build() -> None:
             append_log(f"[Build] Frontend build failed: {exc}")
         finally:
             _build_status["building"] = False
+
+
+def get_download_status() -> Dict[str, Any]:
+    with _lock:
+        return dict(_download_status)
+
+
+def start_binary_download(custom_url: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+    """Downloads prebuilt WeKnora Lite binary from GitHub Releases in background."""
+    global _download_thread
+    with _lock:
+        if _download_status["downloading"]:
+            return {"ok": False, "message": "Binary download is already in progress"}
+
+        _download_status["downloading"] = True
+        _download_status["progress_percent"] = 0.0
+        _download_status["downloaded_bytes"] = 0
+        _download_status["total_bytes"] = 0
+        _download_status["message"] = "Connecting to GitHub Releases..."
+        _download_status["error"] = None
+
+    def _worker():
+        try:
+            from .scripts.download_binary import download_weknora_binary
+        except ImportError:
+            try:
+                scripts_dir = str(MODULE_DIR / "scripts")
+                if scripts_dir not in sys.path:
+                    sys.path.insert(0, scripts_dir)
+                from download_binary import download_weknora_binary
+            except Exception as exc:
+                with _lock:
+                    _download_status["downloading"] = False
+                    _download_status["error"] = f"Failed to import downloader: {exc}"
+                    _download_status["message"] = "Import error"
+                append_log(f"[Downloader] Import error: {exc}")
+                return
+
+        def _on_progress(downloaded: int, total: int, msg: str):
+            with _lock:
+                _download_status["downloaded_bytes"] = downloaded
+                _download_status["total_bytes"] = total
+                _download_status["progress_percent"] = (downloaded / total * 100.0) if total > 0 else 0.0
+                _download_status["message"] = msg
+
+        try:
+            append_log("[Downloader] Starting prebuilt binary download from GitHub Releases...")
+            res = download_weknora_binary(
+                custom_url=custom_url,
+                progress_callback=_on_progress,
+                force=force
+            )
+            with _lock:
+                _download_status["downloading"] = False
+                if res.get("ok"):
+                    _download_status["progress_percent"] = 100.0
+                    _download_status["message"] = res.get("message", "Binary installed successfully.")
+                    _download_status["error"] = None
+                    append_log(f"[Downloader] {res.get('message')}")
+                else:
+                    _download_status["error"] = res.get("message")
+                    _download_status["message"] = "Download failed"
+                    append_log(f"[Downloader] Error: {res.get('message')}")
+        except Exception as exc:
+            with _lock:
+                _download_status["downloading"] = False
+                _download_status["error"] = str(exc)
+                _download_status["message"] = "Download failed"
+            append_log(f"[Downloader] Exception: {exc}")
+
+    _download_thread = threading.Thread(target=_worker, daemon=True, name="WeKnora-BinaryDownloader")
+    _download_thread.start()
+    return {"ok": True, "message": "Prebuilt binary download started"}
+
 
 def _atexit_cleanup() -> None:
     global _process
