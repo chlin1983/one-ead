@@ -41,31 +41,40 @@ def get_available_vision_model() -> str:
         pass
     return ""
 
-def describe_image_with_vlm(img_bytes: bytes, caption_hint: str = "") -> str:
-    """Calls local Ollama VLM to generate a concise technical description of a diagram/chart/image."""
+def describe_image_with_vlm(img_bytes: bytes, caption_hint: str = "", is_table: bool = False) -> str:
+    """Calls local Ollama VLM (e.g. minicpm-v) to transcribe and describe a diagram, chart, or table."""
     model = get_available_vision_model()
     if not model or not img_bytes:
         return ""
     try:
         b64 = base64.b64encode(img_bytes).decode("utf-8")
-        prompt = (
-            "Describe this figure or diagram concisely in 2-3 sentences for a technical search index. "
-            "Explicitly mention the figure title or number if visible, axis names and units, key curves, labels, or flow elements."
-        )
+        if is_table:
+            prompt = (
+                "Transcribe this technical table into a clean GitHub Flavored Markdown table. "
+                "Preserve all column headers, rows, numerical values, and units accurately."
+            )
+        else:
+            prompt = (
+                "Transcribe all visible text, numbers, titles, figure labels, legends, and axis units from this technical graphic. "
+                "Concisely describe what this diagram or chart illustrates for technical search."
+            )
         if caption_hint:
-            prompt += f"\nCaption context: {caption_hint}"
+            prompt += f"\nAdjacent context/caption: {caption_hint}"
         payload = {
             "model": model,
             "prompt": prompt,
             "images": [b64],
-            "stream": False
+            "stream": False,
+            "options": {
+                "temperature": 0.1
+            }
         }
         req = urllib.request.Request(
             "http://127.0.0.1:11434/api/generate",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return data.get("response", "").strip()
     except Exception:
@@ -314,12 +323,8 @@ def extract_pdf(path: str) -> str:
         d = page.get_text("dict")
         blocks = d.get("blocks", [])
 
-        # 3b. Extract figures and diagrams (with local VLM visual analysis if available)
+        # 3b. Universal Layout-Driven Visual Object & Diagram Discovery (Zero Regex)
         figure_suppress_rects = []
-        fig_caption_pattern = re.compile(
-            r"^(?:Figure|Fig\.?|Chart|Diagram|Exhibit|Plate)\s+([0-9]+(?:[\.\-_][0-9]+)*)",
-            re.IGNORECASE
-        )
         vlm_model = get_available_vision_model()
         fig_count_on_page = 0
 
@@ -345,74 +350,123 @@ def extract_pdf(path: str) -> str:
 
         drawing_rects = [_calc_dr_bbox(dr) for dr in drawings] if drawings else []
 
-        # First pass: find explicit figure captions (e.g. Figure 1.1, Fig 1-1, etc.)
+        # Find all visual regions: raster images (type == 1) + vector graphics clusters
+        visual_candidates = []
+
+        # 1. Raster images (diagrams, photos, graphs)
         for b in blocks:
-            if b.get("type") != 0 or fig_count_on_page >= 4:
-                continue
-            raw_text = "".join(s.get("text", "") for l in b.get("lines", []) for s in l.get("spans", [])).strip()
-            if fig_caption_pattern.match(raw_text):
-                cap_rect = pymupdf.Rect(b["bbox"])
-                # Look for vector drawings or raster images sitting above the caption (or below)
-                above_cand = [
-                    r for r in drawing_rects
-                    if r.y1 <= cap_rect.y0 + 15 and r.y0 >= cap_rect.y0 - 450
-                    and max(r.width, r.height) >= 15
-                ] + [
-                    pymupdf.Rect(ib["bbox"]) for ib in blocks
-                    if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y0 + 15
-                    and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y0 - 450
-                ]
-                below_cand = [
-                    r for r in drawing_rects
-                    if r.y0 >= cap_rect.y1 - 15 and r.y1 <= cap_rect.y1 + 450
-                    and max(r.width, r.height) >= 15
-                ] + [
-                    pymupdf.Rect(ib["bbox"]) for ib in blocks
-                    if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y1 - 15
-                    and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y1 + 450
-                ]
+            if b.get("type") == 1:
+                r = pymupdf.Rect(b.get("bbox", (0, 0, 0, 0)))
+                if r.width >= 60 and r.height >= 45:
+                    visual_candidates.append(r)
 
-                cand_rects = above_cand if above_cand else below_cand
-                vlm_desc = ""
-                crop_rect = cap_rect
-                if cand_rects:
-                    u_rect = cand_rects[0]
-                    for cr in cand_rects[1:]:
-                        u_rect |= cr
-                    crop_rect = pymupdf.Rect(
-                        max(0, min(u_rect.x0, cap_rect.x0) - 30),
-                        max(0, min(u_rect.y0, cap_rect.y0) - 15),
-                        min(page.rect.width, max(u_rect.x1, cap_rect.x1) + 30),
-                        min(page.rect.height, max(u_rect.y1, cap_rect.y1) + 15)
-                    )
-                    if vlm_model:
-                        pix = page.get_pixmap(clip=crop_rect, dpi=120)
-                        vlm_desc = describe_image_with_vlm(pix.tobytes("png"), caption_hint=raw_text)
-
-                if vlm_desc:
-                    fig_md = f"> **{raw_text}**\n>\n> *Visual Analysis*: {vlm_desc}"
-                else:
-                    fig_md = f"> **{raw_text}**"
-
-                combined_items.append((crop_rect.y0, "figure", fig_md))
-                figure_suppress_rects.append(crop_rect)
-                fig_count_on_page += 1
-
-            # Second pass: stand-alone raster image blocks (type == 1) not covered by captioned figures
-            for b in blocks:
-                if b.get("type") != 1 or fig_count_on_page >= 4:
+        # 2. Vector drawings (excluding equation fraction lines and table bboxes)
+        for dr in drawing_rects:
+            if dr.width >= 70 and dr.height >= 50:
+                if any(dr.intersects(pymupdf.Rect(tb)) for tb in table_bboxes):
                     continue
-                ib_rect = pymupdf.Rect(b.get("bbox", (0, 0, 0, 0)))
-                if ib_rect.width >= 100 and ib_rect.height >= 80:
-                    if any(ib_rect.intersects(sr) for sr in figure_suppress_rects):
-                        continue
-                    pix = page.get_pixmap(clip=ib_rect, dpi=120)
-                    vlm_desc = describe_image_with_vlm(pix.tobytes("png"))
-                    if vlm_desc:
-                        img_md = f"> **[Diagram / Figure]**\n>\n> *Visual Analysis*: {vlm_desc}"
-                        combined_items.append((ib_rect.y0, "figure", img_md))
-                        figure_suppress_rects.append(ib_rect)
-                        fig_count_on_page += 1
+                visual_candidates.append(dr)
+
+        # Merge overlapping / touching visual candidates
+        merged_visual_regions = []
+        for cand in visual_candidates:
+            merged = False
+            for i, reg in enumerate(merged_visual_regions):
+                if (
+                    cand.intersects(reg)
+                    or (cand.y0 <= reg.y1 + 15 and cand.y1 >= reg.y0 - 15 and max(cand.x0, reg.x0) < min(cand.x1, reg.x1) + 20)
+                ):
+                    merged_visual_regions[i] = reg | cand
+                    merged = True
+                    break
+            if not merged:
+                merged_visual_regions.append(cand)
+
+        # For each visual region, find adjacent context text via Spatial Nearest-Neighbor (zero regex)
+        for v_rect in merged_visual_regions:
+            if fig_count_on_page >= 6:
+                break
+
+            # Find nearest text line directly above or below (within 45pt)
+            best_caption = ""
+            best_dist = 999.0
+            best_cap_rect = None
+
+            for b in blocks:
+                if b.get("type") != 0:
+                    continue
+                tb_rect = pymupdf.Rect(b["bbox"])
+                # Must overlap horizontally with the visual region
+                h_overlap = min(v_rect.x1, tb_rect.x1) - max(v_rect.x0, tb_rect.x0)
+                if h_overlap < -20:
+                    continue
+
+                # Check proximity above or below
+                dist_above = v_rect.y0 - tb_rect.y1
+                dist_below = tb_rect.y0 - v_rect.y1
+
+                cand_dist = None
+                if 0 <= dist_above <= 40:
+                    cand_dist = dist_above
+                elif 0 <= dist_below <= 45:
+                    cand_dist = dist_below
+
+                if cand_dist is not None and cand_dist < best_dist:
+                    lines_text = " ".join(
+                        "".join(s.get("text", "") for s in l.get("spans", [])).strip()
+                        for l in b.get("lines", [])
+                    ).strip()
+                    if 3 <= len(lines_text) <= 300:
+                        best_dist = cand_dist
+                        best_caption = lines_text
+                        best_cap_rect = tb_rect
+
+            # Crop region covering visual element + adjacent title
+            crop_rect = pymupdf.Rect(
+                max(0, min(v_rect.x0, best_cap_rect.x0 if best_cap_rect else v_rect.x0) - 20),
+                max(0, min(v_rect.y0, best_cap_rect.y0 if best_cap_rect else v_rect.y0) - 15),
+                min(page.rect.width, max(v_rect.x1, best_cap_rect.x1 if best_cap_rect else v_rect.x1) + 20),
+                min(page.rect.height, max(v_rect.y1, best_cap_rect.y1 if best_cap_rect else v_rect.y1) + 15),
+            )
+
+            vlm_desc = ""
+            if vlm_model:
+                pix = page.get_pixmap(clip=crop_rect, dpi=130)
+                vlm_desc = describe_image_with_vlm(pix.tobytes("png"), caption_hint=best_caption)
+
+            # Fallback to Tesseract OCR if VLM is offline or returned empty
+            if not vlm_desc:
+                tess_bin = find_tesseract_binary()
+                if tess_bin:
+                    pix = page.get_pixmap(clip=crop_rect, dpi=180)
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_f:
+                        tmp_f.write(pix.tobytes("png"))
+                        tmp_f_path = tmp_f.name
+                    try:
+                        res_ocr = subprocess.run([tess_bin, tmp_f_path, "stdout"], capture_output=True, timeout=20, text=True)
+                        if res_ocr.stdout and len(res_ocr.stdout.strip()) >= 5:
+                            vlm_desc = res_ocr.stdout.strip()
+                    except Exception:
+                        pass
+                    finally:
+                        if os.path.isfile(tmp_f_path):
+                            try:
+                                os.unlink(tmp_f_path)
+                            except Exception:
+                                pass
+
+            # Format universal Markdown entry
+            title_header = best_caption if best_caption else "Visual Diagram / Technical Figure"
+            if vlm_desc:
+                fig_md = f"> **[{title_header}]**\n>\n> *Visual Content*: {vlm_desc}"
+            else:
+                fig_md = f"> **[{title_header}]**"
+
+            combined_items.append((crop_rect.y0, "figure", fig_md))
+            figure_suppress_rects.append(crop_rect)
+            if best_cap_rect:
+                figure_suppress_rects.append(best_cap_rect)
+            fig_count_on_page += 1
 
         for b in blocks:
             if b.get("type") != 0:
