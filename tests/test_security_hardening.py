@@ -636,3 +636,47 @@ def test_credential_redaction_logging():
     assert "auth=[REDACTED]" in record.msg
 
 
+
+
+# ==============================================================================
+# CSRF: Origin / Fetch Metadata validation on state-changing requests
+# ==============================================================================
+EVIL_HEADERS = [
+    {"Origin": "http://127.0.0.1:9999"},
+    {"Origin": "http://evil.example"},
+    {"Origin": "null"},
+    {"Referer": "http://localhost:8100/x"},
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Sec-Fetch-Site": "same-site"},
+]
+WRITE_CALLS = [
+    ("POST", "/api/paperless_ngx/upload"),
+    ("DELETE", "/api/paperless_ngx/documents/1"),
+    ("PUT", "/api/paperless_ngx/documents/1/tags"),
+    ("POST", "/api/paperless_ngx/scan"),
+    ("POST", "/api/paperless_ngx/open-explorer"),
+]
+
+
+@pytest.mark.parametrize("headers", EVIL_HEADERS)
+@pytest.mark.parametrize("method,path", WRITE_CALLS)
+def test_csrf_blocks_untrusted_origin_on_writes(client, method, path, headers):
+    r = client.request(method, path, headers=headers)
+    assert r.status_code == 403
+
+
+def test_csrf_allows_same_origin_and_safe_methods(client):
+    r = client.post(
+        "/api/paperless_ngx/scan",
+        headers={"Origin": "http://127.0.0.1:8100", "Sec-Fetch-Site": "same-origin"},
+    )
+    assert r.status_code != 403
+    r = client.get("/api/paperless_ngx/documents", headers={"Origin": "http://evil.example"})
+    assert r.status_code != 403
+
+
+def test_csrf_blocks_cross_origin_login(unauthenticated_client):
+    r = unauthenticated_client.post(
+        "/auth/login", data={"token": "x"}, headers={"Origin": "http://evil.example"}
+    )
+    assert r.status_code == 403
