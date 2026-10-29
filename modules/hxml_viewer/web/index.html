@@ -653,7 +653,9 @@
       flex: 1;
       min-width: 0;
       min-height: 0;
-      overflow: auto;
+      overflow-y: scroll;
+      overflow-x: hidden;
+      scrollbar-gutter: stable;
     }
     #fs-plot-wrap {
       height: 88vh;
@@ -698,7 +700,7 @@
       background: transparent;
     }
     .fs-border-r {
-      right: 35px;
+      right: 20px;
       top: 46px;
       bottom: 82px;
       width: 28px;
@@ -706,13 +708,13 @@
     }
     .fs-border-b {
       bottom: 68px;
-      left: 86px;
-      right: 49px;
+      left: 98px;
+      right: 34px;
       height: 28px;
       cursor: ns-resize;
     }
     .fs-border-c {
-      right: 31px;
+      right: 16px;
       bottom: 64px;
       width: 36px;
       height: 36px;
@@ -834,13 +836,13 @@
       width: 410px;
       min-width: 360px;
       max-width: 520px;
+      flex-shrink: 0;
       border-left: 1.5px solid var(--border-strong);
       background: var(--surface);
       display: flex;
       flex-direction: column;
       z-index: 10;
       box-shadow: -4px 0 20px rgba(0, 0, 0, 0.06);
-      transition: width 0.15s ease;
     }
     .fs-math-panel[hidden] {
       display: none !important;
@@ -2287,6 +2289,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=curve_proc_8"></script>
+  <script src="app.js?v=curve_proc_11"></script>
 </body>
 </html>

@@ -2673,37 +2673,41 @@ function openFullscreen(bi, blockName) {
   state.fsPlotInfo = { bi, blockName };
 
   if (el.fsTitle) el.fsTitle.textContent = blockName;
-  el.fsOverlay.hidden = false;
-  // Make sure this iframe, not the portal shell, receives the keyboard (ESC to exit)
-  window.focus();
 
-  // Purge any previous plot and render fresh at full size
+  // Unhide overlay and sidepanel upfront so flex container is immediately at final width
+  el.fsOverlay.hidden = false;
+  if (el.fsMathPanel) el.fsMathPanel.hidden = false;
+  if (el.fsMathBtn) el.fsMathBtn.classList.add("active");
+
+  // Purge any previous plot
   try { Plotly.purge(el.fsPlotDiv); } catch (e) {}
 
-  // Use requestAnimationFrame to let overlay render first (so clientWidth/Height are correct)
+  // Render scalar/curve table FIRST so DOM structure and scrollbar presence are completely settled
+  renderFullscreenCurveTable(bi);
+
+  // Double-rAF ensures browser completes style & flexbox layout pass before Plotly measures and renders
   requestAnimationFrame(() => {
-    drawSinglePlot(
-      el.fsPlotDiv,
-      {
-        traces: data.plotTraces,
-        xIsFreq: data.plotXIsFreq,
-        xLabel: data.plotXLabel,
-        yLabel: data.plotYLabel,
-        yRange: data.plotYRange
-      },
-      blockName,
-      1,
-      bi,
-      1
-    );
-    bindPvVisibilitySync();
-    if (el.fsMathPanel) el.fsMathPanel.hidden = false;
-    if (el.fsMathBtn) el.fsMathBtn.classList.add("active");
-    initFsCurveMathPanel(bi);
-    initFsPlotResizer();
-    updateToggleAllBtnState();
-    // Render sample/scalar table without delay or redundant plot redraws
-    renderFullscreenCurveTable(bi);
+    requestAnimationFrame(() => {
+      drawSinglePlot(
+        el.fsPlotDiv,
+        {
+          traces: data.plotTraces,
+          xIsFreq: data.plotXIsFreq,
+          xLabel: data.plotXLabel,
+          yLabel: data.plotYLabel,
+          yRange: data.plotYRange
+        },
+        blockName,
+        1,
+        bi,
+        1
+      );
+      bindPvVisibilitySync();
+      initFsCurveMathPanel(bi);
+      initFsPlotResizer();
+      updateToggleAllBtnState();
+      window.focus();
+    });
   });
 }
 
@@ -5373,6 +5377,8 @@ function drawSinglePlot(plotDiv, { traces, xIsFreq, xLabel, yLabel, yRange }, bl
       ? { l: 56, r: 18, t: titleText ? 34 : 20, b: 42 }
       : isMulti
       ? { l: 64, r: 24, t: titleText ? 36 : 24, b: 46 }
+      : isFullscreen
+      ? { l: 84, r: 20, t: titleText ? 38 : 30, b: 54, autoexpand: false }
       : { l: 72, r: 35, t: titleText ? 38 : 30, b: 54 },
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
