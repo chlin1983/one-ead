@@ -1,0 +1,5 @@
+{
+  "_comment": "Pinned prebuilt WeKnora release. Digests come from the release's SHA256SUMS.txt and must be added via a reviewed commit. Downloads fail closed if an asset has no digest here.",
+  "tag": "v1.0.0-weknora-lite",
+  "assets": {}
+}
