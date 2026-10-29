@@ -314,9 +314,12 @@ def extract_pdf(path: str) -> str:
         d = page.get_text("dict")
         blocks = d.get("blocks", [])
 
-        # 3b. Extract figures and diagrams with local VLM
+        # 3b. Extract figures and diagrams (with local VLM visual analysis if available)
         figure_suppress_rects = []
-        fig_caption_pattern = re.compile(r"^(?:Figure|Fig\.|Chart|Diagram)\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE)
+        fig_caption_pattern = re.compile(
+            r"^(?:Figure|Fig\.?|Chart|Diagram|Exhibit|Plate)\s+([0-9]+(?:[\.\-_][0-9]+)*)",
+            re.IGNORECASE
+        )
         vlm_model = get_available_vision_model()
         fig_count_on_page = 0
 
@@ -342,52 +345,58 @@ def extract_pdf(path: str) -> str:
 
         drawing_rects = [_calc_dr_bbox(dr) for dr in drawings] if drawings else []
 
-        if vlm_model:
-            # First pass: find explicit figure captions (e.g. Figure 1.1 ...)
-            for b in blocks:
-                if b.get("type") != 0 or fig_count_on_page >= 4:
-                    continue
-                raw_text = "".join(s.get("text", "") for l in b.get("lines", []) for s in l.get("spans", [])).strip()
-                if fig_caption_pattern.match(raw_text):
-                    cap_rect = pymupdf.Rect(b["bbox"])
-                    # Look for vector drawings or raster images sitting above the caption (or below)
-                    above_cand = [
-                        r for r in drawing_rects
-                        if r.y1 <= cap_rect.y0 + 15 and r.y0 >= cap_rect.y0 - 450
-                        and max(r.width, r.height) >= 15
-                    ] + [
-                        pymupdf.Rect(ib["bbox"]) for ib in blocks
-                        if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y0 + 15
-                        and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y0 - 450
-                    ]
-                    below_cand = [
-                        r for r in drawing_rects
-                        if r.y0 >= cap_rect.y1 - 15 and r.y1 <= cap_rect.y1 + 450
-                        and max(r.width, r.height) >= 15
-                    ] + [
-                        pymupdf.Rect(ib["bbox"]) for ib in blocks
-                        if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y1 - 15
-                        and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y1 + 450
-                    ]
+        # First pass: find explicit figure captions (e.g. Figure 1.1, Fig 1-1, etc.)
+        for b in blocks:
+            if b.get("type") != 0 or fig_count_on_page >= 4:
+                continue
+            raw_text = "".join(s.get("text", "") for l in b.get("lines", []) for s in l.get("spans", [])).strip()
+            if fig_caption_pattern.match(raw_text):
+                cap_rect = pymupdf.Rect(b["bbox"])
+                # Look for vector drawings or raster images sitting above the caption (or below)
+                above_cand = [
+                    r for r in drawing_rects
+                    if r.y1 <= cap_rect.y0 + 15 and r.y0 >= cap_rect.y0 - 450
+                    and max(r.width, r.height) >= 15
+                ] + [
+                    pymupdf.Rect(ib["bbox"]) for ib in blocks
+                    if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y0 + 15
+                    and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y0 - 450
+                ]
+                below_cand = [
+                    r for r in drawing_rects
+                    if r.y0 >= cap_rect.y1 - 15 and r.y1 <= cap_rect.y1 + 450
+                    and max(r.width, r.height) >= 15
+                ] + [
+                    pymupdf.Rect(ib["bbox"]) for ib in blocks
+                    if ib.get("type") == 1 and pymupdf.Rect(ib["bbox"]).y0 >= cap_rect.y1 - 15
+                    and pymupdf.Rect(ib["bbox"]).y1 <= cap_rect.y1 + 450
+                ]
 
-                    cand_rects = above_cand if above_cand else below_cand
-                    if cand_rects:
-                        u_rect = cand_rects[0]
-                        for cr in cand_rects[1:]:
-                            u_rect |= cr
-                        crop_rect = pymupdf.Rect(
-                            max(0, min(u_rect.x0, cap_rect.x0) - 30),
-                            max(0, min(u_rect.y0, cap_rect.y0) - 15),
-                            min(page.rect.width, max(u_rect.x1, cap_rect.x1) + 30),
-                            min(page.rect.height, max(u_rect.y1, cap_rect.y1) + 15)
-                        )
+                cand_rects = above_cand if above_cand else below_cand
+                vlm_desc = ""
+                crop_rect = cap_rect
+                if cand_rects:
+                    u_rect = cand_rects[0]
+                    for cr in cand_rects[1:]:
+                        u_rect |= cr
+                    crop_rect = pymupdf.Rect(
+                        max(0, min(u_rect.x0, cap_rect.x0) - 30),
+                        max(0, min(u_rect.y0, cap_rect.y0) - 15),
+                        min(page.rect.width, max(u_rect.x1, cap_rect.x1) + 30),
+                        min(page.rect.height, max(u_rect.y1, cap_rect.y1) + 15)
+                    )
+                    if vlm_model:
                         pix = page.get_pixmap(clip=crop_rect, dpi=120)
                         vlm_desc = describe_image_with_vlm(pix.tobytes("png"), caption_hint=raw_text)
-                        if vlm_desc:
-                            fig_md = f"> **{raw_text}**\n>\n> *Visual Analysis*: {vlm_desc}"
-                            combined_items.append((crop_rect.y0, "figure", fig_md))
-                            figure_suppress_rects.append(crop_rect)
-                            fig_count_on_page += 1
+
+                if vlm_desc:
+                    fig_md = f"> **{raw_text}**\n>\n> *Visual Analysis*: {vlm_desc}"
+                else:
+                    fig_md = f"> **{raw_text}**"
+
+                combined_items.append((crop_rect.y0, "figure", fig_md))
+                figure_suppress_rects.append(crop_rect)
+                fig_count_on_page += 1
 
             # Second pass: stand-alone raster image blocks (type == 1) not covered by captioned figures
             for b in blocks:
