@@ -24,3 +24,16 @@ its SHA-256 matches a digest pinned in `release_manifest.json`. Do not bypass th
 the attestation check and PR review are what establish trust. Never auto-commit the manifest from CI.
 
 You can also supply a digest out-of-band for one-off installs with `WEKNORA_RELEASE_SHA256`.
+
+## Using your own local build
+
+`build_info.json` is plain metadata and is **never** treated as proof of integrity. A binary built from source
+(`build_lite.bat`) is therefore rejected by default. To use it, make an explicit decision for that exact file:
+
+```
+# compute the hash of the file you built, then accept exactly that hash
+Get-FileHash modules/weknora/WeKnora-lite.exe -Algorithm SHA256
+$env:WEKNORA_ACCEPT_LOCAL_BUILD_SHA256 = "<sha256>"      # or --accept-local-build-sha256 <sha256>
+```
+
+The result is labelled **UNVERIFIED**; if the file changes, the accepted digest no longer matches and it is rejected.
