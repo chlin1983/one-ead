@@ -269,6 +269,42 @@ def install_from_zip(zip_path: Path, module_dir: Path) -> Dict[str, Any]:
     return extracted
 
 
+def _is_local_source_build() -> bool:
+    """True if build_info.json describes a locally source-built binary (not a download)."""
+    try:
+        with open(MODULE_DIR / "build_info.json", "r", encoding="utf-8") as f:
+            info = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(info, dict) and not info.get("downloaded") and bool(info.get("pinned_commit"))
+
+
+def verify_existing_binary(target_exe: Path) -> Dict[str, Any]:
+    """Verify an already-installed binary instead of blindly trusting it.
+
+    * SHA-256 matches the pinned digest -> accepted as verified.
+    * Locally source-built binary (build_info.json from build_lite) -> accepted but reported as
+      unverified, since a local build can never match the prebuilt release digest.
+    * Anything else (mismatch, or no pinned digest) -> rejected; re-run with force after fixing.
+    """
+    base = {"binary_path": str(target_exe), "skipped": True}
+    try:
+        expected = expected_sha256(BINARY_NAME, None)
+        verify_sha256(target_exe, expected)
+        return {**base, "ok": True, "verified": True, "message": f"Existing binary verified against pinned SHA-256 ({target_exe})"}
+    except IntegrityError as exc:
+        if _is_local_source_build():
+            return {
+                **base, "ok": True, "verified": False, "local_build": True,
+                "message": f"Existing binary is a local source build (not release-verified): {exc}",
+            }
+        return {
+            **base, "ok": False, "verified": False,
+            "message": f"Existing binary at {target_exe} failed integrity verification: {exc}. "
+                       "Remove it or re-download with force after pinning a digest.",
+        }
+
+
 def download_weknora_binary(
     repo: str = DEFAULT_REPO,
     tag: Optional[str] = None,
@@ -279,12 +315,7 @@ def download_weknora_binary(
     """High-level downloader: checks candidates, downloads, and unpacks binary."""
     target_exe = MODULE_DIR / BINARY_NAME
     if target_exe.exists() and not force:
-        return {
-            "ok": True,
-            "message": f"Binary already exists at {target_exe}",
-            "binary_path": str(target_exe),
-            "skipped": True
-        }
+        return verify_existing_binary(target_exe)
 
     try:
         urls = [custom_url] if custom_url else get_candidate_urls(repo=repo, tag=tag)

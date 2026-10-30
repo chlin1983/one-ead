@@ -368,11 +368,33 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def is_same_origin_request(method: str, headers) -> bool:
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_tuple(scheme: str, hostname, port):
+    scheme = (scheme or "").lower()
+    if scheme not in _DEFAULT_PORTS or not hostname:
+        return None
+    return (scheme, hostname.lower(), port if port is not None else _DEFAULT_PORTS[scheme])
+
+
+def _origin_of_url(value: str):
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(value)
+        return _origin_tuple(u.scheme, u.hostname, u.port)
+    except ValueError:
+        return None
+
+
+def is_same_origin_request(method: str, headers, scheme: str = "http") -> bool:
     """CSRF check for state-changing requests using Fetch Metadata, Origin and Referer.
 
-    Browsers always send Sec-Fetch-Site/Origin on cross-site writes, so a page served
-    from another port or host is rejected. Non-browser clients that send none of these
+    Origin/Referer are compared as full origins (scheme, hostname, port), not just the host
+    string, against the origin the request was actually sent to (`scheme` + Host header).
+    Browsers always send Sec-Fetch-Site/Origin on cross-site writes, so a page served from
+    another port, host or scheme is rejected. Non-browser clients that send none of these
     headers (curl, tests, scripts) are allowed; they still need the session token.
     """
     if (method or "").upper() in SAFE_METHODS:
@@ -382,12 +404,17 @@ def is_same_origin_request(method: str, headers) -> bool:
     site = (headers.get("sec-fetch-site") or "").lower()
     if site and site not in ("same-origin", "none"):
         return False
-    host = (headers.get("host") or "").lower()
+
+    host = headers.get("host") or ""
+    try:
+        h = urlsplit("//" + host)
+        expected = _origin_tuple(scheme, h.hostname, h.port)
+    except ValueError:
+        expected = None
+
     for name in ("origin", "referer"):
         value = headers.get(name)
         if value:
-            if value == "null":
-                return False
-            if urlsplit(value).netloc.lower() != host:
+            if expected is None or _origin_of_url(value) != expected:
                 return False
     return True

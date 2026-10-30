@@ -726,3 +726,36 @@ def test_forged_and_expired_tickets_rejected(tmp_path, monkeypatch):
     assert consume_login_ticket(f"{nonce}.{int(expiry) + 999}.{sig}") is False  # tampered expiry
     assert consume_login_ticket(f"{nonce}.{expiry}.{'0' * 64}") is False  # bad signature
     assert consume_login_ticket(good) is True
+
+
+# ==============================================================================
+# Full-origin (scheme, hostname, port) comparison
+# ==============================================================================
+from server.security import is_same_origin_request  # noqa: E402
+
+
+@pytest.mark.parametrize("headers,scheme,expected", [
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:8100"}, "http", True),
+    ({"host": "127.0.0.1:8100", "referer": "http://127.0.0.1:8100/some/page?x=1"}, "http", True),
+    ({"host": "localhost", "origin": "http://localhost:80"}, "http", True),  # default port equivalence
+    ({"host": "LOCALHOST:8100", "origin": "http://localhost:8100"}, "http", True),  # case-insensitive
+    ({"host": "127.0.0.1:8100", "origin": "https://127.0.0.1:8100"}, "http", False),  # scheme differs
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:8101"}, "http", False),  # port differs
+    ({"host": "127.0.0.1:8100", "origin": "http://localhost:8100"}, "http", False),  # hostname differs
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:8100@evil.example"}, "http", False),
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:8100.evil.example"}, "http", False),
+    ({"host": "127.0.0.1:8100", "origin": "ftp://127.0.0.1:8100"}, "http", False),
+    ({"host": "127.0.0.1:8100", "origin": "null"}, "http", False),
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:notaport"}, "http", False),
+    ({"host": "", "origin": "http://127.0.0.1:8100"}, "http", False),  # cannot establish expected origin
+    ({"host": "127.0.0.1:8100", "origin": "http://127.0.0.1:8100", "sec-fetch-site": "cross-site"}, "http", False),
+    ({"host": "example.com", "origin": "https://example.com"}, "https", True),
+    ({"host": "example.com", "origin": "http://example.com"}, "https", False),  # downgrade
+])
+def test_full_origin_comparison(headers, scheme, expected):
+    assert is_same_origin_request("POST", headers, scheme) is expected
+
+
+def test_origin_check_skips_safe_methods_and_header_less_clients():
+    assert is_same_origin_request("GET", {"host": "a", "origin": "http://evil"}, "http") is True
+    assert is_same_origin_request("POST", {"host": "127.0.0.1:8100"}, "http") is True

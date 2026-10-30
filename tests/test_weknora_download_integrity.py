@@ -192,3 +192,55 @@ def test_committed_manifest_still_fails_closed_without_digests(monkeypatch):
     monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {}})
     with pytest.raises(db.IntegrityError):
         db.expected_sha256(db.DEFAULT_ASSET_ZIP, "v1")
+
+
+# ==============================================================================
+# Existing-binary verification
+# ==============================================================================
+def _install_fake_binary(tmp_path, monkeypatch, data=b"existing-exe"):
+    monkeypatch.setattr(db, "MODULE_DIR", tmp_path)
+    (tmp_path / db.BINARY_NAME).write_bytes(data)
+    monkeypatch.delenv("WEKNORA_RELEASE_SHA256", raising=False)
+
+
+def test_existing_binary_verified_against_pinned_digest(tmp_path, monkeypatch):
+    _install_fake_binary(tmp_path, monkeypatch)
+    digest = hashlib.sha256(b"existing-exe").hexdigest()
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {db.BINARY_NAME: digest}})
+    res = db.download_weknora_binary()
+    assert res["ok"] and res["verified"] is True
+
+
+def test_existing_binary_tampered_is_rejected(tmp_path, monkeypatch):
+    _install_fake_binary(tmp_path, monkeypatch, data=b"tampered")
+    digest = hashlib.sha256(b"existing-exe").hexdigest()
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {db.BINARY_NAME: digest}})
+    res = db.download_weknora_binary()
+    assert res["ok"] is False and res["verified"] is False
+
+
+def test_existing_binary_without_pinned_digest_rejected_unless_local_build(tmp_path, monkeypatch):
+    _install_fake_binary(tmp_path, monkeypatch)
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {}})
+    assert db.download_weknora_binary()["ok"] is False  # unknown provenance: fail closed
+
+    import json as _json
+    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc", "edition": "lite"}))
+    res = db.download_weknora_binary()
+    assert res["ok"] is True and res["verified"] is False and res["local_build"] is True
+
+    # A downloaded binary (build_info says downloaded) never gets the local-build exemption
+    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc", "downloaded": True}))
+    assert db.download_weknora_binary()["ok"] is False
+
+
+# ==============================================================================
+# GitHub Actions pinning
+# ==============================================================================
+def test_workflow_actions_pinned_to_commit_sha():
+    import re
+    wf = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "build-weknora.yml")
+    uses = re.findall(r"^\s*(?:-\s*)?uses:\s*(\S+)", open(wf, encoding="utf-8").read(), re.M)
+    assert uses
+    for ref in uses:
+        assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", ref), f"not pinned to a full commit SHA: {ref}"

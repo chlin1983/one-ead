@@ -109,7 +109,7 @@ def create_app() -> FastAPI:
         path = request.url.path
 
         # 0. CSRF defence: reject untrusted cross-origin state-changing requests
-        if not is_same_origin_request(request.method, request.headers):
+        if not is_same_origin_request(request.method, request.headers, request.url.scheme):
             return JSONResponse(
                 {"status": "error", "message": "Forbidden: cross-origin request blocked."},
                 status_code=403,
