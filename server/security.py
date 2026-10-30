@@ -105,8 +105,42 @@ def create_login_ticket() -> str:
     return f"{nonce}.{expiry}.{_sign_ticket(nonce, expiry)}"
 
 
+def _replay_dir() -> Path:
+    override = os.environ.get("ONE_EAD_TICKET_REPLAY_DIR", "").strip()
+    return Path(override) if override else DATA_DIR / ".used_tickets"
+
+
+def _claim_nonce(nonce: str) -> bool:
+    """Atomically claim a nonce in a shared on-disk store (O_CREAT|O_EXCL).
+
+    Shared by every server process on this machine and persistent across restarts, so a
+    ticket can be redeemed exactly once. Any storage error fails closed (ticket rejected).
+    """
+    import hashlib
+
+    d = _replay_dir()
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        # Purge markers that can no longer matter (their tickets have expired)
+        cutoff = time.time() - 2 * TICKET_TTL_SECONDS - 60
+        for entry in os.scandir(d):
+            try:
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    os.unlink(entry.path)
+            except OSError:
+                pass
+        marker = d / hashlib.sha256(nonce.encode()).hexdigest()[:40]
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+
+
 def consume_login_ticket(ticket: Optional[str]) -> bool:
-    """Verify signature/expiry and consume a ticket. Replay is rejected."""
+    """Verify signature/expiry and atomically consume a ticket. Replay is rejected."""
     if not ticket or not isinstance(ticket, str):
         return False
     parts = ticket.strip().split(".")
@@ -120,13 +154,9 @@ def consume_login_ticket(ticket: Optional[str]) -> bool:
     except ValueError:
         return False
     now = time.time()
-    with _TICKETS_LOCK:
-        for n in [n for n, e in _TICKETS.items() if e < now]:
-            _TICKETS.pop(n, None)
-        if now > exp or nonce in _TICKETS:
-            return False
-        _TICKETS[nonce] = exp
-    return True
+    if now > exp or exp > now + TICKET_TTL_SECONDS + 5:
+        return False
+    return _claim_nonce(nonce)
 
 
 def redact_sensitive_url(url_or_query: str) -> str:

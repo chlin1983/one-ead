@@ -493,22 +493,19 @@ def test_unauthenticated_requests_blocked(unauthenticated_client):
     assert res_favicon.status_code != 401
 
 
-def test_auth_query_parameter_handshake(unauthenticated_client):
+def test_legacy_query_string_auth_is_rejected(unauthenticated_client):
+    """Query-string auth (?auth=<token>) is removed: even a VALID token must not authenticate."""
     token = get_portal_token()
-
-    # Valid token via ?auth=<token> succeeds directly (200 OK), sets HttpOnly SameSite=Lax cookie,
-    # avoiding unnecessary 303 redirect roundtrips and race conditions
-    res = unauthenticated_client.get(f"/?auth={token}")
-    assert res.status_code == 200
-    cookie_header = res.headers.get("set-cookie", "")
-    assert SESSION_COOKIE_NAME in cookie_header
-    assert "samesite=lax" in cookie_header.lower()
-    assert "httponly" in cookie_header.lower()
-
-    # Invalid token must be rejected with 401 and lock screen
-    res_invalid = unauthenticated_client.get("/?auth=invalid-token-12345", follow_redirects=False)
-    assert res_invalid.status_code == 401
-    assert "Invalid session authentication token" in res_invalid.text
+    for url in (f"/?auth={token}", f"/api/modules?auth={token}"):
+        res = unauthenticated_client.get(url, follow_redirects=False)
+        assert SESSION_COOKIE_NAME not in res.headers.get("set-cookie", "")
+        assert "Set-Cookie" not in res.headers
+        if url.startswith("/api/"):
+            assert res.status_code == 401
+        else:
+            assert "type=\"password\"" in res.text  # lock screen, not the app
+    # No session was established by the attempts above
+    assert unauthenticated_client.get("/api/modules").status_code == 401
 
 
 def test_header_token_authentication(unauthenticated_client):
@@ -680,3 +677,52 @@ def test_csrf_blocks_cross_origin_login(unauthenticated_client):
         "/auth/login", data={"token": "x"}, headers={"Origin": "http://evil.example"}
     )
     assert r.status_code == 403
+
+
+# ==============================================================================
+# Ticket replay protection: shared, atomic, restart-proof
+# ==============================================================================
+def test_ticket_replay_blocked_across_processes_and_restart(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setenv("ONE_EAD_TICKET_REPLAY_DIR", str(tmp_path / "replay"))
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from server.security import consume_login_ticket; "
+        "print(consume_login_ticket(sys.argv[2]))"
+    )
+    ticket = create_login_ticket()
+
+    def run_worker(_):
+        out = subprocess.run(
+            [sys.executable, "-c", code, root, ticket], capture_output=True, text=True, env=os.environ.copy()
+        )
+        return out.stdout.strip()
+
+    # Several independent server "workers" race to redeem the same ticket: exactly one wins
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(run_worker, range(4)))
+    assert results.count("True") == 1, results
+
+    # A "restarted" process (fresh interpreter) and this process both see it as consumed
+    assert run_worker(0) == "False"
+    assert consume_login_ticket(ticket) is False
+
+
+def test_ticket_replay_store_failure_fails_closed(tmp_path, monkeypatch):
+    blocker = tmp_path / "file_not_dir"
+    blocker.write_text("x")
+    monkeypatch.setenv("ONE_EAD_TICKET_REPLAY_DIR", str(blocker / "sub"))
+    assert consume_login_ticket(create_login_ticket()) is False
+
+
+def test_forged_and_expired_tickets_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("ONE_EAD_TICKET_REPLAY_DIR", str(tmp_path / "replay"))
+    good = create_login_ticket()
+    nonce, expiry, sig = good.split(".")
+    assert consume_login_ticket(f"{nonce}.{int(expiry) + 999}.{sig}") is False  # tampered expiry
+    assert consume_login_ticket(f"{nonce}.{expiry}.{'0' * 64}") is False  # bad signature
+    assert consume_login_ticket(good) is True

@@ -22,7 +22,6 @@ from fastapi.staticfiles import StaticFiles
 from server.registry import discover_modules, save_saved_order
 from server.security import (
     AUTH_HEADER_NAME,
-    AUTH_PARAM_NAME,
     SESSION_COOKIE_NAME,
     TICKET_PARAM_NAME,
     consume_login_ticket,
@@ -149,25 +148,11 @@ def create_app() -> FastAPI:
                     headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
                 )
 
-        # 3. First-time authentication via query parameter (?auth=<token>) - maintained for backward compatibility
-        auth_param = request.query_params.get(AUTH_PARAM_NAME)
-        has_valid_auth_param = False
-        if auth_param is not None:
-            if verify_portal_token(auth_param):
-                has_valid_auth_param = True
-            else:
-                return HTMLResponse(
-                    render_lock_screen_html(error_message="Invalid session authentication token."),
-                    status_code=401,
-                    headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"},
-                )
-
-        # 4. Verify session token from cookie, header, or query param
+        # 3. Verify session token from cookie or header (query-string auth is NOT accepted)
         cookie_tok = request.cookies.get(SESSION_COOKIE_NAME)
         header_tok = request.headers.get(AUTH_HEADER_NAME)
         is_authenticated = (
-            has_valid_auth_param
-            or verify_portal_token(cookie_tok)
+            verify_portal_token(cookie_tok)
             or verify_portal_token(header_tok)
         )
 
@@ -189,17 +174,6 @@ def create_app() -> FastAPI:
             )
 
         response = await call_next(request)
-
-        # Attach persistent session cookie when authenticating via ?auth=
-        if has_valid_auth_param and auth_param:
-            response.set_cookie(
-                key=SESSION_COOKIE_NAME,
-                value=auth_param.strip(),
-                max_age=31536000,  # 1 year session persistence on local machine
-                httponly=True,
-                samesite="lax",
-                path="/",
-            )
 
         # Apply strict Referrer-Policy and security headers
         response.headers["Referrer-Policy"] = "no-referrer"
