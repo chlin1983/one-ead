@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -175,46 +176,133 @@ def download_stream(
         raise exc
 
 
+MAX_ZIP_ENTRIES = 20000
+MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 ** 3  # 2 GiB
+
+
+def _safe_member_parts(member: str) -> List[str]:
+    """Split an archive member name into safe path components or raise IntegrityError.
+
+    Rejects absolute paths, drive prefixes / alternate data streams, '..' components,
+    NUL bytes and empty/dot-only names.
+    """
+    if not member or "\x00" in member:
+        raise IntegrityError(f"Unsafe archive entry (empty or NUL): {member!r}")
+    norm = member.replace("\\", "/")
+    if norm.startswith("/") or re.match(r"^[A-Za-z]:", norm) or norm.startswith("//"):
+        raise IntegrityError(f"Unsafe archive entry (absolute path): {member!r}")
+    parts = [p for p in norm.split("/") if p not in ("", ".")]
+    if not parts:
+        raise IntegrityError(f"Unsafe archive entry (empty path): {member!r}")
+    for part in parts:
+        if part == ".." or ":" in part:
+            raise IntegrityError(f"Unsafe archive entry (traversal or drive prefix): {member!r}")
+    return parts
+
+
+def _confined_target(root: Path, parts: List[str]) -> Path:
+    """Resolve root/parts and prove the result stays inside root."""
+    root_resolved = root.resolve()
+    target = root_resolved.joinpath(*parts).resolve()
+    if target != root_resolved and root_resolved not in target.parents:
+        raise IntegrityError(f"Archive entry escapes extraction directory: {'/'.join(parts)}")
+    return target
+
+
+def _validate_archive(zf: zipfile.ZipFile) -> None:
+    infos = zf.infolist()
+    if len(infos) > MAX_ZIP_ENTRIES:
+        raise IntegrityError("Archive has too many entries")
+    if sum(i.file_size for i in infos) > MAX_ZIP_UNCOMPRESSED_BYTES:
+        raise IntegrityError("Archive uncompressed size exceeds limit")
+    for info in infos:
+        _safe_member_parts(info.filename)
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(mode):
+            raise IntegrityError(f"Archive contains a symbolic link: {info.filename!r}")
+
+
+def _write_atomic(zf: zipfile.ZipFile, info: zipfile.ZipInfo, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".part")
+    with zf.open(info) as src, open(tmp, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    os.replace(tmp, target)
+
+
 def install_from_zip(zip_path: Path, module_dir: Path) -> Dict[str, Any]:
-    """Extracts binary and web frontend assets from release zip."""
+    """Safely extract the binary and web assets from a release zip.
+
+    The whole archive is validated first (no absolute/drive/'..' names, no symlinks, size
+    limits) and every destination is resolved and confined to its intended directory.
+    Any unsafe entry aborts the install with IntegrityError before files are written.
+    """
     extracted = {"binary": False, "web": False, "files": []}
+    dist_root = module_dir / "dist"
     with zipfile.ZipFile(zip_path, "r") as zf:
-        namelist = zf.namelist()
-        for member in namelist:
-            norm = member.replace("\\", "/").strip()
-            filename = Path(norm).name
-            if filename.lower() == BINARY_NAME.lower():
-                # Extract binary directly into MODULE_DIR
-                target_exe = module_dir / BINARY_NAME
-                with zf.open(member) as src, open(target_exe, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+        _validate_archive(zf)
+        for info in zf.infolist():
+            parts = _safe_member_parts(info.filename)
+            is_dir = info.filename.endswith("/") or info.filename.endswith("\\")
+
+            if not is_dir and parts[-1].lower() == BINARY_NAME.lower():
+                target_exe = _confined_target(module_dir, [BINARY_NAME])
+                _write_atomic(zf, info, target_exe)
                 if os.name != "nt":
                     try:
                         target_exe.chmod(0o755)
-                    except Exception:
+                    except OSError:
                         pass
                 extracted["binary"] = True
                 extracted["files"].append(str(target_exe))
 
-            # Extract web dist if present
-            if "/dist/" in norm or norm.startswith("dist/") or "/web/" in norm or norm.startswith("web/"):
-                sub_parts = norm.split("/")
-                try:
-                    idx = sub_parts.index("dist") if "dist" in sub_parts else sub_parts.index("web")
-                    rel_sub = "/".join(sub_parts[idx + 1:])
-                    if rel_sub:
-                        target_file = module_dir / "dist" / rel_sub
-                        if norm.endswith("/"):
-                            target_file.mkdir(parents=True, exist_ok=True)
-                        else:
-                            target_file.parent.mkdir(parents=True, exist_ok=True)
-                            with zf.open(member) as src, open(target_file, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
-                            extracted["web"] = True
-                except ValueError:
-                    pass
+            # Web dist assets: everything after the first 'dist' or 'web' component
+            marker = next((i for i, p in enumerate(parts) if p in ("dist", "web")), None)
+            if marker is not None and len(parts) > marker + 1:
+                target_file = _confined_target(dist_root, parts[marker + 1:])
+                if is_dir:
+                    target_file.mkdir(parents=True, exist_ok=True)
+                else:
+                    _write_atomic(zf, info, target_file)
+                    extracted["web"] = True
 
     return extracted
+
+
+def _is_local_source_build() -> bool:
+    """True if build_info.json describes a locally source-built binary (not a download)."""
+    try:
+        with open(MODULE_DIR / "build_info.json", "r", encoding="utf-8") as f:
+            info = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(info, dict) and not info.get("downloaded") and bool(info.get("pinned_commit"))
+
+
+def verify_existing_binary(target_exe: Path) -> Dict[str, Any]:
+    """Verify an already-installed binary instead of blindly trusting it.
+
+    * SHA-256 matches the pinned digest -> accepted as verified.
+    * Locally source-built binary (build_info.json from build_lite) -> accepted but reported as
+      unverified, since a local build can never match the prebuilt release digest.
+    * Anything else (mismatch, or no pinned digest) -> rejected; re-run with force after fixing.
+    """
+    base = {"binary_path": str(target_exe), "skipped": True}
+    try:
+        expected = expected_sha256(BINARY_NAME, None)
+        verify_sha256(target_exe, expected)
+        return {**base, "ok": True, "verified": True, "message": f"Existing binary verified against pinned SHA-256 ({target_exe})"}
+    except IntegrityError as exc:
+        if _is_local_source_build():
+            return {
+                **base, "ok": True, "verified": False, "local_build": True,
+                "message": f"Existing binary is a local source build (not release-verified): {exc}",
+            }
+        return {
+            **base, "ok": False, "verified": False,
+            "message": f"Existing binary at {target_exe} failed integrity verification: {exc}. "
+                       "Remove it or re-download with force after pinning a digest.",
+        }
 
 
 def download_weknora_binary(
@@ -227,12 +315,7 @@ def download_weknora_binary(
     """High-level downloader: checks candidates, downloads, and unpacks binary."""
     target_exe = MODULE_DIR / BINARY_NAME
     if target_exe.exists() and not force:
-        return {
-            "ok": True,
-            "message": f"Binary already exists at {target_exe}",
-            "binary_path": str(target_exe),
-            "skipped": True
-        }
+        return verify_existing_binary(target_exe)
 
     try:
         urls = [custom_url] if custom_url else get_candidate_urls(repo=repo, tag=tag)

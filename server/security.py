@@ -105,8 +105,42 @@ def create_login_ticket() -> str:
     return f"{nonce}.{expiry}.{_sign_ticket(nonce, expiry)}"
 
 
+def _replay_dir() -> Path:
+    override = os.environ.get("ONE_EAD_TICKET_REPLAY_DIR", "").strip()
+    return Path(override) if override else DATA_DIR / ".used_tickets"
+
+
+def _claim_nonce(nonce: str) -> bool:
+    """Atomically claim a nonce in a shared on-disk store (O_CREAT|O_EXCL).
+
+    Shared by every server process on this machine and persistent across restarts, so a
+    ticket can be redeemed exactly once. Any storage error fails closed (ticket rejected).
+    """
+    import hashlib
+
+    d = _replay_dir()
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        # Purge markers that can no longer matter (their tickets have expired)
+        cutoff = time.time() - 2 * TICKET_TTL_SECONDS - 60
+        for entry in os.scandir(d):
+            try:
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    os.unlink(entry.path)
+            except OSError:
+                pass
+        marker = d / hashlib.sha256(nonce.encode()).hexdigest()[:40]
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+
+
 def consume_login_ticket(ticket: Optional[str]) -> bool:
-    """Verify signature/expiry and consume a ticket. Replay is rejected."""
+    """Verify signature/expiry and atomically consume a ticket. Replay is rejected."""
     if not ticket or not isinstance(ticket, str):
         return False
     parts = ticket.strip().split(".")
@@ -120,13 +154,9 @@ def consume_login_ticket(ticket: Optional[str]) -> bool:
     except ValueError:
         return False
     now = time.time()
-    with _TICKETS_LOCK:
-        for n in [n for n, e in _TICKETS.items() if e < now]:
-            _TICKETS.pop(n, None)
-        if now > exp or nonce in _TICKETS:
-            return False
-        _TICKETS[nonce] = exp
-    return True
+    if now > exp or exp > now + TICKET_TTL_SECONDS + 5:
+        return False
+    return _claim_nonce(nonce)
 
 
 def redact_sensitive_url(url_or_query: str) -> str:
@@ -338,11 +368,33 @@ def render_lock_screen_html(error_message: Optional[str] = None) -> str:
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def is_same_origin_request(method: str, headers) -> bool:
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_tuple(scheme: str, hostname, port):
+    scheme = (scheme or "").lower()
+    if scheme not in _DEFAULT_PORTS or not hostname:
+        return None
+    return (scheme, hostname.lower(), port if port is not None else _DEFAULT_PORTS[scheme])
+
+
+def _origin_of_url(value: str):
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(value)
+        return _origin_tuple(u.scheme, u.hostname, u.port)
+    except ValueError:
+        return None
+
+
+def is_same_origin_request(method: str, headers, scheme: str = "http") -> bool:
     """CSRF check for state-changing requests using Fetch Metadata, Origin and Referer.
 
-    Browsers always send Sec-Fetch-Site/Origin on cross-site writes, so a page served
-    from another port or host is rejected. Non-browser clients that send none of these
+    Origin/Referer are compared as full origins (scheme, hostname, port), not just the host
+    string, against the origin the request was actually sent to (`scheme` + Host header).
+    Browsers always send Sec-Fetch-Site/Origin on cross-site writes, so a page served from
+    another port, host or scheme is rejected. Non-browser clients that send none of these
     headers (curl, tests, scripts) are allowed; they still need the session token.
     """
     if (method or "").upper() in SAFE_METHODS:
@@ -352,12 +404,17 @@ def is_same_origin_request(method: str, headers) -> bool:
     site = (headers.get("sec-fetch-site") or "").lower()
     if site and site not in ("same-origin", "none"):
         return False
-    host = (headers.get("host") or "").lower()
+
+    host = headers.get("host") or ""
+    try:
+        h = urlsplit("//" + host)
+        expected = _origin_tuple(scheme, h.hostname, h.port)
+    except ValueError:
+        expected = None
+
     for name in ("origin", "referer"):
         value = headers.get(name)
         if value:
-            if value == "null":
-                return False
-            if urlsplit(value).netloc.lower() != host:
+            if expected is None or _origin_of_url(value) != expected:
                 return False
     return True
