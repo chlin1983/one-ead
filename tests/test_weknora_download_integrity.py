@@ -219,18 +219,46 @@ def test_existing_binary_tampered_is_rejected(tmp_path, monkeypatch):
     assert res["ok"] is False and res["verified"] is False
 
 
-def test_existing_binary_without_pinned_digest_rejected_unless_local_build(tmp_path, monkeypatch):
-    _install_fake_binary(tmp_path, monkeypatch)
-    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {}})
-    assert db.download_weknora_binary()["ok"] is False  # unknown provenance: fail closed
-
+def test_build_info_metadata_is_never_trusted(tmp_path, monkeypatch):
     import json as _json
-    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc", "edition": "lite"}))
-    res = db.download_weknora_binary()
-    assert res["ok"] is True and res["verified"] is False and res["local_build"] is True
+    _install_fake_binary(tmp_path, monkeypatch)
+    monkeypatch.delenv(db.ACCEPT_LOCAL_BUILD_ENV, raising=False)
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {}})
+    assert db.download_weknora_binary()["ok"] is False  # no pinned digest, no explicit decision
 
-    # A downloaded binary (build_info says downloaded) never gets the local-build exemption
-    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc", "downloaded": True}))
+    # Forged "local build" metadata must not make an unverified executable acceptable
+    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc", "edition": "lite"}))
+    assert db.download_weknora_binary()["ok"] is False
+    assert not hasattr(db, "_is_local_source_build")
+
+
+def test_unverified_local_build_requires_explicit_matching_digest(tmp_path, monkeypatch):
+    _install_fake_binary(tmp_path, monkeypatch)
+    monkeypatch.delenv(db.ACCEPT_LOCAL_BUILD_ENV, raising=False)
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {}})
+    good = hashlib.sha256(b"existing-exe").hexdigest()
+
+    res = db.download_weknora_binary(accept_local_build_sha256=good)
+    assert res["ok"] is True and res["verified"] is False and res["local_build"] is True
+    assert "UNVERIFIED" in res["message"]
+
+    # Same decision via environment variable
+    monkeypatch.setenv(db.ACCEPT_LOCAL_BUILD_ENV, good)
+    assert db.download_weknora_binary()["local_build"] is True
+
+    # Decision for a different file / swapped executable is rejected
+    (tmp_path / db.BINARY_NAME).write_bytes(b"swapped-after-acceptance")
+    assert db.download_weknora_binary()["ok"] is False
+    assert db.download_weknora_binary(accept_local_build_sha256="not-a-digest")["ok"] is False
+
+
+def test_pinned_mismatch_not_overridden_by_metadata(tmp_path, monkeypatch):
+    import json as _json
+    _install_fake_binary(tmp_path, monkeypatch, data=b"tampered")
+    monkeypatch.delenv(db.ACCEPT_LOCAL_BUILD_ENV, raising=False)
+    digest = hashlib.sha256(b"existing-exe").hexdigest()
+    monkeypatch.setattr(db, "load_manifest", lambda: {"tag": "v1", "assets": {db.BINARY_NAME: digest}})
+    (tmp_path / "build_info.json").write_text(_json.dumps({"pinned_commit": "abc"}))
     assert db.download_weknora_binary()["ok"] is False
 
 
