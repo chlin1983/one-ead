@@ -100,21 +100,21 @@ def _write_json(path: Path, data) -> None:
     tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, path)
     try:
-        ok = secure_path_permissions(path, is_dir=False)
+        ok = secure_path_permissions(tmp, is_dir=False)
     except Exception as exc:
         try:
-            path.unlink()
+            tmp.unlink()
         except OSError:
             pass
-        raise PermissionError(f"Failed to secure NTFS permissions on {path}: {exc}") from exc
+        raise PermissionError(f"Failed to secure NTFS permissions on {tmp}: {exc}") from exc
     if not ok:
         try:
-            path.unlink()
+            tmp.unlink()
         except OSError:
             pass
-        raise PermissionError(f"Failed to secure NTFS permissions on {path}")
+        raise PermissionError(f"Failed to secure NTFS permissions on {tmp}")
+    os.replace(tmp, path)
 
 
 def get_config() -> dict:

@@ -2099,3 +2099,61 @@ def test_weknora_download_fails_closed_when_permissions_fail(tmp_path, monkeypat
 
     installed_exe = target_dir / download_binary.BINARY_NAME
     assert not installed_exe.exists()
+
+
+def test_deep_tutor_write_json_preserves_existing_file_when_permissions_fail(tmp_path, monkeypatch):
+    from modules.deep_tutor import deep_tutor
+
+    settings_file = tmp_path / "system.json"
+    original_data = {"existing_key": "original_value", "nested": {"counter": 42}}
+    settings_file.write_text(json.dumps(original_data), encoding="utf-8")
+
+    # Simulate permission hardening failure
+    monkeypatch.setattr(deep_tutor, "secure_path_permissions", lambda p, **kw: False)
+
+    # Attempt to overwrite existing settings file
+    new_data = {"existing_key": "overwritten", "malicious": True}
+    with pytest.raises(PermissionError, match="Failed to secure NTFS permissions"):
+        deep_tutor._write_json(settings_file, new_data)
+
+    # Verify existing settings file remains intact and completely unchanged
+    assert settings_file.exists()
+    assert json.loads(settings_file.read_text(encoding="utf-8")) == original_data
+
+    # Verify no temporary files remain in directory
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_weknora_raw_binary_download_fails_closed_when_permissions_fail(tmp_path, monkeypatch):
+    import hashlib
+    from modules.weknora.scripts import download_binary
+    import server.security as sec
+
+    # Route installation directory and metadata files to isolated tmp_path
+    monkeypatch.setattr(download_binary, "MODULE_DIR", tmp_path)
+    monkeypatch.setattr(download_binary.os, "name", "nt")
+    monkeypatch.setattr(sec, "secure_path_permissions", lambda p, **kw: False)
+
+    fake_raw_binary = b"MZrawexecutableforweknora"
+    raw_sha = hashlib.sha256(fake_raw_binary).hexdigest()
+
+    def fake_download_stream(url, target_path, progress):
+        target_path.write_bytes(fake_raw_binary)
+
+    monkeypatch.setattr(download_binary, "download_stream", fake_download_stream)
+    monkeypatch.setattr(download_binary, "expected_sha256", lambda asset, tag: raw_sha)
+
+    custom_url = "https://github.com/chlin1983/one-ead/releases/download/v1.0.0/WeKnora-lite.exe"
+    res = download_binary.download_weknora_binary(custom_url=custom_url, force=True)
+
+    # 1. Installation reports failure
+    assert res["ok"] is False
+    assert any("Failed to secure NTFS permissions" in str(err) for err in res.get("errors", [])) or "Failed to secure NTFS permissions" in res.get("message", "")
+
+    # 2. The newly downloaded executable is not left behind
+    target_exe = tmp_path / download_binary.BINARY_NAME
+    assert not target_exe.exists()
+
+    # 3. No successful installation metadata is written
+    build_info = tmp_path / "build_info.json"
+    assert not build_info.exists()
