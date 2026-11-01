@@ -97,25 +97,26 @@ def get_portal_token() -> str:
         return _CACHED_TOKEN
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    secure_path_permissions(DATA_DIR, is_dir=True)
+    if not secure_path_permissions(DATA_DIR, is_dir=True):
+        raise PermissionError(f"Failed to confirm secure permissions on portal data directory at {DATA_DIR}")
 
     if TOKEN_FILE.exists():
-        try:
-            tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
-            if len(tok) >= 32:
-                _CACHED_TOKEN = tok
-                secure_path_permissions(TOKEN_FILE, is_dir=False)
-                return tok
-        except Exception:
-            pass
+        tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if len(tok) >= 32:
+            _CACHED_TOKEN = tok
+            if not secure_path_permissions(TOKEN_FILE, is_dir=False):
+                raise PermissionError(f"Failed to confirm secure permissions on existing portal session token at {TOKEN_FILE}")
+            return tok
 
     # Generate high-entropy 256-bit token
     new_token = secrets.token_urlsafe(32)
-    try:
-        TOKEN_FILE.write_text(new_token, encoding="utf-8")
-        secure_path_permissions(TOKEN_FILE, is_dir=False)
-    except Exception:
-        pass
+    TOKEN_FILE.write_text(new_token, encoding="utf-8")
+    if not secure_path_permissions(TOKEN_FILE, is_dir=False):
+        try:
+            TOKEN_FILE.unlink()
+        except OSError:
+            pass
+        raise PermissionError(f"Failed to apply secure NTFS permissions on newly generated portal token at {TOKEN_FILE}")
 
     _CACHED_TOKEN = new_token
     return new_token
@@ -172,11 +173,17 @@ def _claim_nonce(nonce: str) -> bool:
                     os.unlink(entry.path)
             except OSError:
                 pass
-        secure_path_permissions(d, is_dir=True)
+        if not secure_path_permissions(d, is_dir=True):
+            return False
         marker = d / hashlib.sha256(nonce.encode()).hexdigest()[:40]
         fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
-        secure_path_permissions(marker, is_dir=False)
+        if not secure_path_permissions(marker, is_dir=False):
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+            return False
         return True
     except FileExistsError:
         return False

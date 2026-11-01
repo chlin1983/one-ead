@@ -260,7 +260,7 @@ def delete_document(doc_id: str) -> dict:
 
 
 @router.post("/documents/{doc_id}/sync-weknora")
-def sync_to_weknora(doc_id: str, approved: bool = True) -> dict:
+def sync_to_weknora(doc_id: str, approved: bool = False) -> dict:
     if not approved:
         raise HTTPException(400, "Document synchronization to WeKnora requires explicit user approval.")
     try:
@@ -273,12 +273,15 @@ def sync_to_weknora(doc_id: str, approved: bool = True) -> dict:
 
 
 @router.post("/scan")
-def scan_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False) -> dict:
+def scan_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False, approved: bool = False) -> dict:
     """Manually triggers an immediate scan of ~/Documents/OneEAD_Archive/documents.
     
-    Automatic WeKnora synchronization is disabled by default.
+    Automatic WeKnora synchronization is disabled by default. If sync_weknora is requested,
+    it requires explicit user approval (approved=True).
     """
-    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang, sync_weknora=sync_weknora, approved=False)
+    if sync_weknora and not approved:
+        raise HTTPException(400, "WeKnora synchronization during scan requires explicit user approval.")
+    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang, sync_weknora=sync_weknora, approved=approved)
 
 
 MODULE = PortalModule(

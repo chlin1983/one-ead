@@ -187,8 +187,19 @@ def get_missing_packages() -> List[Tuple[str, str, str]]:
     return missing
 
 
-def mark_verified() -> None:
-    """Write .deps_ok stamp with current signature."""
+def mark_verified() -> bool:
+    """Verifies installed packages against requirements.lock and writes .deps_ok stamp.
+
+    Returns True if verification succeeded and stamp was written, False otherwise.
+    """
+    if LOCK_FILE.exists():
+        ok, mismatches = verify_installed_against_lock(LOCK_FILE)
+        if not ok:
+            print("[One EAD] Cannot mark dependencies verified: installed packages do not match lockfile:")
+            for m in mismatches:
+                print(f"  - {m}")
+            return False
+
     try:
         data = {
             "signature": _compute_signature(),
@@ -197,15 +208,21 @@ def mark_verified() -> None:
             "timestamp": time.time(),
         }
         STAMP_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception as exc:
-        # Non-critical if cache file cannot be written
-        pass
+        return True
+    except Exception:
+        return False
 
 
-def ensure_dependencies() -> bool:
-    """Check dependencies; install missing ones from requirements.txt if needed.
+def ensure_dependencies(install_missing: bool = False) -> bool:
+    """Check dependencies against requirements.lock and required packages.
 
-    Returns True if all dependencies are satisfied, False otherwise.
+    Args:
+        install_missing: If True, explicitly triggers pip installation with hash verification.
+                         If False (default for normal startup), rejects uninstalled packages
+                         without running pip.
+
+    Returns:
+        True if all dependencies are satisfied and verified, False otherwise.
     """
     # Fast path: instant return if cached signature matches (<0.01s)
     if is_already_verified():
@@ -213,24 +230,41 @@ def ensure_dependencies() -> bool:
 
     # Check for missing modules without importing heavy packages
     missing = get_missing_packages()
-    if not missing:
-        mark_verified()
-        return True
+    lock_ok = True
+    lock_mismatches: List[str] = []
+    if LOCK_FILE.exists():
+        lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
+
+    if not missing and lock_ok:
+        return mark_verified()
 
     print("======================================================================")
-    print(" [One EAD] First-Time Initialization: Missing Python Dependencies")
+    print(" [One EAD] Dependency Verification Required")
     print("======================================================================")
-    print(" The following required packages were not found on this PC:")
-    for _, _, label in missing:
-        print(f"   - {label}")
+    if missing:
+        print(" The following required packages are missing:")
+        for _, _, label in missing:
+            print(f"   - {label}")
+    if lock_mismatches:
+        print(" The following lockfile version mismatches were detected:")
+        for mm in lock_mismatches:
+            print(f"   - {mm}")
     print()
-    print(" Installing missing packages from requirements.txt...")
-    print(" (This automatic setup only runs once on this PC)")
+
+    if not install_missing:
+        print(" Automatic dependency installation during normal startup is disabled for security.")
+        print(" To install or update dependencies with cryptographic hash verification, run:")
+        print("     python server/check_deps.py --install")
+        print(" or:")
+        print(f"     pip install --require-hashes -r {LOCK_FILE.name}")
+        print("======================================================================")
+        return False
+
+    print(" Installing verified dependencies using requirements.lock (--require-hashes)...")
     print("======================================================================")
     print()
 
     if LOCK_FILE.exists():
-        print(" Installing missing packages using reproducible, hash-verified lockfile (requirements.lock)...")
         cmd = [sys.executable, "-m", "pip", "install", "--require-hashes", "-r", str(LOCK_FILE)]
     else:
         print(" [SECURITY WARNING] requirements.lock not found. Installing from unpinned requirements.txt...")
@@ -240,40 +274,44 @@ def ensure_dependencies() -> bool:
         if res.returncode != 0:
             print()
             print("======================================================================")
-            print(" [ERROR] 'pip install -r requirements.txt' failed with exit code:", res.returncode)
-            print(" Please verify your internet connection or install manually with:")
-            print(f"   pip install -r {REQUIREMENTS_FILE.name}")
+            print(" [ERROR] Dependency installation failed with exit code:", res.returncode)
+            print(" Please check your environment or install manually with:")
+            print(f"   pip install --require-hashes -r {LOCK_FILE.name}")
             print("======================================================================")
             return False
     except Exception as exc:
         print(f"[ERROR] Failed to execute pip: {exc}")
         return False
 
-    # Re-verify that missing packages are now importable
+    # Re-verify against lockfile
+    if LOCK_FILE.exists():
+        lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
+        if not lock_ok:
+            print(" [ERROR] Installed packages still do not match lockfile:")
+            for mm in lock_mismatches:
+                print(f"   - {mm}")
+            return False
+
     still_missing = get_missing_packages()
     if still_missing:
-        print()
-        print("======================================================================")
-        print(" [ERROR] The following packages are still missing after pip installation:")
+        print(" [ERROR] Missing packages after installation:")
         for _, _, label in still_missing:
             print(f"   - {label}")
-        print(" Please install them manually using:")
-        print(f"   pip install -r {REQUIREMENTS_FILE.name}")
-        print("======================================================================")
         return False
 
-    print()
-    print("======================================================================")
-    print(" [One EAD] All required dependencies successfully installed & verified!")
-    print(" Starting application...")
-    print("======================================================================")
-    print()
-
-    mark_verified()
-    return True
+    print(" [One EAD] All dependencies successfully verified against lockfile.")
+    return mark_verified()
 
 
 if __name__ == "__main__":
-    if not ensure_dependencies():
-        sys.exit(1)
-    sys.exit(0)
+    import argparse
+    parser = argparse.ArgumentParser(description="One EAD Dependency Verification & Installer")
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Explicitly install missing/locked dependencies with cryptographic hash verification",
+    )
+    args = parser.parse_args()
+
+    success = ensure_dependencies(install_missing=args.install)
+    sys.exit(0 if success else 1)

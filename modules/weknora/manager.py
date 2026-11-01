@@ -26,14 +26,10 @@ import urllib.request
 try:
     from server.security import secure_path_permissions
 except Exception:
-    try:
-        _root = Path(__file__).resolve().parent.parent.parent
-        if str(_root) not in sys.path:
-            sys.path.insert(0, str(_root))
-        from server.security import secure_path_permissions
-    except Exception:
-        def secure_path_permissions(p, is_dir=False):
-            return True
+    _root = Path(__file__).resolve().parent.parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from server.security import secure_path_permissions
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -74,26 +70,27 @@ def get_setup_token() -> str:
     global _lite_setup_token
     token_file = DATA_DIR / "setup_token.txt"
     if token_file.exists():
-        try:
-            with open(token_file, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    _lite_setup_token = content
-                    secure_path_permissions(token_file, is_dir=False)
-                    return _lite_setup_token
-        except Exception:
-            pass
+        tok = token_file.read_text(encoding="utf-8").strip()
+        if tok:
+            _lite_setup_token = tok
+            if not secure_path_permissions(token_file, is_dir=False):
+                raise PermissionError(f"Failed to confirm secure permissions on WeKnora setup token at {token_file}")
+            return _lite_setup_token
 
-    if not _lite_setup_token:
-        _lite_setup_token = secrets.token_urlsafe(32)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not secure_path_permissions(DATA_DIR, is_dir=True):
+        raise PermissionError(f"Failed to confirm secure permissions on WeKnora data directory at {DATA_DIR}")
+
+    new_token = secrets.token_urlsafe(32)
+    token_file.write_text(new_token, encoding="utf-8")
+    if not secure_path_permissions(token_file, is_dir=False):
         try:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            secure_path_permissions(DATA_DIR, is_dir=True)
-            with open(token_file, "w", encoding="utf-8") as f:
-                f.write(_lite_setup_token)
-            secure_path_permissions(token_file, is_dir=False)
-        except Exception:
+            token_file.unlink()
+        except OSError:
             pass
+        raise PermissionError(f"Failed to apply secure permissions on newly created WeKnora setup token at {token_file}")
+
+    _lite_setup_token = new_token
     return _lite_setup_token
 
 

@@ -30,8 +30,8 @@ if _ROOT not in sys.path:
 try:
     from server.check_deps import ensure_dependencies
 
-    if not ensure_dependencies():
-        print("[One EAD] Missing required dependencies. Exiting.")
+    if not ensure_dependencies(install_missing=False):
+        print("[One EAD] Missing or unverified dependencies. Please run 'python server/check_deps.py --install' first. Exiting.")
         sys.exit(1)
 except ImportError:
     pass

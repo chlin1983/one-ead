@@ -35,8 +35,10 @@ from typing import Optional
 try:
     from server.security import secure_path_permissions
 except Exception:
-    def secure_path_permissions(p, is_dir=False):
-        return True
+    _root = Path(__file__).resolve().parent.parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from server.security import secure_path_permissions
 
 TOOL_ID = "deep-tutor"
 UPSTREAM_REPO = "HKUDS/DeepTutor"
