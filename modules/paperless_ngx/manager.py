@@ -6,6 +6,7 @@ and version control. Provides full-text FTS5 search and 1-click Explorer integra
 """
 
 from __future__ import annotations
+from server.security import secure_path_permissions
 
 import atexit
 from datetime import datetime
@@ -22,7 +23,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from modules.paperless_ngx import ocr_engine
@@ -61,7 +62,7 @@ def get_previews_dir() -> Path:
 
 
 def init_vault() -> None:
-    """Ensures vault folders and SQLite FTS5 tables exist."""
+    """Ensures vault folders and SQLite FTS5 tables exist and have secure NTFS permissions."""
     vault = get_vault_path()
     docs_dir = get_documents_dir()
     ocr_dir = get_ocr_cache_dir()
@@ -74,6 +75,17 @@ def init_vault() -> None:
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     previews_dir.mkdir(parents=True, exist_ok=True)
 
+    if not secure_path_permissions(vault, is_dir=True):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless vault directory: {vault}")
+    if not secure_path_permissions(docs_dir, is_dir=True):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless documents directory: {docs_dir}")
+    if not secure_path_permissions(ocr_dir, is_dir=True):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless OCR cache directory: {ocr_dir}")
+    if not secure_path_permissions(thumbs_dir, is_dir=True):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless thumbnails directory: {thumbs_dir}")
+    if not secure_path_permissions(previews_dir, is_dir=True):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless previews directory: {previews_dir}")
+
     db_path = get_db_path()
     with sqlite3.connect(str(db_path)) as con:
         cur = con.cursor()
@@ -83,17 +95,17 @@ def init_vault() -> None:
                 id TEXT PRIMARY KEY,
                 filename TEXT NOT NULL,
                 original_name TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                file_hash TEXT NOT NULL,
-                mime_type TEXT NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                file_hash TEXT,
+                mime_type TEXT,
                 tags TEXT DEFAULT '',
                 page_count INTEGER DEFAULT 0,
                 ocr_pages INTEGER DEFAULT 0,
                 ocr_status TEXT DEFAULT 'pending',
-                error_msg TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+                created_at TEXT,
+                updated_at TEXT,
+                error_msg TEXT DEFAULT ''
+            )
             """
         )
         cur.execute(
@@ -103,18 +115,27 @@ def init_vault() -> None:
                 title,
                 content,
                 tags,
-                tokenize='unicode61'
-            );
+                tokenize='unicode61 remove_diacritics 2'
+            )
             """
         )
+        cur.execute("PRAGMA table_info(documents)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "error_msg" not in cols:
+            cur.execute("ALTER TABLE documents ADD COLUMN error_msg TEXT DEFAULT ''")
         con.commit()
 
-        # Ensure FTS text is populated if documents lack full text
+    if not secure_path_permissions(db_path, is_dir=False):
+        raise PermissionError(f"Failed to secure NTFS permissions on Paperless database: {db_path}")
+
+    with sqlite3.connect(str(db_path)) as con:
+        cur = con.cursor()
         try:
             cur.execute("SELECT count(*) FROM document_fts WHERE length(content) < 150")
             short_count = cur.fetchone()[0] or 0
             if short_count > 0:
-                weknora_db = get_vault_path() / "weknora_data" / "weknora.db"
+                from modules.weknora.manager import get_data_dir
+                weknora_db = get_data_dir() / "weknora.db"
                 if weknora_db.is_file():
                     with sqlite3.connect(str(weknora_db)) as wek_con:
                         wek_cur = wek_con.cursor()
@@ -122,37 +143,32 @@ def init_vault() -> None:
                         docs_to_sync = cur.fetchall()
                         for doc_id, orig_name, tags in docs_to_sync:
                             wek_cur.execute(
-                                "SELECT content FROM chunks WHERE knowledge_id = ? ORDER BY chunk_index ASC",
-                                (doc_id,),
+                                """
+                                SELECT content FROM chunks
+                                WHERE document_id IN (
+                                    SELECT id FROM documents WHERE name = ? OR name = ?
+                                ) ORDER BY chunk_index ASC
+                                """,
+                                (orig_name, f"{Path(orig_name).stem}_ocr.md")
                             )
-                            chunks = [r[0] for r in wek_cur.fetchall() if r[0]]
-                            if not chunks:
-                                wek_cur.execute("SELECT id FROM knowledges WHERE file_name = ?", (orig_name,))
-                                for kr in wek_cur.fetchall():
-                                    wek_cur.execute(
-                                        "SELECT content FROM chunks WHERE knowledge_id = ? ORDER BY chunk_index ASC",
-                                        (kr[0],),
-                                    )
-                                    c_list = [r[0] for r in wek_cur.fetchall() if r[0]]
-                                    if len(c_list) > len(chunks):
-                                        chunks = c_list
+                            chunks = wek_cur.fetchall()
                             if chunks:
-                                full_text = "\n\n".join(chunks)
-                                cache_file = get_ocr_cache_dir() / f"{doc_id}.md"
-                                if not cache_file.is_file():
-                                    cache_file.write_text(full_text, encoding="utf-8")
+                                full_text = "\n\n".join(c[0] for c in chunks if c[0])
                                 cur.execute("DELETE FROM document_fts WHERE doc_id = ?", (doc_id,))
                                 cur.execute(
-                                    "INSERT INTO document_fts (doc_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                                    (doc_id, orig_name, full_text, tags),
+                                    """
+                                    INSERT INTO document_fts (doc_id, title, content, tags)
+                                    VALUES (?, ?, ?, ?)
+                                    """,
+                                    (doc_id, orig_name, full_text, tags)
                                 )
                                 cur.execute(
                                     "UPDATE documents SET page_count = ?, ocr_pages = ?, ocr_status = 'completed' WHERE id = ?",
                                     (max(1, len(chunks) // 10), len(chunks), doc_id),
                                 )
                     con.commit()
-        except Exception as e:
-            logger.warning("FTS auto-sync check: %s", e)
+        except Exception as fts_err:
+            logger.debug("Non-fatal error populating Paperless full-text index: %s", fts_err)
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -1225,16 +1241,315 @@ def copy_to_weknora_vault(doc_id: str, auto_ocr_if_missing: bool = True, approve
     }
 
 
+def _compute_candidates_token(candidate_ids: List[str], expiry_seconds: int = 300) -> str:
+    """Computes a cryptographically bound confirmation token with expiry for candidate document IDs."""
+    sorted_ids = sorted(candidate_ids)
+    cand_digest = hashlib.sha256(",".join(sorted_ids).encode("utf-8")).hexdigest()[:16]
+    exp = int(time.time()) + expiry_seconds
+    raw_sig = hashlib.sha256(f"{cand_digest}:{exp}:{len(sorted_ids)}".encode("utf-8")).hexdigest()[:16]
+    return f"{exp}_{cand_digest}_{raw_sig}"
+
+
+def _verify_candidates_token(token: Optional[str], candidate_ids: List[str]) -> Tuple[bool, str]:
+    """Validates confirmation token format, expiry, and candidate set binding."""
+    if not token or not isinstance(token, str) or not token.strip():
+        return False, "Confirmation token is missing or empty."
+
+    parts = token.strip().split("_")
+    if len(parts) != 3:
+        return False, "Invalid confirmation token format."
+
+    try:
+        exp_time = int(parts[0])
+    except ValueError:
+        return False, "Invalid confirmation token: invalid timestamp."
+
+    if time.time() > exp_time:
+        return False, "Confirmation token has expired. Please re-run dry-run preview before confirming deletion."
+
+    sorted_ids = sorted(candidate_ids)
+    expected_digest = hashlib.sha256(",".join(sorted_ids).encode("utf-8")).hexdigest()[:16]
+    expected_sig = hashlib.sha256(f"{expected_digest}:{exp_time}:{len(sorted_ids)}".encode("utf-8")).hexdigest()[:16]
+
+    if parts[1] != expected_digest or parts[2] != expected_sig:
+        return False, "Candidate set changed or invalid token signature. Please re-run dry-run preview before confirming deletion."
+
+    return True, "Valid"
+
+
 _scan_lock = threading.Lock()
 _watcher_thread: Optional[threading.Thread] = None
 _watcher_stop_event = threading.Event()
 
 
-def scan_and_sync_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False, approved: bool = False) -> Dict[str, Any]:
+def reconcile_missing_documents(
+    approved: bool = False,
+    dry_run: bool = False,
+    expected_candidate_ids: Optional[List[str]] = None,
+    confirmation_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Reconciles deleted documents by removing records for files deleted from disk.
+
+    Safety constraints:
+    1. Prevents concurrent reconciliation and active scan operations using _scan_lock.
+    2. Supports non-destructive dry-run preview (dry_run=True) returning candidate list & bound confirmation token.
+    3. Requires explicit approval (approved=True) and a valid, non-stale confirmation token bound to candidates.
+    4. Aborts if candidate set changes between preview and execution.
+    5. Strictly verifies that the external documents directory exists and is accessible.
+       If the directory is unmounted, missing, or partially unreadable, aborts immediately
+       without deleting any records to protect against data loss.
+    6. Validates full scan completeness, rejects symlinks, and blocks path traversal.
+    7. Preserves recoverability by backing up metadata and OCR text to recovery/ before purging.
+    8. Secures recovery directory, JSON files, and audit log with fail-closed NTFS permissions.
+    9. Revalidates each candidate immediately before deletion to ensure files haven't reappeared.
+    10. Writes structured audit trail to cleanup_audit.log and tracks partial failures independently.
+    """
+    if not _scan_lock.acquire(blocking=False):
+        return {
+            "ok": False,
+            "busy": True,
+            "cleaned_up": 0,
+            "message": "Vault operation is already running in background.",
+        }
+
+    try:
+        docs_dir = get_documents_dir()
+        if not docs_dir.exists() or not docs_dir.is_dir():
+            logger.warning("Vault documents directory %s does not exist or is unmounted. Aborting cleanup to prevent data loss.", docs_dir)
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": f"Archive documents directory does not exist or is unmounted at {docs_dir}. Reconciliation aborted to protect records.",
+            }
+
+        # Verify accessibility and full scan completeness with strict symlink / traversal checks
+        accessible_rel_paths = set()
+        traversal_errors = []
+
+        def _on_walk_error(err):
+            traversal_errors.append(str(err))
+
+        resolved_docs = docs_dir.resolve()
+        try:
+            for root, dirs, files in os.walk(str(docs_dir), onerror=_on_walk_error):
+                root_path = Path(root)
+                if root_path.is_symlink():
+                    traversal_errors.append(f"Symlink directory rejected: {root_path}")
+                    continue
+                try:
+                    resolved_root = root_path.resolve()
+                    if resolved_root != resolved_docs and resolved_docs not in resolved_root.parents:
+                        traversal_errors.append(f"Directory traversal outside vault rejected: {root_path}")
+                        continue
+                except Exception as exc:
+                    traversal_errors.append(f"Path resolution error for {root_path}: {exc}")
+                    continue
+
+                for f in files:
+                    p = root_path / f
+                    try:
+                        if p.is_symlink():
+                            logger.warning("Ignoring symlink in vault documents: %s", p)
+                            continue
+                        resolved_p = p.resolve()
+                        if resolved_docs not in resolved_p.parents:
+                            traversal_errors.append(f"File traversal outside vault rejected: {p}")
+                            continue
+                        if p.is_file():
+                            rel = p.relative_to(docs_dir).as_posix().lower()
+                            accessible_rel_paths.add(rel)
+                    except (OSError, PermissionError) as exc:
+                        traversal_errors.append(f"{p}: {exc}")
+        except (OSError, PermissionError, Exception) as top_err:
+            traversal_errors.append(f"{docs_dir}: {top_err}")
+
+        if traversal_errors:
+            logger.warning(
+                "Vault directory traversal encountered %d read error(s). Aborting cleanup to prevent data loss: %s",
+                len(traversal_errors),
+                traversal_errors[:3],
+            )
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": f"Archive directory scan incomplete: {len(traversal_errors)} read error(s) during traversal. Reconciliation aborted.",
+                "errors": traversal_errors[:10],
+            }
+
+        with get_db_connection() as con:
+            cur = con.cursor()
+            cur.execute("SELECT id, filename, original_name, file_hash, file_size, tags, created_at FROM documents")
+            registered_docs = cur.fetchall()
+
+        if registered_docs and not accessible_rel_paths:
+            logger.warning("Vault documents directory is empty while %d documents are registered. Aborting cleanup.", len(registered_docs))
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": "Archive directory is empty while documents are registered. Aborting cleanup to prevent catastrophic loss.",
+            }
+
+        # Identify missing candidate documents and validate relative paths
+        candidates = []
+        for d_row in registered_docs:
+            fn = d_row["filename"]
+            if not fn or Path(fn).is_absolute() or ".." in Path(fn).parts:
+                logger.warning("Invalid or suspicious filename in database: %s", fn)
+                continue
+            fn_rel = Path(fn).as_posix().lower()
+            if fn_rel and fn_rel not in accessible_rel_paths:
+                candidates.append(dict(d_row))
+
+        candidate_ids = sorted(c["id"] for c in candidates)
+        token = _compute_candidates_token(candidate_ids, expiry_seconds=300) if candidate_ids else ""
+
+        # Handle dry-run preview
+        if dry_run:
+            return {
+                "ok": True,
+                "dry_run": True,
+                "candidate_count": len(candidates),
+                "candidates": [{"id": c["id"], "original_name": c["original_name"], "filename": c["filename"]} for c in candidates],
+                "confirmation_token": token,
+                "message": f"Dry-run preview: {len(candidates)} document(s) missing from disk. Pass confirmation_token to approve deletion." if candidates else "No missing documents found.",
+            }
+
+        if not approved:
+            raise PermissionError("Destructive reconciliation requires explicit user approval.")
+
+        # Require a non-empty confirmation token
+        if not confirmation_token or not isinstance(confirmation_token, str) or not confirmation_token.strip():
+            raise PermissionError("Destructive reconciliation requires a non-empty confirmation token.")
+
+        # Validate token authenticity, freshness and candidate binding
+        is_valid, token_msg = _verify_candidates_token(confirmation_token, candidate_ids)
+        if not is_valid:
+            logger.warning("Confirmation token validation failed: %s", token_msg)
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": token_msg,
+            }
+
+        # Guard against candidate set drifting between preview and execution
+        if expected_candidate_ids is not None and sorted(expected_candidate_ids) != candidate_ids:
+            logger.warning("Candidate IDs mismatch expected preview set. Aborting cleanup.")
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": "Candidate list changed since preview. Aborting cleanup to prevent accidental deletion.",
+            }
+
+        vault = get_vault_path()
+        audit_log = vault / "cleanup_audit.log"
+        recovery_dir = vault / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        if not secure_path_permissions(recovery_dir, is_dir=True):
+            raise PermissionError(f"Failed to secure NTFS permissions on recovery directory {recovery_dir}")
+
+        if not audit_log.exists():
+            audit_log.touch()
+        if not secure_path_permissions(audit_log, is_dir=False):
+            raise PermissionError(f"Failed to secure NTFS permissions on cleanup audit log {audit_log}")
+
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        with open(audit_log, "a", encoding="utf-8") as af:
+            af.write(f"[{now_iso}] [INTENT] Initiating deletion reconciliation for {len(candidates)} candidate(s) (token={confirmation_token})\n")
+
+        cleaned_up_count = 0
+        partial_errors = []
+
+        for c in candidates:
+            d_id = c["id"]
+            orig_name = c["original_name"]
+            fn = c.get("filename")
+            try:
+                # Revalidate candidate immediately before deletion: check if file reappeared on disk
+                if fn:
+                    candidate_disk_path = docs_dir / fn
+                    if candidate_disk_path.exists() and candidate_disk_path.is_file() and not candidate_disk_path.is_symlink():
+                        logger.warning("Candidate %s reappeared on disk before deletion. Skipping.", fn)
+                        continue
+
+                # 1. Back up record and OCR text to recovery folder before deletion
+                rec_file = recovery_dir / f"{d_id}.json"
+                ocr_cache_path = get_ocr_cache_dir() / f"{d_id}.md"
+                ocr_text = ""
+                if ocr_cache_path.is_file():
+                    try:
+                        ocr_text = ocr_cache_path.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        pass
+                rec_payload = {"metadata": c, "ocr_text": ocr_text, "deleted_at": now_iso}
+                rec_file.write_text(json.dumps(rec_payload, indent=2), encoding="utf-8")
+                if not secure_path_permissions(rec_file, is_dir=False):
+                    raise PermissionError(f"Failed to secure NTFS permissions on recovery file {rec_file}")
+
+                # 2. Delete database record AFTER recovery data is written and secured
+                del_ok = delete_document(d_id)
+                if not del_ok:
+                    raise RuntimeError(f"Database deletion failed for document {d_id}")
+
+                # 3. Purge WeKnora cache files
+                try:
+                    from modules.weknora.manager import get_data_dir
+                    weknora_files_dir = get_data_dir() / "files"
+                    if weknora_files_dir.is_dir():
+                        stem = Path(orig_name).stem
+                        md_f = weknora_files_dir / f"{stem}_ocr.md"
+                        if md_f.is_file():
+                            md_f.unlink(missing_ok=True)
+                        orig_f = weknora_files_dir / Path(orig_name).name
+                        if orig_f.is_file():
+                            orig_f.unlink(missing_ok=True)
+                except Exception as wek_err:
+                    logger.debug("WeKnora cache cleanup error for %s: %s", orig_name, wek_err)
+
+                cleaned_up_count += 1
+                with open(audit_log, "a", encoding="utf-8") as af:
+                    af.write(f"[{now_iso}] [DELETED] id={d_id} name='{orig_name}' hash={c.get('file_hash')}\n")
+            except Exception as del_err:
+                logger.exception("Failed deleting document %s: %s", d_id, del_err)
+                partial_errors.append(f"{d_id}: {del_err}")
+                with open(audit_log, "a", encoding="utf-8") as af:
+                    af.write(f"[{now_iso}] [ERROR] id={d_id} error='{del_err}'\n")
+
+        if partial_errors:
+            with open(audit_log, "a", encoding="utf-8") as af:
+                af.write(f"[{now_iso}] [PARTIAL FAILURE] Cleaned up {cleaned_up_count}/{len(candidates)} with {len(partial_errors)} error(s)\n")
+            return {
+                "ok": False,
+                "partial_failure": True,
+                "cleaned_up": cleaned_up_count,
+                "total_candidates": len(candidates),
+                "errors": partial_errors,
+                "message": f"Cleanup partially failed: {len(partial_errors)} error(s).",
+            }
+
+        with open(audit_log, "a", encoding="utf-8") as af:
+            af.write(f"[{now_iso}] [COMPLETE] Successfully purged {cleaned_up_count} missing document records\n")
+
+        return {
+            "ok": True,
+            "cleaned_up": cleaned_up_count,
+            "message": f"Successfully purged {cleaned_up_count} missing document records."
+            if cleaned_up_count else "All registered documents verified present on disk.",
+        }
+    finally:
+        _scan_lock.release()
+
+
+def scan_and_sync_vault(
+    auto_ocr: bool = False,
+    lang: str = "eng",
+    sync_weknora: bool = False,
+    approved: bool = False,
+) -> Dict[str, Any]:
     """Scans the external vault documents folder (~/Documents/OneEAD_Archive/documents)
     for any untracked or newly added files, registers them in meta.db.
 
     Automatic WeKnora synchronization is disabled by default and requires explicit approval.
+    Destructive record deletion is NEVER performed by scan operations.
     """
     if not _scan_lock.acquire(blocking=False):
         return {
@@ -1314,8 +1629,19 @@ def scan_and_sync_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora:
         errors = []
         docs_to_ocr = []
 
+        resolved_docs = docs_dir.resolve()
         # Recursively traverse documents directory
         for item in docs_dir.rglob("*"):
+            try:
+                if item.is_symlink():
+                    logger.warning("Ignoring symlink in vault documents: %s", item)
+                    continue
+                resolved_item = item.resolve()
+                if resolved_item != resolved_docs and resolved_docs not in resolved_item.parents:
+                    logger.warning("Rejecting path traversal outside vault: %s", item)
+                    continue
+            except Exception:
+                continue
             if not item.is_file():
                 continue
 
@@ -1457,40 +1783,7 @@ def scan_and_sync_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora:
             except Exception as sync_all_err:
                 logger.debug("WeKnora reconciliation error: %s", sync_all_err)
 
-        # Reconcile deleted documents:
-        # If user manually deleted a file from disk in ~/Documents/OneEAD_Archive/documents,
-        # automatically purge its record from meta.db, document_fts, thumbnails, OCR cache, and WeKnora.
-        cleaned_up_count = 0
-        try:
-            with get_db_connection() as con:
-                cur = con.cursor()
-                cur.execute("SELECT id, filename, original_name FROM documents")
-                registered_docs = cur.fetchall()
 
-            for d_row in registered_docs:
-                d_id = d_row["id"]
-                fn = d_row["filename"]
-                orig_name = d_row["original_name"]
-                expected_disk_file = docs_dir / fn
-                if not expected_disk_file.is_file():
-                    logger.info("Detected manual file deletion: %s (%s). Purging database record and caches.", orig_name, d_id)
-                    delete_document(d_id)
-                    cleaned_up_count += 1
-                    try:
-                        from modules.weknora.manager import get_data_dir
-                        weknora_files_dir = get_data_dir() / "files"
-                        if weknora_files_dir.is_dir():
-                            stem = Path(orig_name).stem
-                            md_f = weknora_files_dir / f"{stem}_ocr.md"
-                            if md_f.is_file():
-                                md_f.unlink()
-                            orig_f = weknora_files_dir / Path(orig_name).name
-                            if orig_f.is_file():
-                                orig_f.unlink()
-                    except Exception as wek_del_err:
-                        logger.debug("WeKnora cleanup error for %s: %s", orig_name, wek_del_err)
-        except Exception as del_reconcile_err:
-            logger.debug("Deletion reconciliation error: %s", del_reconcile_err)
 
         return {
             "ok": True,

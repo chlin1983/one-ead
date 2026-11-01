@@ -416,11 +416,17 @@ def _open_service_log():
     nobody drains it, it fills up, and the backend freezes on its next log line.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    secure_path_permissions(DATA_DIR, is_dir=True)
+    # DeepTutor data directory and service log permissions.
+    # Sensitive runtime state (sessions, virtual environment, and logs) must be strictly secured.
+    # Fails closed if NTFS permissions cannot be confirmed.
+    if not secure_path_permissions(DATA_DIR, is_dir=True):
+        raise PermissionError(f"Failed to confirm secure NTFS permissions on DeepTutor data directory at {DATA_DIR}")
     if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2 * 1024 * 1024:
         LOG_FILE.write_bytes(LOG_FILE.read_bytes()[-512 * 1024:])
     fh = open(LOG_FILE, "ab")
-    secure_path_permissions(LOG_FILE, is_dir=False)
+    if not secure_path_permissions(LOG_FILE, is_dir=False):
+        fh.close()
+        raise PermissionError(f"Failed to confirm secure NTFS permissions on DeepTutor service log at {LOG_FILE}")
     fh.write(f"\n--- {_now_iso()} start ---\n".encode("utf-8"))
     fh.flush()
     return fh

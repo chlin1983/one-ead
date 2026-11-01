@@ -9,6 +9,8 @@ Priority 5: Normal startup never silently installs dependencies automatically.
 """
 
 from __future__ import annotations
+import sqlite3
+import time
 
 import hashlib
 import json
@@ -20,6 +22,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import urllib.request
 from fastapi.testclient import TestClient
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +45,7 @@ from server.check_deps import (
     STAMP_FILE,
     _compute_signature,
     ensure_dependencies,
+    is_already_verified,
     mark_verified,
     verify_installed_against_lock,
     verify_lockfile_integrity,
@@ -287,11 +291,12 @@ def test_sync_endpoint_requires_explicit_approval_omitted_or_false(auth_client, 
 def test_scan_endpoint_explicit_approval_preservation(auth_client, monkeypatch):
     captured_args = {}
 
-    def mock_scan(auto_ocr=False, lang="eng", sync_weknora=False, approved=False):
+    def mock_scan(auto_ocr=False, lang="eng", sync_weknora=False, approved=False, **kwargs):
         captured_args["auto_ocr"] = auto_ocr
         captured_args["lang"] = lang
         captured_args["sync_weknora"] = sync_weknora
         captured_args["approved"] = approved
+        captured_args.update(kwargs)
         return {"ok": True, "scanned": 5, "new_imported": 0}
 
     monkeypatch.setattr(paperless_manager, "scan_and_sync_vault", mock_scan)
@@ -554,3 +559,1002 @@ def test_log_file_permissions_secured(tmp_path, monkeypatch):
     if os.name == "nt":
         res = subprocess.run(["icacls", str(log_file)], capture_output=True, text=True, check=True)
         assert "BUILTIN\\Users:(I)" not in res.stdout
+
+# ==============================================================================
+# Priority 5: Additional Hardening (Lockfile Fail-Closed & Deletion Safety)
+# ==============================================================================
+
+def test_is_already_verified_rejects_missing_lockfile(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", tmp_path / "nonexistent.lock")
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+    (tmp_path / ".deps_ok").write_text(json.dumps({"signature": "valid"}), encoding="utf-8")
+    monkeypatch.setattr("server.check_deps._compute_signature", lambda: "valid")
+
+    assert is_already_verified() is False, ".deps_ok must not be accepted when requirements.lock is missing"
+
+
+def test_is_already_verified_rejects_installed_version_mismatch(tmp_path, monkeypatch):
+    lock_file = tmp_path / "requirements.lock"
+    lock_file.write_text("fastapi==0.135.2 \\\n    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1\n", encoding="utf-8")
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", lock_file)
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+    (tmp_path / ".deps_ok").write_text(json.dumps({"signature": "valid"}), encoding="utf-8")
+    monkeypatch.setattr("server.check_deps._compute_signature", lambda: "valid")
+    # Simulate version mismatch in installed packages
+    monkeypatch.setattr("server.check_deps.verify_installed_against_lock", lambda p: (False, ["fastapi: mismatch"]))
+
+    assert is_already_verified() is False, ".deps_ok must not be accepted when installed packages mismatch requirements.lock"
+
+
+def test_ensure_dependencies_fails_closed_when_lockfile_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", tmp_path / "nonexistent.lock")
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+
+    with patch("server.check_deps.subprocess.run") as mock_run:
+        res = ensure_dependencies(install_missing=True)
+        assert res is False
+        mock_run.assert_not_called()
+
+
+def test_ensure_dependencies_fails_closed_when_lockfile_invalid(tmp_path, monkeypatch):
+    bad_lock = tmp_path / "bad.lock"
+    bad_lock.write_text("fastapi>=0.110\n", encoding="utf-8")
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", bad_lock)
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+
+    with patch("server.check_deps.subprocess.run") as mock_run:
+        res = ensure_dependencies(install_missing=True)
+        assert res is False
+        mock_run.assert_not_called()
+
+
+def test_mark_verified_fails_closed_when_lockfile_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", tmp_path / "nonexistent.lock")
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+
+    res = mark_verified()
+    assert res is False
+    assert not (tmp_path / ".deps_ok").exists()
+
+
+def test_is_already_verified_rejects_stale_stamp_signature(tmp_path, monkeypatch):
+    lock_file = tmp_path / "requirements.lock"
+    lock_file.write_text("fastapi==0.110.0 \\\n    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1\n", encoding="utf-8")
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", lock_file)
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+    (tmp_path / ".deps_ok").write_text(json.dumps({"signature": "stale_signature_123"}), encoding="utf-8")
+    monkeypatch.setattr("server.check_deps._compute_signature", lambda: "fresh_signature_456")
+
+    assert is_already_verified() is False, "Cached stamp with stale signature must be rejected"
+
+
+def test_mark_verified_fails_closed_when_installed_mismatch(tmp_path, monkeypatch):
+    lock_file = tmp_path / "requirements.lock"
+    lock_file.write_text("fastapi==0.110.0 \\\n    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1\n", encoding="utf-8")
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", lock_file)
+    monkeypatch.setattr("server.check_deps.STAMP_FILE", tmp_path / ".deps_ok")
+    monkeypatch.setattr("server.check_deps.verify_installed_against_lock", lambda p: (False, ["fastapi: mismatch"]))
+
+    res = mark_verified()
+    assert res is False
+    assert not (tmp_path / ".deps_ok").exists()
+
+
+def test_background_vault_scan_does_not_purge_missing_files(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    # Database contains a document whose disk file was removed
+    fake_cur.fetchall.return_value = [{"id": "d-del", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "hash1"}]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Standard vault scan (which the background watcher executes) must NOT prune missing files
+    res = paperless_manager.scan_and_sync_vault(auto_ocr=False, sync_weknora=False, approved=False)
+    assert res.get("ok") is True
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_requires_explicit_approval():
+    with pytest.raises(PermissionError, match="explicit user approval"):
+        paperless_manager.reconcile_missing_documents(approved=False)
+
+
+def test_reconcile_missing_documents_aborts_when_dir_missing(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    missing_dir = tmp_path / "nonexistent_vault_docs"
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: missing_dir)
+
+    res = paperless_manager.reconcile_missing_documents(approved=True)
+    assert res["ok"] is False
+    assert res["cleaned_up"] == 0
+    assert "does not exist or is unmounted" in res["message"]
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_aborts_when_dir_inaccessible(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    test_dir = tmp_path / "inaccessible_docs"
+    test_dir.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: test_dir)
+
+    def fake_walk(path, onerror=None):
+        raise PermissionError("Access denied by OS / unmounted network share")
+
+    monkeypatch.setattr("os.walk", fake_walk)
+
+    res = paperless_manager.reconcile_missing_documents(approved=True)
+    assert res["ok"] is False
+    assert res["cleaned_up"] == 0
+    assert "scan incomplete" in res["message"] or "Reconciliation aborted" in res["message"]
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_aborts_when_partially_unreadable(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    test_dir = tmp_path / "partial_docs"
+    test_dir.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: test_dir)
+
+    # Simulate os.walk encountering an unreadable subdirectory
+    def fake_walk_partial(top, onerror=None):
+        if onerror:
+            onerror(PermissionError("Permission denied: " + str(top) + "/locked_subfolder"))
+        yield (str(top), ["locked_subfolder"], ["readable.pdf"])
+
+    monkeypatch.setattr("os.walk", fake_walk_partial)
+
+    res = paperless_manager.reconcile_missing_documents(approved=True)
+    assert res["ok"] is False
+    assert res["cleaned_up"] == 0
+    assert "scan incomplete" in res["message"]
+    mock_delete.assert_not_called()
+
+
+def test_cleanup_missing_endpoint_requires_explicit_approval(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        paperless_manager,
+        "reconcile_missing_documents",
+        lambda approved=False, dry_run=False, confirmation_token=None, **kwargs: (
+            {"ok": True, "cleaned_up": 0, "message": "OK"} if (approved and confirmation_token) else (_ for _ in ()).throw(PermissionError("Approval and token required"))
+        ),
+    )
+
+    # 1. Calling cleanup-missing without approval fails closed with 400
+    res_rejected = auth_client.post("/api/paperless-ngx/cleanup-missing")
+    assert res_rejected.status_code == 400
+    assert "explicit user approval" in res_rejected.json()["detail"]
+
+    # 2. Calling cleanup-missing with approved=false fails with 400
+    res_rejected2 = auth_client.post("/api/paperless-ngx/cleanup-missing?approved=false")
+    assert res_rejected2.status_code == 400
+
+    # 3. Calling cleanup-missing with approved=true but without confirmation token fails with 400
+    res_no_tok = auth_client.post("/api/paperless-ngx/cleanup-missing?approved=true")
+    assert res_no_tok.status_code == 400
+    assert "confirmation_token" in res_no_tok.json()["detail"]
+
+    # 4. Calling cleanup-missing with approved=true and valid confirmation token succeeds
+    res_ok = auth_client.post("/api/paperless-ngx/cleanup-missing?approved=true&confirmation_token=valid_token_123")
+    assert res_ok.status_code == 200
+    assert res_ok.json()["ok"] is True
+
+
+def test_scan_endpoint_does_not_perform_destructive_cleanup(auth_client, monkeypatch):
+    mock_scan = MagicMock(return_value={"ok": True, "scanned": 0, "new_imported": 0})
+    mock_cleanup = MagicMock()
+    monkeypatch.setattr(paperless_manager, "scan_and_sync_vault", mock_scan)
+    monkeypatch.setattr(paperless_manager, "reconcile_missing_documents", mock_cleanup)
+
+    res = auth_client.post("/api/paperless-ngx/scan")
+    assert res.status_code == 200
+    mock_scan.assert_called_once()
+    mock_cleanup.assert_not_called()
+
+
+def test_weknora_start_service_fails_closed_when_log_file_permission_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    fake_exe = tmp_path / "WeKnora-lite.exe"
+    data = b"synthetic-binary"
+    fake_exe.write_bytes(data)
+    exe_hash = hashlib.sha256(data).hexdigest()
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", fake_exe)
+    monkeypatch.setenv("WEKNORA_RELEASE_SHA256", exe_hash)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(weknora_manager, "DATA_DIR", data_dir)
+    test_log = data_dir / "service.log"
+    monkeypatch.setattr(weknora_manager, "LOG_FILE", test_log)
+    monkeypatch.setattr(weknora_manager, "check_http_alive", lambda p, h: False)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: False)
+
+    def fake_secure(path, is_dir=False):
+        if not is_dir and Path(path) == test_log:
+            return False
+        return True
+
+    monkeypatch.setattr(weknora_manager, "secure_path_permissions", fake_secure)
+
+    with pytest.raises(PermissionError, match="Failed to confirm secure NTFS permissions on WeKnora log file"):
+        weknora_manager.start_service()
+
+
+def test_weknora_append_log_does_not_mask_application_exceptions(tmp_path, monkeypatch):
+    # Ordinary logging errors must not raise or mask caller exceptions
+    unwritable_log = tmp_path / "nonexistent_dir" / "test.log"
+    monkeypatch.setattr(weknora_manager, "LOG_FILE", unwritable_log)
+
+    weknora_manager._logs.clear()
+    # append_log must execute without raising an unhandled exception
+    weknora_manager.append_log("Test message when disk logging fails")
+    assert any("Test message when disk logging fails" in line for line in weknora_manager._logs)
+
+
+def test_deeptutor_open_service_log_fails_closed_when_permissions_fail(tmp_path, monkeypatch):
+    import modules.deep_tutor.deep_tutor as dt_module
+    monkeypatch.setattr(dt_module, "DATA_DIR", tmp_path / "dt_data")
+    monkeypatch.setattr(dt_module, "LOG_FILE", tmp_path / "dt_data" / "service.log")
+    monkeypatch.setattr(dt_module, "secure_path_permissions", lambda p, is_dir=False: False)
+
+    with pytest.raises(PermissionError, match="Failed to confirm secure NTFS permissions"):
+        dt_module._open_service_log()
+
+
+def test_weknora_start_service_fails_closed_when_data_dir_permission_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    fake_exe = tmp_path / "WeKnora-lite.exe"
+    data = b"synthetic-binary"
+    fake_exe.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", fake_exe)
+    monkeypatch.setattr(weknora_manager, "FALLBACK_BINARY_PATH", tmp_path / "no-fb.exe")
+    monkeypatch.setenv("WEKNORA_RELEASE_SHA256", digest)
+    monkeypatch.setattr(weknora_manager, "check_http_alive", lambda *a: False)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda *a: False)
+    monkeypatch.setattr(weknora_manager, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(weknora_manager, "secure_path_permissions", lambda p, is_dir=False: False)
+
+    with pytest.raises(PermissionError, match="Failed to confirm secure NTFS permissions"):
+        weknora_manager.start_service()
+
+
+# ==============================================================================
+# Additional Stage 2 Regression Tests: Redirects, Process Safety, Lockfile & Vault
+# ==============================================================================
+
+def test_verify_installed_against_lock_handles_missing_package(tmp_path, monkeypatch):
+    lock_file = tmp_path / "requirements.lock"
+    lock_file.write_text("fastapi==0.110.0 \\\n    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1\n", encoding="utf-8")
+
+    import importlib.metadata
+    def fake_version(pkg_name):
+        raise importlib.metadata.PackageNotFoundError(pkg_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    ok, mismatches = verify_installed_against_lock(lock_file)
+    assert ok is False
+    assert any("not installed (locked at 0.110.0)" in m for m in mismatches)
+
+
+def test_ensure_dependencies_handles_pip_install_failure(tmp_path, monkeypatch):
+    lock_file = tmp_path / "requirements.lock"
+    lock_file.write_text("fastapi==0.110.0 \\\n    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1\n", encoding="utf-8")
+    monkeypatch.setattr("server.check_deps.LOCK_FILE", lock_file)
+    monkeypatch.setattr("server.check_deps.is_already_verified", lambda: False)
+    monkeypatch.setattr("server.check_deps.get_missing_packages", lambda: [("fastapi", "fastapi", "FastAPI")])
+    monkeypatch.setattr("server.check_deps.verify_installed_against_lock", lambda p: (False, ["fastapi: not installed"]))
+
+    # Simulate pip install failing with exit code 1
+    mock_res = MagicMock()
+    mock_res.returncode = 1
+    monkeypatch.setattr("server.check_deps.subprocess.run", lambda *a, **k: mock_res)
+
+    res = ensure_dependencies(install_missing=True)
+    assert res is False
+
+
+def test_paperless_init_vault_secures_meta_db_and_vault(tmp_path, monkeypatch):
+    vault = tmp_path / "test_vault"
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: vault / "documents")
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "get_thumbnails_dir", lambda: vault / "thumbs")
+    monkeypatch.setattr(paperless_manager, "get_previews_dir", lambda: vault / "previews")
+    monkeypatch.setattr(paperless_manager, "get_db_path", lambda: vault / "meta.db")
+
+    secured_paths = []
+    def fake_secure(path, is_dir=False):
+        secured_paths.append((Path(path), is_dir))
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    paperless_manager.init_vault()
+
+    assert (vault, True) in secured_paths
+    assert (vault / "documents", True) in secured_paths
+    assert (vault / "ocr", True) in secured_paths
+    assert (vault / "meta.db", False) in secured_paths
+
+
+def test_paperless_init_vault_fails_closed_when_permissions_fail(tmp_path, monkeypatch):
+    vault = tmp_path / "test_vault_fail"
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: vault / "documents")
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "get_thumbnails_dir", lambda: vault / "thumbs")
+    monkeypatch.setattr(paperless_manager, "get_previews_dir", lambda: vault / "previews")
+    monkeypatch.setattr(paperless_manager, "get_db_path", lambda: vault / "meta.db")
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", lambda p, is_dir=False: False)
+
+    with pytest.raises(PermissionError, match="Failed to secure NTFS permissions on Paperless"):
+        paperless_manager.init_vault()
+
+
+def test_reconcile_missing_documents_dry_run_preview(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing content")
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-preview-1", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "hash1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Calling dry_run=True should preview candidates without deleting
+    res = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert res["ok"] is True
+    assert res["dry_run"] is True
+    assert res["candidate_count"] == 1
+    assert res["candidates"][0]["id"] == "d-preview-1"
+    assert "confirmation_token" in res
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_candidate_confirmation_guard(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing content")
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-guard-1", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "hash1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Missing or empty confirmation token fails closed with PermissionError
+    with pytest.raises(PermissionError, match="non-empty confirmation token"):
+        paperless_manager.reconcile_missing_documents(approved=True, confirmation_token="")
+
+    # Calling with malformed confirmation token aborts immediately
+    res_malformed = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token="wrong_token_123")
+    assert res_malformed["ok"] is False
+    assert res_malformed["cleaned_up"] == 0
+    assert "Invalid confirmation token" in res_malformed["message"]
+
+    # Calling with expired confirmation token aborts immediately
+    expired_tok = f"{int(time.time()) - 100}_fakehash_fakesig"
+    res_exp = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=expired_tok)
+    assert res_exp["ok"] is False
+    assert "Confirmation token has expired" in res_exp["message"]
+
+    # Calling with valid format token but mismatched candidate digest aborts
+    mismatch_tok = f"{int(time.time()) + 300}_otherhash_othersig"
+    res_mismatch = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=mismatch_tok)
+    assert res_mismatch["ok"] is False
+    assert "Candidate set changed or invalid token signature" in res_mismatch["message"]
+
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_writes_audit_log_and_recovery(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing content")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+    monkeypatch.setattr(paperless_manager, "delete_document", lambda d_id: True)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-audit-1", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "hash1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Preview to obtain legitimate confirmation token
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert preview["ok"] is True
+    tok = preview["confirmation_token"]
+
+    # Execute with valid confirmation token
+    res = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+    assert res["ok"] is True
+    assert res["cleaned_up"] == 1
+
+    audit_log = vault / "cleanup_audit.log"
+    assert audit_log.exists()
+    audit_text = audit_log.read_text(encoding="utf-8")
+    assert "[INTENT]" in audit_text
+    assert "[DELETED] id=d-audit-1" in audit_text
+    assert "[COMPLETE]" in audit_text
+
+    recovery_file = vault / "recovery" / "d-audit-1.json"
+    assert recovery_file.exists()
+    rec_data = json.loads(recovery_file.read_text(encoding="utf-8"))
+    assert rec_data["metadata"]["id"] == "d-audit-1"
+
+
+def test_reconcile_missing_documents_handles_partial_failure(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing content")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    call_counts = {"count": 0}
+
+    def fake_delete(d_id):
+        call_counts["count"] += 1
+        if call_counts["count"] == 1:
+            return True
+        raise RuntimeError(f"Database locked or error deleting {d_id}")
+
+    monkeypatch.setattr(paperless_manager, "delete_document", fake_delete)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-part-1", "filename": "missing1.pdf", "original_name": "missing1.pdf", "file_hash": "hash1", "file_size": 100, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-part-2", "filename": "missing2.pdf", "original_name": "missing2.pdf", "file_hash": "hash2", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    tok = preview["confirmation_token"]
+
+    res = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+    assert res["ok"] is False
+    assert res["partial_failure"] is True
+    assert res["cleaned_up"] == 1
+    assert len(res["errors"]) == 1
+
+    audit_log = vault / "cleanup_audit.log"
+    assert audit_log.exists()
+    audit_text = audit_log.read_text(encoding="utf-8")
+    assert "[PARTIAL FAILURE]" in audit_text
+
+
+def test_cleanup_missing_endpoint_dry_run_and_approval(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        paperless_manager,
+        "reconcile_missing_documents",
+        lambda approved=False, dry_run=False, confirmation_token=None, **k: (
+            {"ok": True, "dry_run": True, "candidates": [], "confirmation_token": "token_preview_xyz"} if dry_run else (
+                {"ok": True, "cleaned_up": 0} if (approved and confirmation_token == "token_preview_xyz") else (_ for _ in ()).throw(PermissionError("Approval and token required"))
+            )
+        ),
+    )
+
+    # 1. dry_run=true succeeds without requiring approved=true
+    res_dry = auth_client.post("/api/paperless-ngx/cleanup-missing?dry_run=true")
+    assert res_dry.status_code == 200
+    assert res_dry.json()["dry_run"] is True
+    tok = res_dry.json()["confirmation_token"]
+
+    # 2. calling without approval fails with 400
+    res_no_app = auth_client.post("/api/paperless-ngx/cleanup-missing")
+    assert res_no_app.status_code == 400
+
+    # 3. calling without token fails with 400
+    res_no_tok = auth_client.post("/api/paperless-ngx/cleanup-missing?approved=true")
+    assert res_no_tok.status_code == 400
+
+    # 4. calling with approved=true and token succeeds
+    res_ok = auth_client.post(f"/api/paperless-ngx/cleanup-missing?approved=true&confirmation_token={tok}")
+    assert res_ok.status_code == 200
+
+
+def test_check_ollama_rejects_unsafe_redirect_target(monkeypatch):
+    handler = weknora_manager._SafeLoopbackRedirectHandler()
+    req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+
+    # Attempt redirect to external IP or AWS metadata
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://169.254.169.254/latest/meta-data")
+    assert exc_info.value.code == 403
+
+    # Attempt redirect to external domain
+    with pytest.raises(urllib.error.HTTPError) as exc_info2:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://attacker.com/api/tags")
+    assert exc_info2.value.code == 403
+
+
+def test_check_ollama_rejects_redirect_to_unapproved_port(monkeypatch):
+    handler = weknora_manager._SafeLoopbackRedirectHandler()
+    req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+
+    # Attempt redirect to loopback on sensitive SSH/SMB port 22 or 445
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:22/api/tags")
+    assert exc_info.value.code == 403
+
+
+def test_check_ollama_rejects_redirect_with_credentials(monkeypatch):
+    handler = weknora_manager._SafeLoopbackRedirectHandler()
+    req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://user:pass@127.0.0.1:11434/api/tags")
+    assert exc_info.value.code == 403
+
+
+def test_weknora_stop_service_eliminates_shell_injection(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: False)
+
+    with patch("subprocess.run") as mock_run, patch("subprocess.check_output") as mock_co:
+        res = weknora_manager.stop_service()
+        assert res["ok"] is True
+        mock_co.assert_not_called()
+        # Verify shell=True was never called
+        for call_args in mock_run.call_args_list:
+            assert call_args.kwargs.get("shell") is not True
+
+
+def test_weknora_stop_service_refuses_to_kill_unrelated_process(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: True)
+
+    # netstat shows port 8082 in use by PID 9999
+    fake_netstat = MagicMock()
+    fake_netstat.returncode = 0
+    fake_netstat.stdout = "  TCP    127.0.0.1:8082         0.0.0.0:0              LISTENING       9999\n"
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: fake_netstat if cmd[0] == "netstat" else MagicMock())
+
+    # PID 9999 is NOT our WeKnora process
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: False)
+
+    killed_pids = []
+    def fake_run(cmd, **k):
+        if cmd[0] == "netstat":
+            return fake_netstat
+        if cmd[0] == "taskkill":
+            killed_pids.append(cmd)
+        return MagicMock()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    weknora_manager._logs.clear()
+
+    res = weknora_manager.stop_service()
+    assert res["ok"] is True
+    # Crucial assertion: PID 9999 must NOT be killed!
+    assert not any("9999" in str(cmd) for cmd in killed_pids)
+    assert any("refusing termination" in log for log in weknora_manager._logs)
+
+
+def test_weknora_stop_service_kills_verified_orphan(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: True)
+
+    fake_netstat = MagicMock()
+    fake_netstat.returncode = 0
+    fake_netstat.stdout = "  TCP    127.0.0.1:8082         0.0.0.0:0              LISTENING       8888\n"
+
+    # PID 8888 is a verified orphaned WeKnora instance
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: pid == 8888)
+
+    killed_pids = []
+    def fake_run(cmd, **k):
+        if cmd[0] == "netstat":
+            return fake_netstat
+        if cmd[0] == "taskkill":
+            killed_pids.append(cmd)
+        return MagicMock()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    res = weknora_manager.stop_service()
+    assert res["ok"] is True
+    # Verified orphan PID 8888 WAS targeted
+    assert any("8888" in str(cmd) for cmd in killed_pids)
+
+
+def test_reconcile_missing_documents_fails_closed_on_recovery_dir_permission(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-rec-fail", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "h1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    tok = preview["confirmation_token"]
+
+    rec_dir = vault / "recovery"
+
+    def fake_secure(path, is_dir=False):
+        if is_dir and Path(path) == rec_dir:
+            return False
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    with pytest.raises(PermissionError, match="recovery directory"):
+        paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+
+
+def test_reconcile_missing_documents_fails_closed_on_audit_log_permission(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-audit-fail", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "h1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    tok = preview["confirmation_token"]
+
+    audit_f = vault / "cleanup_audit.log"
+
+    def fake_secure(path, is_dir=False):
+        if not is_dir and Path(path) == audit_f:
+            return False
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    with pytest.raises(PermissionError, match="cleanup audit log"):
+        paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+
+
+def test_reconcile_missing_documents_fails_closed_on_recovery_file_permission(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+    mock_del = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_del)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-file-fail", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "h1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    tok = preview["confirmation_token"]
+
+    def fake_secure(path, is_dir=False):
+        if not is_dir and str(path).endswith("d-file-fail.json"):
+            return False
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    res = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+    assert res["ok"] is False
+    assert res["partial_failure"] is True
+    # Crucially, delete_document was NOT invoked because recovery file securing failed!
+    mock_del.assert_not_called()
+
+
+def test_reconcile_missing_documents_concurrency_lock():
+    # If _scan_lock is already acquired, reconcile returns busy
+    with paperless_manager._scan_lock:
+        res = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+        assert res["ok"] is False
+        assert res.get("busy") is True
+        assert "already running" in res["message"]
+
+
+def test_reconcile_missing_documents_skips_reappeared_candidate(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: vault / "ocr")
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+    mock_del = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_del)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-reappear", "filename": "reappear.pdf", "original_name": "reappear.pdf", "file_hash": "h1", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    tok = preview["confirmation_token"]
+
+    # Re-create the file on disk right before execution
+    (docs_dir / "reappear.pdf").write_text("I am back!")
+
+    res = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=tok)
+    # The candidate set changed because the file reappeared; execution safely aborts
+    assert res["ok"] is False
+    assert "Candidate set changed" in res["message"]
+    mock_del.assert_not_called()
+
+
+def test_reconcile_missing_documents_rejects_path_traversal_filename(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("existing")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-traverse", "filename": "../../etc/shadow", "original_name": "shadow", "file_hash": "h_bad", "file_size": 500, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Path traversal candidate must be ignored/skipped
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert preview["ok"] is True
+    assert preview["candidate_count"] == 0
+
+
+def test_paperless_init_vault_secures_thumbnails_and_previews(tmp_path, monkeypatch):
+    test_vault = tmp_path / "paperless_vault"
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: test_vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: test_vault / "documents")
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: test_vault / "ocr_cache")
+    thumbs_dir = test_vault / "thumbnails"
+    previews_dir = test_vault / "previews"
+    monkeypatch.setattr(paperless_manager, "get_thumbnails_dir", lambda: thumbs_dir)
+    monkeypatch.setattr(paperless_manager, "get_previews_dir", lambda: previews_dir)
+    monkeypatch.setattr(paperless_manager, "get_db_path", lambda: test_vault / "meta.db")
+
+    secured_paths = []
+    def fake_secure(path, is_dir=False):
+        secured_paths.append((Path(path).resolve(), is_dir))
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    paperless_manager.init_vault()
+
+    assert (thumbs_dir.resolve(), True) in secured_paths
+    assert (previews_dir.resolve(), True) in secured_paths
+
+    # Test fail-closed when thumbnails directory permission hardening fails
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", lambda p, is_dir=False: Path(p) != thumbs_dir)
+    with pytest.raises(PermissionError, match="thumbnails directory"):
+        paperless_manager.init_vault()
+
+
+def test_paperless_legacy_database_migration(tmp_path, monkeypatch):
+    # Test upgrading an older meta.db schema (lacking error_msg column)
+    test_vault = tmp_path / "legacy_vault"
+    test_vault.mkdir()
+    legacy_db = test_vault / "meta.db"
+    monkeypatch.setattr(paperless_manager, "get_vault_path", lambda: test_vault)
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: test_vault / "documents")
+    monkeypatch.setattr(paperless_manager, "get_ocr_cache_dir", lambda: test_vault / "ocr_cache")
+    monkeypatch.setattr(paperless_manager, "get_thumbnails_dir", lambda: test_vault / "thumbnails")
+    monkeypatch.setattr(paperless_manager, "get_previews_dir", lambda: test_vault / "previews")
+    monkeypatch.setattr(paperless_manager, "get_db_path", lambda: legacy_db)
+
+    # Create older schema without error_msg column
+    with sqlite3.connect(str(legacy_db)) as con:
+        con.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                file_hash TEXT,
+                mime_type TEXT,
+                tags TEXT DEFAULT '',
+                page_count INTEGER DEFAULT 0,
+                ocr_pages INTEGER DEFAULT 0,
+                ocr_status TEXT DEFAULT 'pending',
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        con.execute(
+            "INSERT INTO documents (id, filename, original_name) VALUES ('d-legacy', 'doc.pdf', 'doc.pdf')"
+        )
+        con.commit()
+
+    secured_paths = []
+    def fake_secure(path, is_dir=False):
+        secured_paths.append(Path(path).resolve())
+        return True
+
+    monkeypatch.setattr(paperless_manager, "secure_path_permissions", fake_secure)
+
+    # Call init_vault() which performs schema migration and permission hardening
+    paperless_manager.init_vault()
+
+    # Verify column was added and existing data preserved
+    with sqlite3.connect(str(legacy_db)) as con:
+        cur = con.cursor()
+        cur.execute("PRAGMA table_info(documents)")
+        cols = {r[1] for r in cur.fetchall()}
+        assert "error_msg" in cols
+        cur.execute("SELECT id, original_name FROM documents WHERE id = 'd-legacy'")
+        row = cur.fetchone()
+        assert row[0] == "d-legacy"
+
+    # Confirm database permissions were explicitly secured
+    assert legacy_db.resolve() in secured_paths
+
+
+def test_weknora_process_verification_fails_closed_without_binary(tmp_path, monkeypatch):
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", tmp_path / "nonexistent1.exe")
+    monkeypatch.setattr(weknora_manager, "FALLBACK_BINARY_PATH", tmp_path / "nonexistent2.exe")
+
+    # When no trusted binary exists on disk, process verification fails closed
+    assert weknora_manager._is_expected_weknora_process(12345) is False
+
+
+def test_weknora_process_verification_fails_closed_on_unverified_process(tmp_path, monkeypatch):
+    real_exe = tmp_path / "WeKnora-lite.exe"
+    real_exe.write_bytes(b"trusted")
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", real_exe)
+    monkeypatch.setattr(weknora_manager, "FALLBACK_BINARY_PATH", tmp_path / "no-fb.exe")
+
+    # If process inspection query returns None
+    monkeypatch.setattr(weknora_manager, "_get_process_executable_path_win32", lambda pid: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: MagicMock(returncode=1, stdout=""))
+
+    assert weknora_manager._is_expected_weknora_process(12345) is False
+
+
+def test_weknora_process_verification_rejects_mismatched_binary_path(tmp_path, monkeypatch):
+    real_exe = tmp_path / "WeKnora-lite.exe"
+    real_exe.write_bytes(b"trusted")
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", real_exe)
+    monkeypatch.setattr(weknora_manager, "FALLBACK_BINARY_PATH", tmp_path / "no-fb.exe")
+
+    # A process having the same filename but in a malicious or unauthorized directory
+    foreign_exe = tmp_path / "malicious" / "WeKnora-lite.exe"
+    monkeypatch.setattr(weknora_manager, "_get_process_executable_path_win32", lambda pid: foreign_exe)
+
+    assert weknora_manager._is_expected_weknora_process(12345) is False
+
+
+def test_weknora_process_verification_succeeds_on_exact_binary_path(tmp_path, monkeypatch):
+    real_exe = tmp_path / "WeKnora-lite.exe"
+    real_exe.write_bytes(b"trusted")
+    monkeypatch.setattr(weknora_manager, "BINARY_PATH", real_exe)
+    monkeypatch.setattr(weknora_manager, "FALLBACK_BINARY_PATH", tmp_path / "no-fb.exe")
+
+    # When process image exactly matches authorized binary
+    monkeypatch.setattr(weknora_manager, "_get_process_executable_path_win32", lambda pid: real_exe.resolve())
+
+    assert weknora_manager._is_expected_weknora_process(12345) is True
+
+
+def test_weknora_stop_service_exact_port_parsing(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: True)
+
+    # Netstat output contains port 18082, 80820, but NOT exact port 8082
+    fake_netstat = MagicMock()
+    fake_netstat.returncode = 0
+    fake_netstat.stdout = (
+        "  TCP    127.0.0.1:18082        0.0.0.0:0              LISTENING       1111\n"
+        "  TCP    127.0.0.1:80820        0.0.0.0:0              LISTENING       2222\n"
+    )
+
+    killed_pids = []
+    def fake_run(cmd, **k):
+        if cmd[0] == "netstat":
+            return fake_netstat
+        if cmd[0] == "taskkill":
+            killed_pids.append(cmd)
+        return MagicMock()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: True)
+
+    res = weknora_manager.stop_service()
+    assert res["ok"] is True
+    # Exact port 8082 was requested, so neither PID 1111 nor 2222 must be killed!
+    assert len(killed_pids) == 0

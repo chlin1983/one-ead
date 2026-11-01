@@ -1,9 +1,15 @@
 """Smart dependency verification and auto-installer for One EAD.
 
-Checks that all required Python packages are installed before launching.
-- On subsequent launches: instant check (<0.01s) using a cached signature in .deps_ok.
-- On fresh PC / git clone: automatically detects missing packages, installs them
-  from requirements.txt with friendly progress output, and caches verification.
+SUPPLY-CHAIN INTEGRITY & LOCKFILE REVIEW PROCESS:
+1. One EAD requires all dependencies and transitive sub-dependencies to be pinned
+   with exact versions ('==') and cryptographic SHA-256 digests in requirements.lock.
+2. The presence of hashes alone does not establish trustworthiness; the lockfile
+   itself must be reviewed and committed to version control.
+3. Lockfiles are never automatically regenerated or modified at runtime. Any package
+   additions or upgrades must be generated in an isolated environment, verified with
+   `pip hash`, reviewed, and committed through a pull request.
+4. Normal application startup strictly fails closed if requirements.lock is missing,
+   unpinned, or fails hash verification.
 """
 
 from __future__ import annotations
@@ -38,19 +44,18 @@ REQUIRED_PACKAGES: List[Tuple[str, str, str]] = [
 
 
 def _compute_signature() -> str:
-    """Compute a hash signature based on requirements.txt content and python executable."""
+    """Compute a hash signature based strictly on requirements.lock content and python executable.
+
+    Returns an empty string if requirements.lock does not exist or cannot be read.
+    """
+    if not LOCK_FILE.exists():
+        return ""
     h = hashlib.sha256()
-    if REQUIREMENTS_FILE.exists():
-        try:
-            h.update(REQUIREMENTS_FILE.read_bytes())
-        except OSError:
-            pass
-    if LOCK_FILE.exists():
-        try:
-            h.update(b"lock:")
-            h.update(LOCK_FILE.read_bytes())
-        except OSError:
-            pass
+    try:
+        h.update(b"lock:")
+        h.update(LOCK_FILE.read_bytes())
+    except OSError:
+        return ""
     # Normalize python executable path (lowercase on Windows)
     h.update(str(sys.executable).lower().encode("utf-8"))
     h.update(f"{sys.version_info[0]}.{sys.version_info[1]}".encode("utf-8"))
@@ -163,16 +168,29 @@ def verify_installed_against_lock(lock_path: Path) -> Tuple[bool, List[str]]:
 
 
 def is_already_verified() -> bool:
-    """Return True if dependencies were previously verified and nothing changed."""
-    if not STAMP_FILE.exists():
+    """Return True only if requirements.lock exists, passes cryptographic integrity,
+    the .deps_ok stamp signature matches, AND every locked package version is verified installed.
+
+    Fails closed on missing/invalid lockfile, stale stamp, or modified package versions.
+    """
+    if not LOCK_FILE.exists() or not STAMP_FILE.exists():
         return False
+
+    lock_valid, _, _ = verify_lockfile_integrity(LOCK_FILE)
+    if not lock_valid:
+        return False
+
     try:
         data = json.loads(STAMP_FILE.read_text(encoding="utf-8"))
-        if data.get("signature") == _compute_signature():
-            return True
+        sig = data.get("signature")
+        if not sig or sig != _compute_signature():
+            return False
     except Exception:
-        pass
-    return False
+        return False
+
+    # Never accept stamp based only on matching signature; strictly verify installed packages
+    ok, _ = verify_installed_against_lock(LOCK_FILE)
+    return ok
 
 
 def get_missing_packages() -> List[Tuple[str, str, str]]:
@@ -191,14 +209,18 @@ def mark_verified() -> bool:
     """Verifies installed packages against requirements.lock and writes .deps_ok stamp.
 
     Returns True if verification succeeded and stamp was written, False otherwise.
+    Fails closed if requirements.lock is missing or verification fails.
     """
-    if LOCK_FILE.exists():
-        ok, mismatches = verify_installed_against_lock(LOCK_FILE)
-        if not ok:
-            print("[One EAD] Cannot mark dependencies verified: installed packages do not match lockfile:")
-            for m in mismatches:
-                print(f"  - {m}")
-            return False
+    if not LOCK_FILE.exists():
+        print("[One EAD] Cannot mark dependencies verified: requirements.lock is missing.")
+        return False
+
+    ok, mismatches = verify_installed_against_lock(LOCK_FILE)
+    if not ok:
+        print("[One EAD] Cannot mark dependencies verified: installed packages do not match lockfile:")
+        for m in mismatches:
+            print(f"  - {m}")
+        return False
 
     try:
         data = {
@@ -224,16 +246,31 @@ def ensure_dependencies(install_missing: bool = False) -> bool:
     Returns:
         True if all dependencies are satisfied and verified, False otherwise.
     """
-    # Fast path: instant return if cached signature matches (<0.01s)
+    # 1. Fail closed immediately if requirements.lock is missing or invalid
+    if not LOCK_FILE.exists():
+        print("======================================================================")
+        print(" [SECURITY ERROR] requirements.lock is missing!")
+        print(" One EAD requires a cryptographically pinned, hash-verified lockfile.")
+        print(" Startup cannot proceed without requirements.lock.")
+        print("======================================================================")
+        return False
+
+    lock_valid, lock_err_msg, _ = verify_lockfile_integrity(LOCK_FILE)
+    if not lock_valid:
+        print("======================================================================")
+        print(" [SECURITY ERROR] requirements.lock is invalid or corrupted!")
+        print(f" Reason: {lock_err_msg}")
+        print(" Startup cannot proceed with an untrusted lockfile.")
+        print("======================================================================")
+        return False
+
+    # Fast path: instant return if cached signature matches AND installed packages match lockfile (<0.01s)
     if is_already_verified():
         return True
 
     # Check for missing modules without importing heavy packages
     missing = get_missing_packages()
-    lock_ok = True
-    lock_mismatches: List[str] = []
-    if LOCK_FILE.exists():
-        lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
+    lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
 
     if not missing and lock_ok:
         return mark_verified()
@@ -264,11 +301,8 @@ def ensure_dependencies(install_missing: bool = False) -> bool:
     print("======================================================================")
     print()
 
-    if LOCK_FILE.exists():
-        cmd = [sys.executable, "-m", "pip", "install", "--require-hashes", "-r", str(LOCK_FILE)]
-    else:
-        print(" [SECURITY WARNING] requirements.lock not found. Installing from unpinned requirements.txt...")
-        cmd = [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)]
+    # Never fall back to unpinned requirements.txt; strictly require hash-verified lockfile
+    cmd = [sys.executable, "-m", "pip", "install", "--require-hashes", "-r", str(LOCK_FILE)]
     try:
         res = subprocess.run(cmd)
         if res.returncode != 0:
@@ -284,13 +318,12 @@ def ensure_dependencies(install_missing: bool = False) -> bool:
         return False
 
     # Re-verify against lockfile
-    if LOCK_FILE.exists():
-        lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
-        if not lock_ok:
-            print(" [ERROR] Installed packages still do not match lockfile:")
-            for mm in lock_mismatches:
-                print(f"   - {mm}")
-            return False
+    lock_ok, lock_mismatches = verify_installed_against_lock(LOCK_FILE)
+    if not lock_ok:
+        print(" [ERROR] Installed packages still do not match lockfile:")
+        for mm in lock_mismatches:
+            print(f"   - {mm}")
+        return False
 
     still_missing = get_missing_packages()
     if still_missing:

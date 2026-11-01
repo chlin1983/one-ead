@@ -273,15 +273,54 @@ def sync_to_weknora(doc_id: str, approved: bool = False) -> dict:
 
 
 @router.post("/scan")
-def scan_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False, approved: bool = False) -> dict:
+def scan_vault(
+    auto_ocr: bool = False,
+    lang: str = "eng",
+    sync_weknora: bool = False,
+    approved: bool = False,
+) -> dict:
     """Manually triggers an immediate scan of ~/Documents/OneEAD_Archive/documents.
     
-    Automatic WeKnora synchronization is disabled by default. If sync_weknora is requested,
-    it requires explicit user approval (approved=True).
+    Automatic WeKnora synchronization is disabled by default and requires explicit user approval.
+    Destructive record deletion is NEVER performed during vault scans.
     """
     if sync_weknora and not approved:
         raise HTTPException(400, "WeKnora synchronization during scan requires explicit user approval.")
-    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang, sync_weknora=sync_weknora, approved=approved)
+    return manager.scan_and_sync_vault(
+        auto_ocr=auto_ocr,
+        lang=lang,
+        sync_weknora=sync_weknora,
+        approved=approved,
+    )
+
+
+@router.post("/cleanup-missing")
+def cleanup_missing(
+    approved: bool = False,
+    dry_run: bool = False,
+    confirmation_token: Optional[str] = None,
+) -> dict:
+    """Explicitly purges records whose underlying files were deleted from the vault.
+
+    Requires dry_run preview or explicit user approval with candidate confirmation.
+    """
+    if dry_run:
+        return manager.reconcile_missing_documents(approved=False, dry_run=True)
+    if not approved:
+        raise HTTPException(400, "Purging missing vault documents requires explicit user approval.")
+    if not confirmation_token or not confirmation_token.strip():
+        raise HTTPException(400, "Purging missing vault documents requires a non-empty confirmation_token from a dry-run preview.")
+    try:
+        res = manager.reconcile_missing_documents(approved=True, dry_run=False, confirmation_token=confirmation_token)
+        if not res.get("ok"):
+            raise HTTPException(400, res.get("message", "Cleanup failed"))
+        return res
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Cleanup error: {exc}")
 
 
 MODULE = PortalModule(

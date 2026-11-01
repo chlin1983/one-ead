@@ -33,8 +33,9 @@ try:
     if not ensure_dependencies(install_missing=False):
         print("[One EAD] Missing or unverified dependencies. Please run 'python server/check_deps.py --install' first. Exiting.")
         sys.exit(1)
-except ImportError:
-    pass
+except ImportError as exc:
+    print(f"[One EAD] CRITICAL: Failed to load dependency verification module: {exc}. Exiting.")
+    sys.exit(1)
 
 import uvicorn
 
