@@ -1558,3 +1558,192 @@ def test_weknora_stop_service_exact_port_parsing(monkeypatch):
     assert res["ok"] is True
     # Exact port 8082 was requested, so neither PID 1111 nor 2222 must be killed!
     assert len(killed_pids) == 0
+
+
+def test_windows_acl_removes_explicit_aces_and_verifies_acl(tmp_path):
+    import os
+    if os.name != "nt":
+        return
+    import subprocess
+    from server.security import secure_path_permissions, _verify_windows_acl
+
+    test_file = tmp_path / "test_acl_target.txt"
+    test_file.write_text("sensitive-data")
+
+    # Grant unauthorized explicit ACE to Everyone
+    subprocess.run(["icacls", str(test_file), "/grant", "Everyone:(R)"], capture_output=True, check=False)
+
+    # secure_path_permissions should remove unauthorized explicit ACE, reset, strip inheritance and verify clean ACL
+    ok = secure_path_permissions(test_file, is_dir=False)
+    assert ok is True
+
+    # Verify that Everyone is no longer present in the ACL
+    res = subprocess.run(["icacls", str(test_file)], capture_output=True, text=True, check=False)
+    assert "Everyone" not in res.stdout
+    assert "(I)" not in res.stdout
+
+
+def test_windows_acl_fails_closed_when_verification_fails(tmp_path, monkeypatch):
+    import os
+    if os.name != "nt":
+        return
+    import server.security as sec
+
+    test_file = tmp_path / "test_fail_target.txt"
+    test_file.write_text("sensitive-data")
+
+    # If verification function detects unauthorized ACL or failure
+    monkeypatch.setattr(sec, "_verify_windows_acl", lambda p, u: False)
+    ok = sec.secure_path_permissions(test_file, is_dir=False)
+    assert ok is False
+
+
+def test_reconcile_missing_documents_aborts_on_symlink_file(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("real content")
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-missing", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "h_miss", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Simulate encountering a symlink file during traversal
+    real_target = tmp_path / "external.pdf"
+    real_target.write_text("external content")
+    symlink_file = docs_dir / "symlink.pdf"
+    try:
+        import os
+        os.symlink(str(real_target), str(symlink_file))
+    except (OSError, NotImplementedError):
+        # On Windows without SeCreateSymbolicLinkPrivilege, mock Path.is_symlink
+        orig_is_symlink = Path.is_symlink
+        monkeypatch.setattr(Path, "is_symlink", lambda self: True if self.name == "symlink.pdf" else orig_is_symlink(self))
+        symlink_file.write_text("simulated symlink")
+
+    res = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert res["ok"] is False
+    assert "scan incomplete" in res["message"] or "Symlink" in res["message"]
+    # Symlink was never classified as a missing document
+    assert "candidates" not in res
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_aborts_if_registered_document_is_symlink(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("real content")
+    sym_doc = docs_dir / "sym_doc.pdf"
+    sym_doc.write_text("doc content")
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-sym", "filename": "sym_doc.pdf", "original_name": "sym_doc.pdf", "file_hash": "h_sym", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    orig_is_symlink = Path.is_symlink
+    monkeypatch.setattr(Path, "is_symlink", lambda self: True if self.name == "sym_doc.pdf" else orig_is_symlink(self))
+
+    res = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert res["ok"] is False
+    assert ("Symlink" in res["message"] or "scan incomplete" in res["message"] or
+            any("Symlink" in str(e) for e in res.get("errors", [])))
+    mock_delete.assert_not_called()
+
+
+def test_reconcile_missing_documents_hmac_rejects_unauthorized_signature(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("real content")
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-target", "filename": "missing.pdf", "original_name": "missing.pdf", "file_hash": "h_miss", "file_size": 100, "tags": "", "created_at": "2026-01-01"}
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Dry-run generates valid HMAC token
+    preview = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    assert preview["ok"] is True
+    valid_tok = preview["confirmation_token"]
+
+    # Client tries forging token without knowing server secret (e.g. invalid HMAC or plain SHA-256)
+    parts = valid_tok.split("_")
+    forged_tok = f"{parts[0]}_{parts[1]}_badhmacsignature1234567890abcdef"
+
+    res = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token=forged_tok)
+    assert res["ok"] is False
+    assert "Candidate set changed or invalid token signature" in res["message"]
+
+
+def test_weknora_get_status_refuses_unverified_listening_process(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "check_http_alive", lambda p, h: True)
+    monkeypatch.setattr(weknora_manager, "get_listening_pid_for_port", lambda p: 9999)
+    # PID 9999 is NOT a verified WeKnora executable
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: False)
+    monkeypatch.setattr(weknora_manager, "_process", None)
+
+    st = weknora_manager.status()
+    # Unverified listening process MUST NOT be treated as a running WeKnora service
+    assert st["running"] is False
+    assert st["pid"] is None
+
+
+def test_weknora_start_service_refuses_unverified_listening_process(tmp_path, monkeypatch):
+    monkeypatch.setattr(weknora_manager, "_process", None)
+    monkeypatch.setattr(weknora_manager, "check_http_alive", lambda p, h: True)
+    monkeypatch.setattr(weknora_manager, "get_listening_pid_for_port", lambda p: 9999)
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: False)
+    monkeypatch.setattr(weknora_manager, "check_port", lambda p, h: True)
+
+    cleared = []
+    monkeypatch.setattr(weknora_manager, "stop_service", lambda: cleared.append(True))
+    fake_exe = tmp_path / "WeKnora-lite.exe"
+    fake_exe.write_bytes(b"bin")
+    monkeypatch.setattr(weknora_manager, "get_active_binary", lambda: fake_exe)
+    monkeypatch.setattr(weknora_manager, "verify_binary_integrity", lambda *a: {"ok": False, "message": "fail-test"})
+
+    # start_service does NOT return "Service is already running" and attempts to clear the port
+    with pytest.raises(RuntimeError, match="WeKnora executable integrity verification failed"):
+        weknora_manager.start_service()
+
+    assert len(cleared) > 0
+
+
+def test_weknora_get_status_accepts_verified_listening_process(monkeypatch):
+    monkeypatch.setattr(weknora_manager, "check_http_alive", lambda p, h: True)
+    monkeypatch.setattr(weknora_manager, "get_listening_pid_for_port", lambda p: 4321)
+    # PID 4321 IS a verified WeKnora executable
+    monkeypatch.setattr(weknora_manager, "_is_expected_weknora_process", lambda pid: pid == 4321)
+    monkeypatch.setattr(weknora_manager, "_process", None)
+
+    st = weknora_manager.status()
+    assert st["running"] is True
+    assert st["pid"] == 4321

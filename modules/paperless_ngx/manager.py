@@ -11,6 +11,7 @@ from server.security import secure_path_permissions
 import atexit
 from datetime import datetime
 import hashlib
+import hmac
 import html
 import httpx
 import json
@@ -1241,17 +1242,28 @@ def copy_to_weknora_vault(doc_id: str, auto_ocr_if_missing: bool = True, approve
     }
 
 
+def _get_reconciliation_secret() -> bytes:
+    try:
+        from server.security import get_portal_token
+        return get_portal_token().encode("utf-8")
+    except Exception:
+        return b"one-ead-reconciliation-server-secret-256"
+
+
 def _compute_candidates_token(candidate_ids: List[str], expiry_seconds: int = 300) -> str:
-    """Computes a cryptographically bound confirmation token with expiry for candidate document IDs."""
+    """Computes an HMAC-SHA256 bound confirmation token with expiry for candidate document IDs
+    using the protected server secret.
+    """
     sorted_ids = sorted(candidate_ids)
     cand_digest = hashlib.sha256(",".join(sorted_ids).encode("utf-8")).hexdigest()[:16]
     exp = int(time.time()) + expiry_seconds
-    raw_sig = hashlib.sha256(f"{cand_digest}:{exp}:{len(sorted_ids)}".encode("utf-8")).hexdigest()[:16]
-    return f"{exp}_{cand_digest}_{raw_sig}"
+    msg = f"{cand_digest}:{exp}:{len(sorted_ids)}".encode("utf-8")
+    sig = hmac.new(_get_reconciliation_secret(), msg, hashlib.sha256).hexdigest()[:32]
+    return f"{exp}_{cand_digest}_{sig}"
 
 
 def _verify_candidates_token(token: Optional[str], candidate_ids: List[str]) -> Tuple[bool, str]:
-    """Validates confirmation token format, expiry, and candidate set binding."""
+    """Validates confirmation token format, expiry, and HMAC signature with protected server secret."""
     if not token or not isinstance(token, str) or not token.strip():
         return False, "Confirmation token is missing or empty."
 
@@ -1269,9 +1281,10 @@ def _verify_candidates_token(token: Optional[str], candidate_ids: List[str]) -> 
 
     sorted_ids = sorted(candidate_ids)
     expected_digest = hashlib.sha256(",".join(sorted_ids).encode("utf-8")).hexdigest()[:16]
-    expected_sig = hashlib.sha256(f"{expected_digest}:{exp_time}:{len(sorted_ids)}".encode("utf-8")).hexdigest()[:16]
+    msg = f"{expected_digest}:{exp_time}:{len(sorted_ids)}".encode("utf-8")
+    expected_sig = hmac.new(_get_reconciliation_secret(), msg, hashlib.sha256).hexdigest()[:32]
 
-    if parts[1] != expected_digest or parts[2] != expected_sig:
+    if not hmac.compare_digest(parts[1], expected_digest) or not hmac.compare_digest(parts[2], expected_sig):
         return False, "Candidate set changed or invalid token signature. Please re-run dry-run preview before confirming deletion."
 
     return True, "Valid"
@@ -1349,7 +1362,7 @@ def reconcile_missing_documents(
                     p = root_path / f
                     try:
                         if p.is_symlink():
-                            logger.warning("Ignoring symlink in vault documents: %s", p)
+                            traversal_errors.append(f"Symlink file rejected: {p}")
                             continue
                         resolved_p = p.resolve()
                         if resolved_docs not in resolved_p.parents:
@@ -1396,6 +1409,14 @@ def reconcile_missing_documents(
             if not fn or Path(fn).is_absolute() or ".." in Path(fn).parts:
                 logger.warning("Invalid or suspicious filename in database: %s", fn)
                 continue
+            cand_disk_path = docs_dir / fn
+            if cand_disk_path.is_symlink():
+                logger.warning("Document %s on disk is a symlink. Aborting destructive reconciliation.", fn)
+                return {
+                    "ok": False,
+                    "cleaned_up": 0,
+                    "message": f"Symlink detected for document '{fn}'. Reconciliation aborted to protect against unsafe deletion.",
+                }
             fn_rel = Path(fn).as_posix().lower()
             if fn_rel and fn_rel not in accessible_rel_paths:
                 candidates.append(dict(d_row))

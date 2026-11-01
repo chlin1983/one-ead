@@ -43,11 +43,73 @@ SENSITIVE_PARAM_PATTERN = re.compile(
 
 
 
+def _verify_windows_acl(p: Path, username: str) -> bool:
+    """Verifies that the file/dir ACL strictly contains only the authorized user and SYSTEM,
+    with no inherited permissions and no unauthorized explicit ACEs.
+    """
+    try:
+        check_res = subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False)
+        if check_res.returncode != 0:
+            return False
+
+        allowed_names = {
+            username.lower(),
+            "system",
+            "nt authority\\system",
+            "*s-1-5-18",
+            "s-1-5-18",
+            "builtin\\administrators",
+            "administrators",
+        }
+        found_user = False
+        found_system = False
+
+        for line in check_res.stdout.splitlines():
+            clean = line.strip()
+            if not clean or "successfully processed" in clean.lower():
+                continue
+            idx = clean.find(":(")
+            if idx == -1:
+                continue
+            before_perm = clean[:idx]
+            perm = clean[idx + 2 :].split(")")[0].lower()
+
+            for p_cand in [str(p).lower(), p.name.lower(), str(p.resolve()).lower()]:
+                if before_perm.lower().startswith(p_cand):
+                    before_perm = before_perm[len(p_cand) :].strip()
+
+            p_name = before_perm.strip().lower()
+            if "\\" in p_name:
+                short_name = p_name.split("\\")[-1]
+            else:
+                short_name = p_name
+
+            # Reject any inherited permission (I)
+            if "(i)" in clean.lower() or "i" in perm.split(","):
+                return False
+
+            # Verify principal authorization
+            if p_name in allowed_names or short_name in allowed_names:
+                if "f" in clean[idx:].lower():
+                    if short_name == username.lower() or p_name == username.lower():
+                        found_user = True
+                    if "system" in short_name or "*s-1-5-18" in p_name:
+                        found_system = True
+            else:
+                # Unauthorized explicit ACE detected!
+                return False
+
+        return found_user and found_system
+    except Exception:
+        return False
+
+
 def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> bool:
     r"""Restricts permissions on a sensitive file or directory to current user and SYSTEM.
 
-    Removes inherited permissions from BUILTIN\\Users and Authenticated Users.
-    On Windows: Uses icacls.exe to remove inheritance (/inheritance:r) and grant Full Control.
+    Removes unauthorized explicit ACEs and strips inherited permissions.
+    On Windows: Uses icacls.exe to reset explicit ACEs (/reset), remove inheritance (/inheritance:r),
+    grant Full Control strictly to current user and SYSTEM, and verifies final ACL before returning True.
     On POSIX: Uses os.chmod with 0o700 for directories and 0o600 for files.
     """
     p = Path(path)
@@ -65,17 +127,33 @@ def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> boo
             return False
 
         perm = "(OI)(CI)(F)" if is_dir else "(F)"
-        cmd = [
-            "icacls",
-            str(p),
-            "/inheritance:r",
-            "/grant:r",
-            f"{username}:{perm}",
-            f"*S-1-5-18:{perm}",
-        ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            return res.returncode == 0
+            # 1. Reset permissions to remove unauthorized explicit ACEs
+            subprocess.run(["icacls", str(p), "/reset"], capture_output=True, text=True, check=False)
+
+            # 2. Explicitly remove any broad or unauthorized principal ACEs
+            subprocess.run(
+                ["icacls", str(p), "/remove:g", "Everyone", "BUILTIN\\Users", "Authenticated Users", "Guests"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            # 3. Strip inherited permissions
+            subprocess.run(["icacls", str(p), "/inheritance:r"], capture_output=True, text=True, check=False)
+
+            # 4. Grant Full Control exclusively to current user and SYSTEM
+            grant_res = subprocess.run(
+                ["icacls", str(p), "/grant:r", f"{username}:{perm}", f"*S-1-5-18:{perm}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if grant_res.returncode != 0:
+                return False
+
+            # 5. Verify the final ACL before returning True
+            return _verify_windows_acl(p, username)
         except Exception:
             return False
     else:
@@ -84,6 +162,7 @@ def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> boo
             return True
         except Exception:
             return False
+
 
 def get_portal_token() -> str:
     """Retrieves or generates the persistent local portal session token."""

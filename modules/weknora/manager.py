@@ -486,6 +486,51 @@ def check_http_alive(port: int, host: str = "127.0.0.1") -> bool:
         return False
 
 
+def get_listening_pid_for_port(port: int) -> Optional[int]:
+    """Finds the PID of the process listening on the given port using netstat without shell=True."""
+    if sys.platform == "win32":
+        try:
+            res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 5 and "LISTENING" in parts:
+                        local_addr = parts[1]
+                        addr_str, _, port_str = local_addr.rpartition(":")
+                        if port_str.isdigit() and int(port_str) == port:
+                            try:
+                                return int(parts[-1])
+                            except ValueError:
+                                pass
+        except Exception:
+            pass
+    return None
+
+
+def is_verified_weknora_running(port: int, host: str = "127.0.0.1") -> tuple[bool, Optional[int]]:
+    """Verifies that an HTTP service is responding on the port AND that the actual listening
+    process identity matches the verified WeKnora binary.
+    Fails closed if the port is responding to HTTP but the listening process is unverified or unrelated.
+    """
+    if not check_http_alive(port, host):
+        return False, None
+
+    global _process
+    if _process is not None and _process.poll() is None:
+        if _is_expected_weknora_process(_process.pid):
+            return True, _process.pid
+
+    listening_pid = get_listening_pid_for_port(port)
+    if listening_pid and _is_expected_weknora_process(listening_pid):
+        return True, listening_pid
+
+    append_log(
+        f"[Security Warning] Process on port {port} (PID {listening_pid}) does not match verified WeKnora executable; "
+        "refusing to treat as running WeKnora service."
+    )
+    return False, None
+
+
 _tool_cache: Dict[str, tuple[bool, float]] = {}
 _ollama_cache: Dict[str, tuple[Dict[str, Any], float]] = {}
 
@@ -713,20 +758,12 @@ def status() -> Dict[str, Any]:
     )
 
     with _lock:
-        is_proc_alive = _process is not None and _process.poll() is None
-        http_alive = check_http_alive(port, host)
-        is_running = is_proc_alive and http_alive
+        is_running, active_pid = is_verified_weknora_running(port, host)
         if is_running:
-            pid = _process.pid
-            start_math_watchdog()
-        elif is_proc_alive:
-            pid = _process.pid
-        elif http_alive:
-            is_running = True
-            pid = None
+            pid = active_pid
             start_math_watchdog()
         else:
-            pid = None
+            pid = _process.pid if (_process and _process.poll() is None) else None
 
     ollama_info = check_ollama(cfg.get("OLLAMA_BASE_URL"))
 
@@ -798,10 +835,12 @@ def start_service() -> Dict[str, Any]:
         port = int(cfg.get("SERVER_PORT", cfg.get("PORT", "8082")))
         host = cfg.get("SERVER_HOST", "127.0.0.1")
 
+        is_running, active_pid = is_verified_weknora_running(port, host)
+        if is_running:
+            return {"ok": True, "message": "Service is already running", "pid": active_pid}
+
         if _process and _process.poll() is None:
-            if check_http_alive(port, host):
-                return {"ok": True, "message": "Service is already running", "pid": _process.pid}
-            append_log(f"Process PID {_process.pid} is alive but unresponsive on port {port}. Cleaning up...")
+            append_log(f"Managed process PID {_process.pid} is unresponsive or unverified on port {port}. Cleaning up...")
             stop_service()
             time.sleep(0.5)
 
@@ -810,9 +849,6 @@ def start_service() -> Dict[str, Any]:
             raise RuntimeError(
                 "WeKnora-lite binary not found. Please build the Lite binary first."
             )
-
-        if check_http_alive(port, host):
-            return {"ok": True, "message": f"Port {port} is already active", "pid": None}
 
         # If an unresponsive process or zombie socket is holding the port, clear it
         if check_port(port, host):
