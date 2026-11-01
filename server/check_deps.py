@@ -12,14 +12,16 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 _ROOT = Path(__file__).resolve().parent.parent
 REQUIREMENTS_FILE = _ROOT / "requirements.txt"
+LOCK_FILE = _ROOT / "requirements.lock"
 STAMP_FILE = _ROOT / ".deps_ok"
 
 # List of (pip_spec, import_module_name, friendly_label)
@@ -43,10 +45,121 @@ def _compute_signature() -> str:
             h.update(REQUIREMENTS_FILE.read_bytes())
         except OSError:
             pass
+    if LOCK_FILE.exists():
+        try:
+            h.update(b"lock:")
+            h.update(LOCK_FILE.read_bytes())
+        except OSError:
+            pass
     # Normalize python executable path (lowercase on Windows)
     h.update(str(sys.executable).lower().encode("utf-8"))
     h.update(f"{sys.version_info[0]}.{sys.version_info[1]}".encode("utf-8"))
     return h.hexdigest()
+
+
+
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def verify_lockfile_integrity(lock_path: Path) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    """Cryptographically validates a requirements lockfile.
+
+    Ensures:
+    1. Lockfile exists and contains at least one requirement.
+    2. Every package uses an exact version specifier ('==').
+    3. Every package has at least one valid SHA-256 hash (--hash=sha256:<64 hex>).
+    4. Rejects ranges, unpinned dependencies, and malformed digests.
+    """
+    if not lock_path.exists():
+        return False, f"Lockfile not found: {lock_path}", []
+
+    try:
+        content = lock_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"Failed to read lockfile: {exc}", []
+
+    lines = content.splitlines()
+    entries: List[Dict[str, Any]] = []
+    current_entry: Optional[Dict[str, Any]] = None
+
+    for line_num, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(("--require-hashes", "--index-url", "--extra-index-url", "--no-index", "-r ", "-i ", "-f ")):
+            continue
+
+        is_continuation = line.endswith("\\")
+        clean_part = line[:-1].strip() if is_continuation else line
+
+        if clean_part.startswith("--hash="):
+            if current_entry is None:
+                return False, f"Line {line_num}: Hash specification without preceding package", []
+            hash_val = clean_part[7:].strip()
+            if not hash_val.startswith("sha256:"):
+                return False, f"Line {line_num}: Only sha256 hashes are permitted, got {hash_val}", []
+            hex_digest = hash_val[7:].lower()
+            if not _SHA256_HEX_RE.match(hex_digest):
+                return False, f"Line {line_num}: Malformed SHA-256 digest: {hex_digest}", []
+            current_entry["hashes"].append(hex_digest)
+        else:
+            if current_entry is not None:
+                if not current_entry["hashes"]:
+                    return False, f"Package {current_entry['name']} missing required --hash verification", []
+                entries.append(current_entry)
+                current_entry = None
+
+            tokens = clean_part.split()
+            pkg_spec = tokens[0]
+            inline_hashes = []
+            for t in tokens[1:]:
+                if t.startswith("--hash=sha256:"):
+                    h = t[14:].lower()
+                    if _SHA256_HEX_RE.match(h):
+                        inline_hashes.append(h)
+                    else:
+                        return False, f"Line {line_num}: Malformed SHA-256 in {t}", []
+
+            if "==" not in pkg_spec:
+                return False, f"Line {line_num}: Package '{pkg_spec}' must be pinned with exact '==' version", []
+            name, ver = pkg_spec.split("==", 1)
+            name = name.strip()
+            ver = ver.strip()
+            if not name or not ver or any(c in ver for c in (">", "<", "~", "*")):
+                return False, f"Line {line_num}: Invalid version pin '{pkg_spec}'", []
+
+            current_entry = {"name": name, "version": ver, "hashes": inline_hashes, "line": line_num}
+
+    if current_entry is not None:
+        if not current_entry["hashes"]:
+            return False, f"Package {current_entry['name']} missing required --hash verification", []
+        entries.append(current_entry)
+
+    if not entries:
+        return False, "Lockfile contains no package requirements", []
+
+    return True, f"Verified {len(entries)} pinned and hash-verified packages", entries
+
+
+def verify_installed_against_lock(lock_path: Path) -> Tuple[bool, List[str]]:
+    """Verifies that installed packages match the pinned lockfile versions."""
+    import importlib.metadata
+    ok, msg, entries = verify_lockfile_integrity(lock_path)
+    if not ok:
+        return False, [msg]
+
+    mismatches = []
+    for entry in entries:
+        pkg_name = entry["name"]
+        expected_ver = entry["version"]
+        try:
+            installed_ver = importlib.metadata.version(pkg_name)
+            if installed_ver != expected_ver:
+                mismatches.append(f"{pkg_name}: installed {installed_ver} != locked {expected_ver}")
+        except importlib.metadata.PackageNotFoundError:
+            mismatches.append(f"{pkg_name}: not installed (locked at {expected_ver})")
+
+    return len(mismatches) == 0, mismatches
 
 
 def is_already_verified() -> bool:
@@ -116,7 +229,12 @@ def ensure_dependencies() -> bool:
     print("======================================================================")
     print()
 
-    cmd = [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)]
+    if LOCK_FILE.exists():
+        print(" Installing missing packages using reproducible, hash-verified lockfile (requirements.lock)...")
+        cmd = [sys.executable, "-m", "pip", "install", "--require-hashes", "-r", str(LOCK_FILE)]
+    else:
+        print(" [SECURITY WARNING] requirements.lock not found. Installing from unpinned requirements.txt...")
+        cmd = [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)]
     try:
         res = subprocess.run(cmd)
         if res.returncode != 0:

@@ -14,7 +14,8 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+import subprocess
 
 _ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = _ROOT / "data"
@@ -40,6 +41,50 @@ SENSITIVE_PARAM_PATTERN = re.compile(
 )
 
 
+
+
+def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> bool:
+    r"""Restricts permissions on a sensitive file or directory to current user and SYSTEM.
+
+    Removes inherited permissions from BUILTIN\\Users and Authenticated Users.
+    On Windows: Uses icacls.exe to remove inheritance (/inheritance:r) and grant Full Control.
+    On POSIX: Uses os.chmod with 0o700 for directories and 0o600 for files.
+    """
+    p = Path(path)
+    if not p.exists():
+        return False
+
+    if os.name == "nt":
+        username = os.environ.get("USERNAME")
+        if not username and hasattr(os, "getlogin"):
+            try:
+                username = os.getlogin()
+            except Exception:
+                pass
+        if not username:
+            return False
+
+        perm = "(OI)(CI)(F)" if is_dir else "(F)"
+        cmd = [
+            "icacls",
+            str(p),
+            "/inheritance:r",
+            "/grant:r",
+            f"{username}:{perm}",
+            f"*S-1-5-18:{perm}",
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            return res.returncode == 0
+        except Exception:
+            return False
+    else:
+        try:
+            os.chmod(p, 0o700 if is_dir else 0o600)
+            return True
+        except Exception:
+            return False
+
 def get_portal_token() -> str:
     """Retrieves or generates the persistent local portal session token."""
     global _CACHED_TOKEN
@@ -52,12 +97,14 @@ def get_portal_token() -> str:
         return _CACHED_TOKEN
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    secure_path_permissions(DATA_DIR, is_dir=True)
 
     if TOKEN_FILE.exists():
         try:
             tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
             if len(tok) >= 32:
                 _CACHED_TOKEN = tok
+                secure_path_permissions(TOKEN_FILE, is_dir=False)
                 return tok
         except Exception:
             pass
@@ -66,11 +113,7 @@ def get_portal_token() -> str:
     new_token = secrets.token_urlsafe(32)
     try:
         TOKEN_FILE.write_text(new_token, encoding="utf-8")
-        if hasattr(os, "chmod"):
-            try:
-                os.chmod(TOKEN_FILE, 0o600)
-            except Exception:
-                pass
+        secure_path_permissions(TOKEN_FILE, is_dir=False)
     except Exception:
         pass
 
@@ -129,9 +172,11 @@ def _claim_nonce(nonce: str) -> bool:
                     os.unlink(entry.path)
             except OSError:
                 pass
+        secure_path_permissions(d, is_dir=True)
         marker = d / hashlib.sha256(nonce.encode()).hexdigest()[:40]
         fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
+        secure_path_permissions(marker, is_dir=False)
         return True
     except FileExistsError:
         return False

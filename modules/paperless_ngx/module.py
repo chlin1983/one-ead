@@ -58,6 +58,7 @@ async def upload_document(
     category: str = Form(""),
     auto_ocr: bool = Form(True),
     lang: str = Form("eng"),
+    auto_sync_weknora: bool = Form(False),
 ) -> dict:
     if not file.filename:
         raise HTTPException(400, "Filename is required.")
@@ -73,6 +74,7 @@ async def upload_document(
         category=category,
         auto_ocr=auto_ocr,
         lang=lang,
+        auto_sync_weknora=auto_sync_weknora,
     )
     return {"ok": True, "document": doc}
 
@@ -218,9 +220,9 @@ def get_document_thumbnail(doc_id: str):
 
 
 @router.post("/documents/{doc_id}/ocr")
-def trigger_ocr(doc_id: str, lang: str = "eng") -> dict:
+def trigger_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool = False) -> dict:
     try:
-        updated = manager.process_document_ocr(doc_id, lang=lang, auto_sync_weknora=True)
+        updated = manager.process_document_ocr(doc_id, lang=lang, auto_sync_weknora=auto_sync_weknora)
         weknora_synced = False
         weknora_file = None
         if updated:
@@ -258,18 +260,25 @@ def delete_document(doc_id: str) -> dict:
 
 
 @router.post("/documents/{doc_id}/sync-weknora")
-def sync_to_weknora(doc_id: str) -> dict:
+def sync_to_weknora(doc_id: str, approved: bool = True) -> dict:
+    if not approved:
+        raise HTTPException(400, "Document synchronization to WeKnora requires explicit user approval.")
     try:
-        res = manager.copy_to_weknora_vault(doc_id)
+        res = manager.copy_to_weknora_vault(doc_id, auto_ocr_if_missing=True, approved=True)
         return res
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
     except Exception as exc:
         raise HTTPException(500, f"Failed to sync to WeKnora: {exc}")
 
 
 @router.post("/scan")
-def scan_vault(auto_ocr: bool = True, lang: str = "eng") -> dict:
-    """Manually triggers an immediate scan of ~/Documents/OneEAD_Archive/documents."""
-    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang)
+def scan_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False) -> dict:
+    """Manually triggers an immediate scan of ~/Documents/OneEAD_Archive/documents.
+    
+    Automatic WeKnora synchronization is disabled by default.
+    """
+    return manager.scan_and_sync_vault(auto_ocr=auto_ocr, lang=lang, sync_weknora=sync_weknora, approved=False)
 
 
 MODULE = PortalModule(
@@ -284,10 +293,12 @@ MODULE = PortalModule(
     router=router,
 )
 
-# Automatically start background vault watcher on module load
-try:
-    manager.start_vault_watcher(interval_sec=20)
-except Exception as _watcher_err:
-    import logging
-    logging.getLogger("paperless_ngx").warning("Failed to start vault watcher: %s", _watcher_err)
+# Automatic background vault watcher is DISABLED by default.
+# It can only run if explicitly enabled via environment configuration (e.g. ONEEAD_ENABLE_VAULT_WATCHER=1).
+if os.environ.get("ONEEAD_ENABLE_VAULT_WATCHER", "").strip().lower() in ("1", "true", "yes"):
+    try:
+        manager.start_vault_watcher(interval_sec=20)
+    except Exception as _watcher_err:
+        import logging
+        logging.getLogger("paperless_ngx").warning("Failed to start vault watcher: %s", _watcher_err)
 

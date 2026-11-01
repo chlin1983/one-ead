@@ -32,6 +32,11 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+try:
+    from server.security import secure_path_permissions
+except Exception:
+    def secure_path_permissions(p, is_dir=False):
+        return True
 
 TOOL_ID = "deep-tutor"
 UPSTREAM_REPO = "HKUDS/DeepTutor"
@@ -409,9 +414,11 @@ def _open_service_log():
     nobody drains it, it fills up, and the backend freezes on its next log line.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    secure_path_permissions(DATA_DIR, is_dir=True)
     if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2 * 1024 * 1024:
         LOG_FILE.write_bytes(LOG_FILE.read_bytes()[-512 * 1024:])
     fh = open(LOG_FILE, "ab")
+    secure_path_permissions(LOG_FILE, is_dir=False)
     fh.write(f"\n--- {_now_iso()} start ---\n".encode("utf-8"))
     fh.flush()
     return fh

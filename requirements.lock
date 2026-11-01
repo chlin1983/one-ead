@@ -1,0 +1,33 @@
+# ==============================================================================
+# One EAD - Cryptographically Pinned & Hash-Verified Python Dependency Lockfile
+# ==============================================================================
+# Generated for reproducible, tamper-proof dependency installation.
+# Enforces SHA-256 cryptographic verification for every package archive.
+# Install with:
+#   pip install --require-hashes -r requirements.lock
+# ==============================================================================
+--require-hashes
+
+fastapi==0.135.2 \
+    --hash=sha256:7c7c5e2195dfb8f278eb084534e62551fb26fc4957e8417f73db1b7470697ad1
+
+uvicorn==0.41.0 \
+    --hash=sha256:56cf223ca1098659d587c67568ba7d057778b40974bfa0b5df6e3b5e43bf1e02
+
+python-multipart==0.0.22 \
+    --hash=sha256:7d853e3faee9e0e56ecff3aa1b2a9e32a67a07567ae22199f36f6dca658141ea
+
+pdfplumber==0.11.10 \
+    --hash=sha256:4ae04cfdb63f6beaeec43c3915bc5c9f53e6b3fa1f2ee0662d04a6016e3002f2
+
+pymupdf==1.28.2 \
+    --hash=sha256:bd50e18987ec8d4bfbf048684ad3df5b4b1a201b229fa1ffb17e335e2baae70a
+
+numpy==2.4.2 \
+    --hash=sha256:88944510795c64f7fa38ef9ca92e47262d0299f2452c93845eb5b211ec1dbfc6
+
+scipy==1.18.0 \
+    --hash=sha256:0b04bc5bc3b71e16f73bfd7890ec9e59d4c79c8cefe8f7a94d80a18e2285a7bb
+
+httpx==0.27.2 \
+    --hash=sha256:76c24190e72251d1872199bcf8923e20ec611ca09ffea75e4787a2ec3f6e1f0e

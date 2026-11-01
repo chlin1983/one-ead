@@ -499,6 +499,7 @@ def save_uploaded_document(
     category: str = "",
     auto_ocr: bool = True,
     lang: str = "eng",
+    auto_sync_weknora: bool = False,
 ) -> Dict[str, Any]:
     """Saves a document into an organized subfolder in external vault and optionally runs OCR."""
     init_vault()
@@ -573,17 +574,17 @@ def save_uploaded_document(
         con.commit()
 
     if auto_ocr:
-        process_document_ocr(doc_id, lang=lang, auto_sync_weknora=True)
-    else:
+        process_document_ocr(doc_id, lang=lang, auto_sync_weknora=auto_sync_weknora)
+    elif auto_sync_weknora:
         try:
-            copy_to_weknora_vault(doc_id, auto_ocr_if_missing=False)
+            copy_to_weknora_vault(doc_id, auto_ocr_if_missing=False, approved=True)
         except Exception as sync_exc:
             logger.debug("Upload sync to WeKnora: %s", sync_exc)
 
     return get_document(doc_id)
 
 
-def process_document_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool = True) -> Dict[str, Any]:
+def process_document_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool = False) -> Dict[str, Any]:
     """Runs dual-pipeline OCR and text extraction for any document type in the vault."""
     doc = get_document(doc_id)
     if not doc:
@@ -637,13 +638,13 @@ def process_document_ocr(doc_id: str, lang: str = "eng", auto_sync_weknora: bool
             )
             con.commit()
 
-        # Automatically synchronize clean OCR markdown to WeKnora ingestion storage
+        # Synchronize clean OCR markdown to WeKnora ingestion storage ONLY when explicitly approved
         if auto_sync_weknora:
             try:
-                copy_to_weknora_vault(doc_id, auto_ocr_if_missing=False)
-                logger.info("Automatically synced OCR markdown to WeKnora for doc: %s", doc_id)
+                copy_to_weknora_vault(doc_id, auto_ocr_if_missing=False, approved=True)
+                logger.info("Explicitly approved sync of OCR markdown to WeKnora for doc: %s", doc_id)
             except Exception as sync_exc:
-                logger.warning("Auto-sync to WeKnora failed for %s: %s", doc_id, sync_exc)
+                logger.warning("WeKnora sync failed for %s: %s", doc_id, sync_exc)
 
         return get_document(doc_id)
 
@@ -1144,10 +1145,16 @@ def delete_document_from_weknora(orig_name: str) -> None:
             pass
 
 
-def copy_to_weknora_vault(doc_id: str, auto_ocr_if_missing: bool = True) -> Dict[str, Any]:
+def copy_to_weknora_vault(doc_id: str, auto_ocr_if_missing: bool = True, approved: bool = False) -> Dict[str, Any]:
     """Copies the clean OCR Markdown AND original document to WeKnora's document ingestion folder,
     and automatically registers the document in WeKnora's Knowledge Base for instant RAG QA.
+
+    Requires explicit user approval (approved=True) to prevent automatic leakage.
     """
+    if not approved:
+        raise PermissionError(
+            f"Document {doc_id} cannot be synchronized to WeKnora without explicit user approval."
+        )
     doc = get_document(doc_id)
     if not doc:
         raise ValueError(f"Document {doc_id} not found.")
@@ -1223,10 +1230,11 @@ _watcher_thread: Optional[threading.Thread] = None
 _watcher_stop_event = threading.Event()
 
 
-def scan_and_sync_vault(auto_ocr: bool = True, lang: str = "eng") -> Dict[str, Any]:
+def scan_and_sync_vault(auto_ocr: bool = False, lang: str = "eng", sync_weknora: bool = False, approved: bool = False) -> Dict[str, Any]:
     """Scans the external vault documents folder (~/Documents/OneEAD_Archive/documents)
-    for any untracked or newly added files, registers them in meta.db, runs OCR,
-    and automatically synchronizes them to WeKnora knowledge base.
+    for any untracked or newly added files, registers them in meta.db.
+
+    Automatic WeKnora synchronization is disabled by default and requires explicit approval.
     """
     if not _scan_lock.acquire(blocking=False):
         return {
@@ -1417,35 +1425,37 @@ def scan_and_sync_vault(auto_ocr: bool = True, lang: str = "eng") -> Dict[str, A
                 logger.exception("Failed importing scanned vault file %s: %s", item, imp_err)
                 errors.append(f"{item.name}: {imp_err}")
 
-        # Process newly discovered documents: run OCR and guarantee WeKnora synchronization
+        # Process newly discovered documents: run OCR if requested (never auto-sync WeKnora by default)
         for d_id in docs_to_ocr:
             if auto_ocr:
                 try:
-                    process_document_ocr(d_id, lang=lang, auto_sync_weknora=True)
+                    process_document_ocr(d_id, lang=lang, auto_sync_weknora=False)
                 except Exception as ocr_err:
                     logger.warning("OCR processing error for doc %s during scan: %s", d_id, ocr_err)
-            try:
-                copy_to_weknora_vault(d_id, auto_ocr_if_missing=False)
-            except Exception as w_err:
-                logger.debug("WeKnora sync fallback error for doc %s: %s", d_id, w_err)
+            if sync_weknora and approved:
+                try:
+                    copy_to_weknora_vault(d_id, auto_ocr_if_missing=False, approved=True)
+                except Exception as w_err:
+                    logger.debug("WeKnora sync error for doc %s: %s", d_id, w_err)
 
-        # Automatically ensure ALL documents in the vault have their clean text, files, and Knowledge Base records in WeKnora
-        try:
-            from modules.weknora.manager import get_data_dir
-            weknora_files_dir = get_data_dir() / "files"
-            with get_db_connection() as con:
-                cur = con.cursor()
-                cur.execute("SELECT id, original_name FROM documents")
-                all_vault_docs = cur.fetchall()
-            for d_row in all_vault_docs:
-                stem = Path(d_row["original_name"]).stem
-                dest_md = weknora_files_dir / f"{stem}_ocr.md" if weknora_files_dir.is_dir() else None
-                if dest_md and not dest_md.exists():
-                    copy_to_weknora_vault(d_row["id"], auto_ocr_if_missing=True)
-                else:
-                    upload_document_to_weknora_kb(d_row["id"])
-        except Exception as sync_all_err:
-            logger.debug("Automatic WeKnora reconciliation error: %s", sync_all_err)
+        # Reconcile documents with WeKnora ONLY if explicitly approved and requested
+        if sync_weknora and approved:
+            try:
+                from modules.weknora.manager import get_data_dir
+                weknora_files_dir = get_data_dir() / "files"
+                with get_db_connection() as con:
+                    cur = con.cursor()
+                    cur.execute("SELECT id, original_name FROM documents")
+                    all_vault_docs = cur.fetchall()
+                for d_row in all_vault_docs:
+                    stem = Path(d_row["original_name"]).stem
+                    dest_md = weknora_files_dir / f"{stem}_ocr.md" if weknora_files_dir.is_dir() else None
+                    if dest_md and not dest_md.exists():
+                        copy_to_weknora_vault(d_row["id"], auto_ocr_if_missing=True, approved=True)
+                    else:
+                        upload_document_to_weknora_kb(d_row["id"])
+            except Exception as sync_all_err:
+                logger.debug("WeKnora reconciliation error: %s", sync_all_err)
 
         # Reconcile deleted documents:
         # If user manually deleted a file from disk in ~/Documents/OneEAD_Archive/documents,
@@ -1501,7 +1511,7 @@ def _vault_watcher_loop(interval_sec: int = 20) -> None:
     # Give the app a couple seconds to boot up before initial scan
     if not _watcher_stop_event.wait(3.0):
         try:
-            scan_and_sync_vault(auto_ocr=True)
+            scan_and_sync_vault(auto_ocr=False, sync_weknora=False, approved=False)
         except Exception as exc:
             logger.debug("Initial vault scan error: %s", exc)
 
@@ -1509,7 +1519,7 @@ def _vault_watcher_loop(interval_sec: int = 20) -> None:
         if _watcher_stop_event.wait(interval_sec):
             break
         try:
-            scan_and_sync_vault(auto_ocr=True)
+            scan_and_sync_vault(auto_ocr=False, sync_weknora=False, approved=False)
         except Exception as exc:
             logger.debug("Periodic vault scan error: %s", exc)
 

@@ -23,6 +23,18 @@ from typing import Any, Dict, List, Optional
 import urllib.error
 import urllib.parse
 import urllib.request
+try:
+    from server.security import secure_path_permissions
+except Exception:
+    try:
+        _root = Path(__file__).resolve().parent.parent.parent
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        from server.security import secure_path_permissions
+    except Exception:
+        def secure_path_permissions(p, is_dir=False):
+            return True
+
 
 MODULE_DIR = Path(__file__).resolve().parent
 REPO_DIR = MODULE_DIR / "WeKnora"
@@ -67,6 +79,7 @@ def get_setup_token() -> str:
                 content = f.read().strip()
                 if content:
                     _lite_setup_token = content
+                    secure_path_permissions(token_file, is_dir=False)
                     return _lite_setup_token
         except Exception:
             pass
@@ -75,8 +88,10 @@ def get_setup_token() -> str:
         _lite_setup_token = secrets.token_urlsafe(32)
         try:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
+            secure_path_permissions(DATA_DIR, is_dir=True)
             with open(token_file, "w", encoding="utf-8") as f:
                 f.write(_lite_setup_token)
+            secure_path_permissions(token_file, is_dir=False)
         except Exception:
             pass
     return _lite_setup_token
@@ -189,10 +204,56 @@ def append_log(line: str) -> None:
     formatted = f"[{timestamp}] {line.rstrip()}"
     _logs.append(formatted)
     try:
+        log_is_new = not LOG_FILE.exists()
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
+        if log_is_new:
+            secure_path_permissions(LOG_FILE, is_dir=False)
     except Exception:
         pass
+
+
+def verify_binary_integrity(target_exe: Optional[Path] = None) -> Dict[str, Any]:
+    """Verifies the SHA-256 digest of the WeKnora Lite executable against pinned release digest.
+
+    Fails closed if the binary does not exist, has an unexpected digest, or lacks a trusted hash.
+    Covers both primary and fallback binary paths.
+    """
+    binary = target_exe or get_active_binary()
+    if not binary:
+        return {
+            "ok": False,
+            "verified": False,
+            "message": "Binary not found",
+            "binary_path": None,
+        }
+
+    binary_path = Path(binary)
+    if not binary_path.exists():
+        return {
+            "ok": False,
+            "verified": False,
+            "message": f"Binary file not found at {binary_path}",
+            "binary_path": str(binary_path),
+        }
+
+    try:
+        from .scripts.download_binary import verify_existing_binary
+    except ImportError:
+        try:
+            scripts_dir = str(MODULE_DIR / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from download_binary import verify_existing_binary
+        except Exception as exc:
+            return {
+                "ok": False,
+                "verified": False,
+                "message": f"Unable to import verification submodule: {exc}",
+                "binary_path": str(binary_path),
+            }
+
+    return verify_existing_binary(binary_path)
 
 
 def get_active_binary() -> Optional[Path]:
@@ -671,6 +732,7 @@ def status() -> Dict[str, Any]:
         "service_url": f"http://{host}:{port}",
         "proxy_url": f"/api/weknora/proxy",
         "installed": binary is not None,
+        "verified": verify_binary_integrity(binary).get("ok", False) if binary else False,
         "binary_path": str(binary) if binary else None,
         "repo_exists": repo_exists,
         "frontend_built": web_dist_exists,
@@ -741,6 +803,14 @@ def start_service() -> Dict[str, Any]:
             append_log(f"Cleaning up unresponsive process holding port {port}...")
             stop_service()
             time.sleep(0.5)
+
+        # Fail-closed executable integrity verification before subprocess.Popen()
+        # Covers both primary (BINARY_PATH) and fallback (FALLBACK_BINARY_PATH) binary paths.
+        verif = verify_binary_integrity(binary)
+        if not verif.get("ok"):
+            err_msg = verif.get("message", "Integrity verification failed")
+            append_log(f"[Security] Binary integrity verification failed for {binary}: {err_msg}")
+            raise RuntimeError(f"WeKnora executable integrity verification failed for {binary}: {err_msg}")
 
         # Build clean environment dictionary
         env = dict(os.environ)
