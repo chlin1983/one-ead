@@ -1747,3 +1747,143 @@ def test_weknora_get_status_accepts_verified_listening_process(monkeypatch):
     st = weknora_manager.status()
     assert st["running"] is True
     assert st["pid"] == 4321
+
+
+def test_hmac_secret_retrieval_failure_aborts_reconciliation(monkeypatch):
+    import server.security as sec
+    # 1. When get_portal_token raises exception, _get_reconciliation_secret fails closed
+    monkeypatch.setattr(sec, "get_portal_token", MagicMock(side_effect=RuntimeError("Token file unreadable")))
+    with pytest.raises(RuntimeError, match="Token file unreadable"):
+        paperless_manager._get_reconciliation_secret()
+
+    # Dry-run reconciliation must fail closed immediately
+    res_dry = paperless_manager.reconcile_missing_documents(dry_run=True)
+    assert res_dry["ok"] is False
+    assert res_dry["cleaned_up"] == 0
+    assert "security token service unavailable" in res_dry["message"]
+
+    # Destructive reconciliation must fail closed immediately
+    res_exec = paperless_manager.reconcile_missing_documents(approved=True, confirmation_token="12345_abc_def")
+    assert res_exec["ok"] is False
+    assert res_exec["cleaned_up"] == 0
+    assert "security token service unavailable" in res_exec["message"]
+
+    # 2. When get_portal_token returns empty string or whitespace
+    monkeypatch.setattr(sec, "get_portal_token", lambda: "   ")
+    with pytest.raises(RuntimeError, match="Protected server secret unavailable"):
+        paperless_manager._get_reconciliation_secret()
+
+
+def test_reconcile_missing_documents_aborts_on_symlink_directory(tmp_path, monkeypatch):
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "present.pdf").write_text("real content")
+    sub_dir = docs_dir / "sub_dir"
+    sub_dir.mkdir()
+    (sub_dir / "inside.pdf").write_text("inside content")
+
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    fake_con = MagicMock()
+    fake_cur = MagicMock()
+    fake_con.cursor.return_value = fake_cur
+    fake_con.__enter__.return_value = fake_con
+    fake_con.__exit__.return_value = None
+    fake_cur.fetchall.return_value = [
+        {"id": "d-present", "filename": "present.pdf", "original_name": "present.pdf", "file_hash": "h_pres", "file_size": 50, "tags": "", "created_at": "2026-01-01"},
+        {"id": "d-inside", "filename": "sub_dir/inside.pdf", "original_name": "inside.pdf", "file_hash": "h_ins", "file_size": 100, "tags": "", "created_at": "2026-01-01"},
+    ]
+    monkeypatch.setattr(paperless_manager, "get_db_connection", lambda: fake_con)
+
+    # Simulate sub_dir being detected as a symlink directory
+    orig_is_symlink = Path.is_symlink
+    monkeypatch.setattr(Path, "is_symlink", lambda self: True if self.name == "sub_dir" else orig_is_symlink(self))
+
+    res = paperless_manager.reconcile_missing_documents(approved=False, dry_run=True)
+    # Must abort before candidate calculation
+    assert res["ok"] is False
+    assert res["cleaned_up"] == 0
+    assert "Archive directory scan incomplete" in res["message"] or "Symlink directory rejected" in res["message"]
+    # Candidate calculation was aborted, so no candidates are queued and nothing is deleted
+    assert res.get("candidates") is None or len(res.get("candidates", [])) == 0
+    mock_delete.assert_not_called()
+
+
+def test_windows_acl_rejects_unauthorized_explicit_aces(tmp_path):
+    import os
+    if os.name != "nt":
+        return
+    import subprocess
+    from server.security import _verify_windows_acl, secure_path_permissions
+
+    test_file = tmp_path / "test_acl_reject.txt"
+    test_file.write_text("secret-token")
+    username = os.environ.get("USERNAME") or "user"
+
+    # Reset and establish clean permissions first
+    assert secure_path_permissions(test_file, is_dir=False) is True
+    assert _verify_windows_acl(test_file, username) is True
+
+    # 1. Grant explicit ACE to BUILTIN\Administrators - policy must not silently allow additional principals
+    subprocess.run(["icacls", str(test_file), "/grant", "BUILTIN\\Administrators:(F)"], capture_output=True, check=False)
+    assert _verify_windows_acl(test_file, username) is False
+
+    # Clean back up
+    assert secure_path_permissions(test_file, is_dir=False) is True
+    assert _verify_windows_acl(test_file, username) is True
+
+    # 2. Grant explicit ACE to Guest
+    subprocess.run(["icacls", str(test_file), "/grant", "Guest:(R)"], capture_output=True, check=False)
+    assert _verify_windows_acl(test_file, username) is False
+
+
+def test_secure_path_permissions_fails_when_icacls_commands_fail(tmp_path, monkeypatch):
+    import os
+    if os.name != "nt":
+        return
+    import subprocess
+    import server.security as sec
+
+    test_file = tmp_path / "test_icacls_fail.txt"
+    test_file.write_text("secret")
+
+    orig_run = subprocess.run
+
+    # Test failure on icacls /reset
+    def fake_run_reset_fail(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "icacls" and cmd[2] == "/reset":
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="Access denied")
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run_reset_fail)
+    assert sec.secure_path_permissions(test_file, is_dir=False) is False
+
+    # Test failure on icacls /remove:g
+    def fake_run_remove_fail(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "icacls" and cmd[2] == "/remove:g":
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="Access denied")
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run_remove_fail)
+    assert sec.secure_path_permissions(test_file, is_dir=False) is False
+
+    # Test failure on icacls /inheritance:r
+    def fake_run_inherit_fail(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "icacls" and cmd[2] == "/inheritance:r":
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="Access denied")
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run_inherit_fail)
+    assert sec.secure_path_permissions(test_file, is_dir=False) is False
+
+    # Test failure on icacls /grant:r
+    def fake_run_grant_fail(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "icacls" and cmd[2] == "/grant:r":
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="Access denied")
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run_grant_fail)
+    assert sec.secure_path_permissions(test_file, is_dir=False) is False

@@ -58,8 +58,6 @@ def _verify_windows_acl(p: Path, username: str) -> bool:
             "nt authority\\system",
             "*s-1-5-18",
             "s-1-5-18",
-            "builtin\\administrators",
-            "administrators",
         }
         found_user = False
         found_system = False
@@ -129,18 +127,24 @@ def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> boo
         perm = "(OI)(CI)(F)" if is_dir else "(F)"
         try:
             # 1. Reset permissions to remove unauthorized explicit ACEs
-            subprocess.run(["icacls", str(p), "/reset"], capture_output=True, text=True, check=False)
+            r_reset = subprocess.run(["icacls", str(p), "/reset"], capture_output=True, text=True, check=False)
+            if r_reset.returncode != 0:
+                return False
 
             # 2. Explicitly remove any broad or unauthorized principal ACEs
-            subprocess.run(
+            r_remove = subprocess.run(
                 ["icacls", str(p), "/remove:g", "Everyone", "BUILTIN\\Users", "Authenticated Users", "Guests"],
                 capture_output=True,
                 text=True,
                 check=False,
             )
+            if r_remove.returncode != 0:
+                return False
 
             # 3. Strip inherited permissions
-            subprocess.run(["icacls", str(p), "/inheritance:r"], capture_output=True, text=True, check=False)
+            r_inherit = subprocess.run(["icacls", str(p), "/inheritance:r"], capture_output=True, text=True, check=False)
+            if r_inherit.returncode != 0:
+                return False
 
             # 4. Grant Full Control exclusively to current user and SYSTEM
             grant_res = subprocess.run(

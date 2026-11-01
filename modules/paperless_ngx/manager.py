@@ -1243,11 +1243,15 @@ def copy_to_weknora_vault(doc_id: str, auto_ocr_if_missing: bool = True, approve
 
 
 def _get_reconciliation_secret() -> bytes:
-    try:
-        from server.security import get_portal_token
-        return get_portal_token().encode("utf-8")
-    except Exception:
-        return b"one-ead-reconciliation-server-secret-256"
+    """Retrieves the protected server portal secret for HMAC token generation.
+    Fails closed if the secret is missing, empty, or cannot be retrieved.
+    Never falls back to a public or hardcoded secret.
+    """
+    from server.security import get_portal_token
+    token = get_portal_token()
+    if not token or not isinstance(token, str) or not token.strip():
+        raise RuntimeError("Protected server secret unavailable: get_portal_token() returned empty or invalid token.")
+    return token.encode("utf-8")
 
 
 def _compute_candidates_token(candidate_ids: List[str], expiry_seconds: int = 300) -> str:
@@ -1279,10 +1283,15 @@ def _verify_candidates_token(token: Optional[str], candidate_ids: List[str]) -> 
     if time.time() > exp_time:
         return False, "Confirmation token has expired. Please re-run dry-run preview before confirming deletion."
 
+    try:
+        secret = _get_reconciliation_secret()
+    except Exception as exc:
+        return False, f"Reconciliation security secret unavailable: {exc}"
+
     sorted_ids = sorted(candidate_ids)
     expected_digest = hashlib.sha256(",".join(sorted_ids).encode("utf-8")).hexdigest()[:16]
     msg = f"{expected_digest}:{exp_time}:{len(sorted_ids)}".encode("utf-8")
-    expected_sig = hmac.new(_get_reconciliation_secret(), msg, hashlib.sha256).hexdigest()[:32]
+    expected_sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
 
     if not hmac.compare_digest(parts[1], expected_digest) or not hmac.compare_digest(parts[2], expected_sig):
         return False, "Candidate set changed or invalid token signature. Please re-run dry-run preview before confirming deletion."
@@ -1326,6 +1335,17 @@ def reconcile_missing_documents(
         }
 
     try:
+        # Verify that HMAC secret is available upfront; fail closed if unavailable
+        try:
+            _get_reconciliation_secret()
+        except Exception as sec_err:
+            logger.error("Reconciliation aborted: failed to retrieve secure portal secret: %s", sec_err)
+            return {
+                "ok": False,
+                "cleaned_up": 0,
+                "message": f"Reconciliation aborted: security token service unavailable ({sec_err}).",
+            }
+
         docs_dir = get_documents_dir()
         if not docs_dir.exists() or not docs_dir.is_dir():
             logger.warning("Vault documents directory %s does not exist or is unmounted. Aborting cleanup to prevent data loss.", docs_dir)
@@ -1357,6 +1377,23 @@ def reconcile_missing_documents(
                 except Exception as exc:
                     traversal_errors.append(f"Path resolution error for {root_path}: {exc}")
                     continue
+
+                for d in list(dirs):
+                    d_path = root_path / d
+                    try:
+                        if d_path.is_symlink():
+                            traversal_errors.append(f"Symlink directory rejected: {d_path}")
+                            dirs.remove(d)
+                            continue
+                        resolved_d = d_path.resolve()
+                        if resolved_docs not in resolved_d.parents and resolved_d != resolved_docs:
+                            traversal_errors.append(f"Directory traversal outside vault rejected: {d_path}")
+                            dirs.remove(d)
+                            continue
+                    except Exception as exc:
+                        traversal_errors.append(f"Directory inspection error for {d_path}: {exc}")
+                        dirs.remove(d)
+                        continue
 
                 for f in files:
                     p = root_path / f
@@ -1410,12 +1447,28 @@ def reconcile_missing_documents(
                 logger.warning("Invalid or suspicious filename in database: %s", fn)
                 continue
             cand_disk_path = docs_dir / fn
-            if cand_disk_path.is_symlink():
-                logger.warning("Document %s on disk is a symlink. Aborting destructive reconciliation.", fn)
+            # Check if cand_disk_path or any of its parent directory components is a symlink
+            try:
+                curr = cand_disk_path
+                is_sym = False
+                while curr != docs_dir and curr != curr.parent:
+                    if curr.is_symlink():
+                        is_sym = True
+                        break
+                    curr = curr.parent
+                if is_sym:
+                    logger.warning("Symlink path component detected for %s at %s. Aborting reconciliation.", fn, curr)
+                    return {
+                        "ok": False,
+                        "cleaned_up": 0,
+                        "message": f"Symlink detected for document path '{fn}' at '{curr}'. Reconciliation aborted to protect against unsafe deletion.",
+                    }
+            except Exception as exc:
+                logger.warning("Error checking symlink for %s: %s", fn, exc)
                 return {
                     "ok": False,
                     "cleaned_up": 0,
-                    "message": f"Symlink detected for document '{fn}'. Reconciliation aborted to protect against unsafe deletion.",
+                    "message": f"Path check failed for '{fn}': {exc}. Reconciliation aborted.",
                 }
             fn_rel = Path(fn).as_posix().lower()
             if fn_rel and fn_rel not in accessible_rel_paths:
