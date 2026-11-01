@@ -102,9 +102,19 @@ def _write_json(path: Path, data) -> None:
         json.dump(data, f, indent=2)
     os.replace(tmp, path)
     try:
-        secure_path_permissions(path, is_dir=False)
-    except Exception:
-        pass
+        ok = secure_path_permissions(path, is_dir=False)
+    except Exception as exc:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise PermissionError(f"Failed to secure NTFS permissions on {path}: {exc}") from exc
+    if not ok:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise PermissionError(f"Failed to secure NTFS permissions on {path}")
 
 
 def get_config() -> dict:

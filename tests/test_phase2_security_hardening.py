@@ -1942,14 +1942,20 @@ def test_deep_tutor_process_verification_and_orphan_safety(monkeypatch):
 def test_deep_tutor_serve_fails_closed_when_loopback_patch_fails(monkeypatch):
     from modules.deep_tutor import _serve
 
-    monkeypatch.setattr(_serve, "_patch", lambda launcher: False)
-    monkeypatch.setattr(sys, "argv", ["_serve.py", "fake_home"])
-
     fake_launcher = MagicMock()
+    mock_deeptutor_runtime = MagicMock(launcher=fake_launcher)
+    monkeypatch.setitem(sys.modules, "deeptutor", MagicMock())
+    monkeypatch.setitem(sys.modules, "deeptutor.runtime", mock_deeptutor_runtime)
+    monkeypatch.setattr(sys, "argv", ["_serve.py", "fake_home_path"])
+
+    # Loopback patch fails
+    monkeypatch.setattr(_serve, "_patch", lambda launcher: False)
+
+    # Calling the actual _serve.main() must raise RuntimeError and never start launcher
     with pytest.raises(RuntimeError, match="Failed to patch DeepTutor launcher for loopback-only binding"):
-        patched = _serve._patch(fake_launcher)
-        if not patched:
-            raise RuntimeError("Failed to patch DeepTutor launcher for loopback-only binding: refusing to expose service on 0.0.0.0")
+        _serve.main()
+
+    fake_launcher.start.assert_not_called()
 
 
 def test_deep_tutor_ollama_redirect_validation():
@@ -2049,3 +2055,47 @@ def test_deep_tutor_secures_home_dir_and_settings(tmp_path, monkeypatch):
 
     with pytest.raises(PermissionError, match="Failed to secure NTFS permissions on DeepTutor home directory"):
         deep_tutor._ensure_ports()
+
+
+def test_deep_tutor_write_json_fails_closed_when_permissions_fail(tmp_path, monkeypatch):
+    from modules.deep_tutor import deep_tutor
+
+    test_file = tmp_path / "config.json"
+    monkeypatch.setattr(deep_tutor, "secure_path_permissions", lambda p, **kw: False)
+
+    # _write_json must raise PermissionError and clean up the file
+    with pytest.raises(PermissionError, match="Failed to secure NTFS permissions"):
+        deep_tutor._write_json(test_file, {"test": "value"})
+
+    assert not test_file.exists()
+
+    # set_config must fail closed with PermissionError
+    monkeypatch.setattr(deep_tutor, "CONFIG_FILE", test_file)
+    with pytest.raises(PermissionError, match="Failed to secure NTFS permissions"):
+        deep_tutor.set_config({"auto_update": False})
+
+
+def test_weknora_download_fails_closed_when_permissions_fail(tmp_path, monkeypatch):
+    import os
+    if os.name != "nt":
+        return
+    import zipfile
+    from modules.weknora.scripts import download_binary
+    import server.security as sec
+
+    # When secure_path_permissions fails, install_from_zip and download must fail closed and clean up
+    monkeypatch.setattr(sec, "secure_path_permissions", lambda p, **kw: False)
+
+    # Create dummy zip with WeKnora-lite.exe
+    zip_path = tmp_path / "test.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(download_binary.BINARY_NAME, b"MZfakeexe")
+
+    target_dir = tmp_path / "module_dir"
+    target_dir.mkdir()
+
+    with pytest.raises(download_binary.IntegrityError, match="Failed to secure NTFS permissions on installed binary"):
+        download_binary.install_from_zip(zip_path, target_dir)
+
+    installed_exe = target_dir / download_binary.BINARY_NAME
+    assert not installed_exe.exists()
