@@ -181,6 +181,13 @@ def is_already_verified() -> bool:
         return False
 
     try:
+        from server.security import secure_path_permissions
+        if not secure_path_permissions(STAMP_FILE, is_dir=False):
+            return False
+    except Exception:
+        return False
+
+    try:
         data = json.loads(STAMP_FILE.read_text(encoding="utf-8"))
         sig = data.get("signature")
         if not sig or sig != _compute_signature():
@@ -230,6 +237,20 @@ def mark_verified() -> bool:
             "timestamp": time.time(),
         }
         STAMP_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            from server.security import secure_path_permissions
+            if not secure_path_permissions(STAMP_FILE, is_dir=False):
+                try:
+                    STAMP_FILE.unlink()
+                except OSError:
+                    pass
+                return False
+        except Exception:
+            try:
+                STAMP_FILE.unlink()
+            except OSError:
+                pass
+            return False
         return True
     except Exception:
         return False

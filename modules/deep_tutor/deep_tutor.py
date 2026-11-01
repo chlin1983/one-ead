@@ -101,6 +101,10 @@ def _write_json(path: Path, data) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, path)
+    try:
+        secure_path_permissions(path, is_dir=False)
+    except Exception:
+        pass
 
 
 def get_config() -> dict:
@@ -348,7 +352,53 @@ def _pid_alive(pid: Optional[int]) -> bool:
         return False
 
 
+def _is_expected_deep_tutor_process(pid: int) -> bool:
+    """Verifies that the target PID belongs to DeepTutor before termination."""
+    if not pid or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        if sys.platform == "win32":
+            ps_cmd = (
+                f'Get-CimInstance Win32_Process -Filter "ProcessId = {pid}" '
+                f'| Select-Object -Property ExecutablePath, CommandLine | ConvertTo-Json -Compress'
+            )
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                import json
+                info = json.loads(res.stdout.strip())
+                exe = str(info.get("ExecutablePath") or "").lower()
+                cmd = str(info.get("CommandLine") or "").lower()
+                venv_str = str(VENV_DIR).lower()
+                is_dt = (
+                    venv_str in exe
+                    or venv_str in cmd
+                    or "_serve.py" in cmd
+                    or "deeptutor" in exe
+                    or "deeptutor" in cmd
+                    or "deep_tutor" in cmd
+                )
+                return is_dt
+            return False
+        else:
+            cmdline_path = Path(f"/proc/{pid}/cmdline")
+            if cmdline_path.exists():
+                cmdline = cmdline_path.read_text(errors="replace").lower()
+                venv_str = str(VENV_DIR).lower()
+                return venv_str in cmdline or "_serve.py" in cmdline or "deeptutor" in cmdline
+            return False
+    except Exception:
+        return False
+
+
 def _kill_tree(pid: int) -> None:
+    if not _is_expected_deep_tutor_process(pid):
+        return
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=30,
                        creationflags=_NO_WINDOW)
@@ -393,6 +443,8 @@ def _ensure_ports() -> dict:
     if not _settings_file().exists():
         exe = VENV_DIR / ("Scripts/deeptutor.exe" if os.name == "nt" else "bin/deeptutor")
         HOME_DIR.mkdir(parents=True, exist_ok=True)
+        if not secure_path_permissions(HOME_DIR, is_dir=True):
+            raise PermissionError(f"Failed to secure NTFS permissions on DeepTutor home directory at {HOME_DIR}")
         subprocess.run([str(exe), "init", "--non-interactive", "--home", str(HOME_DIR)], capture_output=True,
                        timeout=180, creationflags=_NO_WINDOW)
     ports = _ports()
@@ -538,6 +590,8 @@ def start_service() -> dict:
             else 0
         )
         HOME_DIR.mkdir(parents=True, exist_ok=True)
+        if not secure_path_permissions(HOME_DIR, is_dir=True):
+            raise PermissionError(f"Failed to secure NTFS permissions on DeepTutor home directory at {HOME_DIR}")
         log_fh = _open_service_log()
         try:
             _proc = subprocess.Popen(
@@ -582,7 +636,7 @@ def stop_service() -> dict:
                     target_ports.add(p_val)
         for p_val in target_ports:
             for orphan_pid in _find_pids_by_port(p_val):
-                if orphan_pid and orphan_pid != os.getpid():
+                if orphan_pid and orphan_pid != os.getpid() and _is_expected_deep_tutor_process(orphan_pid):
                     _kill_tree(orphan_pid)
 
         # Other processes (e.g. setup_local_ai.py) import this module and must not drop the server's run file.
@@ -663,7 +717,34 @@ OLLAMA_ENV = {
     "OLLAMA_MAX_LOADED_MODELS": "1",
 }
 
-_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+class _LoopbackRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Enforces strict security validation on all redirect hops for local service requests:
+    - Allows only approved loopback addresses (127.0.0.1, localhost, ::1).
+    - Requires http scheme.
+    - Rejects credentials (user:pass in URL).
+    - Rejects non-loopback IPs or external domains.
+    - Enforces port 11434.
+    """
+    APPROVED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+    APPROVED_PORT = 11434
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        import urllib.parse
+        parsed = urllib.parse.urlsplit(newurl or "")
+        if parsed.scheme.lower() != "http":
+            raise urllib.error.HTTPError(newurl, code, f"Forbidden redirect scheme: {parsed.scheme}", headers, fp)
+        if parsed.username or parsed.password:
+            raise urllib.error.HTTPError(newurl, code, "Forbidden redirect containing credentials", headers, fp)
+        hostname = (parsed.hostname or "").lower()
+        if hostname not in self.APPROVED_HOSTS:
+            raise urllib.error.HTTPError(newurl, code, f"Forbidden redirect to non-loopback host: {hostname}", headers, fp)
+        port = parsed.port if parsed.port is not None else 80
+        if port != self.APPROVED_PORT:
+            raise urllib.error.HTTPError(newurl, code, f"Forbidden redirect to unapproved port: {port}", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _LoopbackRedirectHandler())
 _hw_cache: dict = {"at": 0.0, "value": None}
 _AI_LOCK = threading.Lock()
 _ai_job: dict = {"state": "idle", "message": "", "error": None, "started_at": None, "finished_at": None}

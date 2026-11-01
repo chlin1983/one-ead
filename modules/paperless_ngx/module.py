@@ -122,8 +122,7 @@ def download_document(doc_id: str):
         raise HTTPException(404, "Document not found")
     file_path = manager.get_documents_dir() / doc["filename"]
     if not file_path.is_file():
-        manager.delete_document(doc_id)
-        raise HTTPException(404, f"File '{doc['original_name']}' was removed from external vault. Database record cleaned.")
+        raise HTTPException(404, f"File '{doc['original_name']}' not found in external vault.")
     return FileResponse(
         path=str(file_path),
         filename=doc["original_name"],
@@ -138,8 +137,7 @@ def view_document(doc_id: str, p: Optional[int] = None, q: Optional[str] = None)
         raise HTTPException(404, "Document not found")
     file_path = manager.get_documents_dir() / doc["filename"]
     if not file_path.is_file():
-        manager.delete_document(doc_id)
-        raise HTTPException(404, f"File '{doc['original_name']}' was removed from external vault. Database record cleaned.")
+        raise HTTPException(404, f"File '{doc['original_name']}' not found in external vault.")
 
     # Pipeline A: Get or generate high-fidelity PDF preview for right-panel inline viewing
     preview_path = manager.get_or_create_preview_pdf(doc_id)

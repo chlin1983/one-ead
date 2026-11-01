@@ -1887,3 +1887,165 @@ def test_secure_path_permissions_fails_when_icacls_commands_fail(tmp_path, monke
 
     monkeypatch.setattr(subprocess, "run", fake_run_grant_fail)
     assert sec.secure_path_permissions(test_file, is_dir=False) is False
+
+
+def test_run_py_port_parsing_and_process_verification(monkeypatch):
+    import run
+
+    # 1. Test parsing netstat without shell
+    fake_netstat = (
+        "Active Connections\n"
+        "  Proto  Local Address          Foreign Address        State           PID\n"
+        "  TCP    127.0.0.1:8100         0.0.0.0:0              LISTENING       12345\n"
+        "  TCP    127.0.0.1:18100        0.0.0.0:0              LISTENING       99999\n"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **kw: MagicMock(returncode=0, stdout=fake_netstat))
+    pid = run._find_pid_on_port(8100)
+    assert pid == 12345
+
+    # 2. Test refusing to kill unverified process
+    monkeypatch.setattr(run, "_is_expected_one_ead_process", lambda p: False)
+    killed = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **kw: killed.append(cmd) or MagicMock(returncode=0))
+    res = run._kill_pid(12345)
+    assert res is False
+    assert len(killed) == 0
+
+    # 3. Test killing verified process
+    monkeypatch.setattr(run, "_is_expected_one_ead_process", lambda p: True)
+    res_ok = run._kill_pid(12345)
+    assert res_ok is True
+    assert len(killed) == 1
+    assert "12345" in killed[0]
+
+
+def test_deep_tutor_process_verification_and_orphan_safety(monkeypatch):
+    from modules.deep_tutor import deep_tutor
+
+    # 1. Non-matching process is rejected
+    monkeypatch.setattr(deep_tutor, "_is_expected_deep_tutor_process", lambda p: False)
+    killed = []
+    orig_run = subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **kw: killed.append(cmd) if cmd[0] == "taskkill" else orig_run(cmd, *a, **kw))
+
+    deep_tutor._kill_tree(8888)
+    assert len(killed) == 0
+
+    # 2. In stop_service, unverified orphan PID is not killed
+    monkeypatch.setattr(deep_tutor, "_find_pids_by_port", lambda port: [8888])
+    monkeypatch.setattr(deep_tutor, "_proc", None)
+    monkeypatch.setattr(deep_tutor, "_adopted_pid", None)
+    deep_tutor.stop_service()
+    assert len(killed) == 0
+
+
+def test_deep_tutor_serve_fails_closed_when_loopback_patch_fails(monkeypatch):
+    from modules.deep_tutor import _serve
+
+    monkeypatch.setattr(_serve, "_patch", lambda launcher: False)
+    monkeypatch.setattr(sys, "argv", ["_serve.py", "fake_home"])
+
+    fake_launcher = MagicMock()
+    with pytest.raises(RuntimeError, match="Failed to patch DeepTutor launcher for loopback-only binding"):
+        patched = _serve._patch(fake_launcher)
+        if not patched:
+            raise RuntimeError("Failed to patch DeepTutor launcher for loopback-only binding: refusing to expose service on 0.0.0.0")
+
+
+def test_deep_tutor_ollama_redirect_validation():
+    from modules.deep_tutor.deep_tutor import _LoopbackRedirectHandler
+    handler = _LoopbackRedirectHandler()
+    req_orig = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+
+    # 1. External domain redirect is rejected
+    with pytest.raises(urllib.error.HTTPError):
+        handler.redirect_request(req_orig, None, 302, "Found", {}, "http://evil.com/api/tags")
+
+    # 2. Non-http scheme is rejected
+    with pytest.raises(urllib.error.HTTPError):
+        handler.redirect_request(req_orig, None, 302, "Found", {}, "https://127.0.0.1:11434/api/tags")
+
+    # 3. Credentials in URL are rejected
+    with pytest.raises(urllib.error.HTTPError):
+        handler.redirect_request(req_orig, None, 302, "Found", {}, "http://admin:secret@127.0.0.1:11434/api/tags")
+
+    # 4. Unapproved port is rejected
+    with pytest.raises(urllib.error.HTTPError):
+        handler.redirect_request(req_orig, None, 302, "Found", {}, "http://127.0.0.1:8080/api/tags")
+
+    # 5. Approved loopback request is allowed
+    req = handler.redirect_request(req_orig, None, 302, "Found", {}, "http://127.0.0.1:11434/api/tags")
+    assert req is not None
+
+
+def test_open_vault_in_explorer_rejects_path_traversal(tmp_path, monkeypatch):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    monkeypatch.setattr(paperless_manager, "get_documents_dir", lambda: docs_dir)
+    monkeypatch.setattr(paperless_manager, "init_vault", lambda: None)
+
+    # Path traversal with ..
+    res = paperless_manager.open_vault_in_explorer(subfolder="../../secret")
+    assert res["ok"] is False
+    assert "Path traversal rejected" in res["error"]
+
+    # Absolute path traversal
+    res_abs = paperless_manager.open_vault_in_explorer(subfolder="C:\\Windows\\System32")
+    assert res_abs["ok"] is False
+    assert "Path traversal rejected" in res_abs["error"]
+
+
+def test_paperless_download_and_view_do_not_delete_missing_file(monkeypatch):
+    import modules.paperless_ngx.module as paperless_module
+    from fastapi import HTTPException
+
+    mock_delete = MagicMock()
+    monkeypatch.setattr(paperless_manager, "delete_document", mock_delete)
+    monkeypatch.setattr(paperless_manager, "get_document", lambda d_id: {"id": d_id, "filename": "nonexistent.pdf", "original_name": "nonexistent.pdf"})
+
+    with pytest.raises(HTTPException) as exc1:
+        paperless_module.download_document("doc-test-1")
+    assert exc1.value.status_code == 404
+    mock_delete.assert_not_called()
+
+    with pytest.raises(HTTPException) as exc2:
+        paperless_module.view_document("doc-test-1")
+    assert exc2.value.status_code == 404
+    mock_delete.assert_not_called()
+
+
+def test_check_deps_secures_stamp_permissions_fail_closed(tmp_path, monkeypatch):
+    import server.check_deps as cd
+    import server.security as sec
+
+    stamp_file = tmp_path / ".deps_ok"
+    lock_file = tmp_path / "requirements.lock"
+    monkeypatch.setattr(cd, "STAMP_FILE", stamp_file)
+    monkeypatch.setattr(cd, "LOCK_FILE", lock_file)
+
+    # 1. When secure_path_permissions returns False during mark_verified, it must fail closed
+    monkeypatch.setattr(cd, "verify_installed_against_lock", lambda *a: (True, []))
+    monkeypatch.setattr(sec, "secure_path_permissions", lambda p, **kw: False)
+
+    lock_file.write_text("package==1.0.0 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")
+    res = cd.mark_verified()
+    assert res is False
+    assert not stamp_file.exists()
+
+    # 2. When is_already_verified sees stamp file whose permissions cannot be verified, it returns False
+    stamp_file.write_text('{"signature": "test"}')
+    monkeypatch.setattr(cd, "verify_lockfile_integrity", lambda *a: (True, "", []))
+    assert cd.is_already_verified() is False
+
+
+def test_deep_tutor_secures_home_dir_and_settings(tmp_path, monkeypatch):
+    from modules.deep_tutor import deep_tutor
+
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(deep_tutor, "HOME_DIR", fake_home)
+
+    # When secure_path_permissions on HOME_DIR fails, _ensure_ports must raise PermissionError
+    monkeypatch.setattr(deep_tutor, "secure_path_permissions", lambda p, **kw: False)
+
+    with pytest.raises(PermissionError, match="Failed to secure NTFS permissions on DeepTutor home directory"):
+        deep_tutor._ensure_ports()

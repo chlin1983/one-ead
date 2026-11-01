@@ -385,10 +385,15 @@ def _activate_explorer_window(target_path_str: str) -> None:
 
 
 def open_vault_in_explorer(subfolder: str = "", doc_id: str = "") -> Dict[str, Any]:
-    """Opens C:\\Users\\Z00314DJ\\Documents\\OneEAD_Archive\\documents (or category folder) in native Windows File Explorer and forces it on top."""
+    """Opens documents vault directory in native Windows File Explorer and forces it on top."""
     import threading
     init_vault()
+    docs_dir = get_documents_dir().resolve()
     clean_sub = subfolder.strip().strip("/\\")
+
+    # Reject path traversal tokens
+    if ".." in Path(clean_sub).parts or Path(clean_sub).is_absolute():
+        return {"ok": False, "error": "Path traversal rejected: invalid subfolder path."}
 
     target_file = None
     target_dir = None
@@ -397,7 +402,9 @@ def open_vault_in_explorer(subfolder: str = "", doc_id: str = "") -> Dict[str, A
     if doc_id:
         doc = get_document(doc_id)
         if doc and doc.get("filename"):
-            candidate = get_documents_dir() / doc["filename"]
+            candidate = (get_documents_dir() / doc["filename"]).resolve()
+            if docs_dir not in candidate.parents:
+                return {"ok": False, "error": "Path traversal rejected: document outside vault."}
             if candidate.exists() and candidate.is_file():
                 target_file = candidate
                 target_dir = candidate.parent
@@ -405,12 +412,20 @@ def open_vault_in_explorer(subfolder: str = "", doc_id: str = "") -> Dict[str, A
     # 2. If no target_file yet, check if clean_sub is a file or subfolder
     if not target_file:
         if clean_sub and (get_documents_dir() / clean_sub).is_file():
-            target_file = get_documents_dir() / clean_sub
+            target_file = (get_documents_dir() / clean_sub).resolve()
+            if docs_dir not in target_file.parents:
+                return {"ok": False, "error": "Path traversal rejected: target file outside vault."}
             target_dir = target_file.parent
         elif not clean_sub or clean_sub.lower() in ("documents", "root", "archive", "oneead_archive"):
-            target_dir = get_documents_dir()  # C:\Users\Z00314DJ\Documents\OneEAD_Archive\documents
+            target_dir = docs_dir
         else:
-            target_dir = get_documents_dir() / clean_sub
+            resolved_sub = (get_documents_dir() / clean_sub).resolve()
+            if docs_dir not in resolved_sub.parents and resolved_sub != docs_dir:
+                return {"ok": False, "error": "Path traversal rejected: target folder outside vault."}
+            target_dir = resolved_sub
+
+    if docs_dir not in target_dir.parents and target_dir != docs_dir:
+        return {"ok": False, "error": "Path traversal rejected: target directory outside vault."}
 
     target_dir.mkdir(parents=True, exist_ok=True)
     dir_str = str(target_dir.resolve())
@@ -472,7 +487,7 @@ def open_vault_in_explorer(subfolder: str = "", doc_id: str = "") -> Dict[str, A
             pass
 
         if not launched:
-            subprocess.Popen(f'explorer.exe {args}')
+            subprocess.Popen(["explorer.exe", args])
 
         threading.Thread(target=_activate_explorer_window, args=(dir_str,), daemon=True).start()
         return {"ok": True, "path": display_path, "message": "Opened in Windows Explorer"}

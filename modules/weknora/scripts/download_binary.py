@@ -253,6 +253,12 @@ def install_from_zip(zip_path: Path, module_dir: Path) -> Dict[str, Any]:
                         target_exe.chmod(0o755)
                     except OSError:
                         pass
+                else:
+                    try:
+                        from server.security import secure_path_permissions
+                        secure_path_permissions(target_exe, is_dir=False)
+                    except Exception:
+                        pass
                 extracted["binary"] = True
                 extracted["files"].append(str(target_exe))
 
@@ -368,6 +374,12 @@ def download_weknora_binary(
                     if os.name != "nt":
                         try:
                             target_exe.chmod(0o755)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            from server.security import secure_path_permissions
+                            secure_path_permissions(target_exe, is_dir=False)
                         except Exception:
                             pass
 
