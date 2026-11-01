@@ -30,11 +30,12 @@ if _ROOT not in sys.path:
 try:
     from server.check_deps import ensure_dependencies
 
-    if not ensure_dependencies():
-        print("[One EAD] Missing required dependencies. Exiting.")
+    if not ensure_dependencies(install_missing=False):
+        print("[One EAD] Missing or unverified dependencies. Please run 'python server/check_deps.py --install' first. Exiting.")
         sys.exit(1)
-except ImportError:
-    pass
+except ImportError as exc:
+    print(f"[One EAD] CRITICAL: Failed to load dependency verification module: {exc}. Exiting.")
+    sys.exit(1)
 
 import uvicorn
 
@@ -77,29 +78,80 @@ import time
 
 
 def _find_pid_on_port(port: int) -> Optional[int]:
-    """Find the PID of the process listening on the given port (Windows / Unix)."""
+    """Find the PID of the process listening on the given port without shell execution."""
     try:
         if sys.platform == "win32":
-            out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True, text=True)
-            for line in out.strip().splitlines():
-                parts = line.split()
-                if len(parts) >= 5 and "LISTENING" in parts:
-                    return int(parts[-1])
+            res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                target_suffix = f":{port}"
+                for line in res.stdout.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 5 and parts[0].upper() == "TCP":
+                        local_addr = parts[1]
+                        state = parts[3].upper()
+                        if state == "LISTENING":
+                            addr_port = local_addr.rsplit(":", 1)[-1] if ":" in local_addr else ""
+                            if addr_port == str(port) or local_addr.endswith(target_suffix):
+                                try:
+                                    return int(parts[4])
+                                except ValueError:
+                                    pass
         else:
-            out = subprocess.check_output(["lsof", "-t", f"-i:{port}"], text=True)
-            pids = out.strip().split()
-            if pids:
-                return int(pids[0])
+            res = subprocess.run(["lsof", "-t", f"-i:{port}"], capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                pids = res.stdout.strip().split()
+                if pids:
+                    return int(pids[0])
     except Exception:
         pass
     return None
 
 
-def _kill_pid(pid: int) -> bool:
-    """Terminate a process by PID."""
+def _is_expected_one_ead_process(pid: int) -> bool:
+    """Verifies that the target PID belongs to a Python / One EAD process before termination."""
+    if not pid or pid <= 0:
+        return False
     try:
         if sys.platform == "win32":
-            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, check=True)
+            ps_cmd = (
+                f'Get-CimInstance Win32_Process -Filter "ProcessId = {pid}" '
+                f'| Select-Object -Property ExecutablePath, CommandLine | ConvertTo-Json -Compress'
+            )
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                import json
+                info = json.loads(res.stdout.strip())
+                exe = str(info.get("ExecutablePath") or "").lower()
+                cmd = str(info.get("CommandLine") or "").lower()
+                is_python = "python" in exe
+                is_one_ead = any(term in cmd for term in ("run.py", "server.app", "uvicorn", "one-ead", "one_ead"))
+                return is_python and (is_one_ead or "uvicorn" in exe)
+            return False
+        else:
+            cmdline_path = Path(f"/proc/{pid}/cmdline")
+            if cmdline_path.exists():
+                cmdline = cmdline_path.read_text(errors="replace").lower()
+                return "python" in cmdline and any(term in cmdline for term in ("run.py", "server.app", "uvicorn", "one-ead"))
+            return False
+    except Exception:
+        return False
+
+
+def _kill_pid(pid: int) -> bool:
+    """Terminate a process by PID strictly after verifying its identity as One EAD."""
+    if not _is_expected_one_ead_process(pid):
+        print(f"[One EAD] Refusing to terminate unverified process (PID {pid}) on port.")
+        return False
+    try:
+        if sys.platform == "win32":
+            res = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, check=False)
+            return res.returncode == 0
         else:
             os.kill(pid, 9)
         return True

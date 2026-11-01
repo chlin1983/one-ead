@@ -14,7 +14,8 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+import subprocess
 
 _ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = _ROOT / "data"
@@ -40,6 +41,133 @@ SENSITIVE_PARAM_PATTERN = re.compile(
 )
 
 
+
+
+def _verify_windows_acl(p: Path, username: str) -> bool:
+    """Verifies that the file/dir ACL strictly contains only the authorized user and SYSTEM,
+    with no inherited permissions and no unauthorized explicit ACEs.
+    """
+    try:
+        check_res = subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False)
+        if check_res.returncode != 0:
+            return False
+
+        allowed_names = {
+            username.lower(),
+            "system",
+            "nt authority\\system",
+            "*s-1-5-18",
+            "s-1-5-18",
+        }
+        found_user = False
+        found_system = False
+
+        for line in check_res.stdout.splitlines():
+            clean = line.strip()
+            if not clean or "successfully processed" in clean.lower():
+                continue
+            idx = clean.find(":(")
+            if idx == -1:
+                continue
+            before_perm = clean[:idx]
+            perm = clean[idx + 2 :].split(")")[0].lower()
+
+            for p_cand in [str(p).lower(), p.name.lower(), str(p.resolve()).lower()]:
+                if before_perm.lower().startswith(p_cand):
+                    before_perm = before_perm[len(p_cand) :].strip()
+
+            p_name = before_perm.strip().lower()
+            if "\\" in p_name:
+                short_name = p_name.split("\\")[-1]
+            else:
+                short_name = p_name
+
+            # Reject any inherited permission (I)
+            if "(i)" in clean.lower() or "i" in perm.split(","):
+                return False
+
+            # Verify principal authorization
+            if p_name in allowed_names or short_name in allowed_names:
+                if "f" in clean[idx:].lower():
+                    if short_name == username.lower() or p_name == username.lower():
+                        found_user = True
+                    if "system" in short_name or "*s-1-5-18" in p_name:
+                        found_system = True
+            else:
+                # Unauthorized explicit ACE detected!
+                return False
+
+        return found_user and found_system
+    except Exception:
+        return False
+
+
+def secure_path_permissions(path: Union[Path, str], is_dir: bool = False) -> bool:
+    r"""Restricts permissions on a sensitive file or directory to current user and SYSTEM.
+
+    Removes unauthorized explicit ACEs and strips inherited permissions.
+    On Windows: Uses icacls.exe to reset explicit ACEs (/reset), remove inheritance (/inheritance:r),
+    grant Full Control strictly to current user and SYSTEM, and verifies final ACL before returning True.
+    On POSIX: Uses os.chmod with 0o700 for directories and 0o600 for files.
+    """
+    p = Path(path)
+    if not p.exists():
+        return False
+
+    if os.name == "nt":
+        username = os.environ.get("USERNAME")
+        if not username and hasattr(os, "getlogin"):
+            try:
+                username = os.getlogin()
+            except Exception:
+                pass
+        if not username:
+            return False
+
+        perm = "(OI)(CI)(F)" if is_dir else "(F)"
+        try:
+            # 1. Reset permissions to remove unauthorized explicit ACEs
+            r_reset = subprocess.run(["icacls", str(p), "/reset"], capture_output=True, text=True, check=False)
+            if r_reset.returncode != 0:
+                return False
+
+            # 2. Explicitly remove any broad or unauthorized principal ACEs
+            r_remove = subprocess.run(
+                ["icacls", str(p), "/remove:g", "Everyone", "BUILTIN\\Users", "Authenticated Users", "Guests"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if r_remove.returncode != 0:
+                return False
+
+            # 3. Strip inherited permissions
+            r_inherit = subprocess.run(["icacls", str(p), "/inheritance:r"], capture_output=True, text=True, check=False)
+            if r_inherit.returncode != 0:
+                return False
+
+            # 4. Grant Full Control exclusively to current user and SYSTEM
+            grant_res = subprocess.run(
+                ["icacls", str(p), "/grant:r", f"{username}:{perm}", f"*S-1-5-18:{perm}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if grant_res.returncode != 0:
+                return False
+
+            # 5. Verify the final ACL before returning True
+            return _verify_windows_acl(p, username)
+        except Exception:
+            return False
+    else:
+        try:
+            os.chmod(p, 0o700 if is_dir else 0o600)
+            return True
+        except Exception:
+            return False
+
+
 def get_portal_token() -> str:
     """Retrieves or generates the persistent local portal session token."""
     global _CACHED_TOKEN
@@ -52,27 +180,26 @@ def get_portal_token() -> str:
         return _CACHED_TOKEN
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not secure_path_permissions(DATA_DIR, is_dir=True):
+        raise PermissionError(f"Failed to confirm secure permissions on portal data directory at {DATA_DIR}")
 
     if TOKEN_FILE.exists():
-        try:
-            tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
-            if len(tok) >= 32:
-                _CACHED_TOKEN = tok
-                return tok
-        except Exception:
-            pass
+        tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if len(tok) >= 32:
+            _CACHED_TOKEN = tok
+            if not secure_path_permissions(TOKEN_FILE, is_dir=False):
+                raise PermissionError(f"Failed to confirm secure permissions on existing portal session token at {TOKEN_FILE}")
+            return tok
 
     # Generate high-entropy 256-bit token
     new_token = secrets.token_urlsafe(32)
-    try:
-        TOKEN_FILE.write_text(new_token, encoding="utf-8")
-        if hasattr(os, "chmod"):
-            try:
-                os.chmod(TOKEN_FILE, 0o600)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    TOKEN_FILE.write_text(new_token, encoding="utf-8")
+    if not secure_path_permissions(TOKEN_FILE, is_dir=False):
+        try:
+            TOKEN_FILE.unlink()
+        except OSError:
+            pass
+        raise PermissionError(f"Failed to apply secure NTFS permissions on newly generated portal token at {TOKEN_FILE}")
 
     _CACHED_TOKEN = new_token
     return new_token
@@ -129,9 +256,17 @@ def _claim_nonce(nonce: str) -> bool:
                     os.unlink(entry.path)
             except OSError:
                 pass
+        if not secure_path_permissions(d, is_dir=True):
+            return False
         marker = d / hashlib.sha256(nonce.encode()).hexdigest()[:40]
         fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
+        if not secure_path_permissions(marker, is_dir=False):
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+            return False
         return True
     except FileExistsError:
         return False

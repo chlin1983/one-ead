@@ -2809,7 +2809,7 @@
       let successCount = 0;
       for (const id of Array.from(selectedDocIds)) {
         try {
-          const res = await fetch(`/api/paperless-ngx/documents/${id}/sync-weknora`, { method: "POST" });
+          const res = await fetch(`/api/paperless-ngx/documents/${id}/sync-weknora?approved=true`, { method: "POST" });
           if (res.ok) successCount++;
         } catch { }
       }
@@ -3250,7 +3250,7 @@
       if (!activeDocId) return;
       showToast("Exporting OCR text to WeKnora ingestion storage...");
       try {
-        const res = await fetch(`/api/paperless-ngx/documents/${activeDocId}/sync-weknora`, { method: "POST" });
+        const res = await fetch(`/api/paperless-ngx/documents/${activeDocId}/sync-weknora?approved=true`, { method: "POST" });
         const data = await res.json();
         if (data.ok) {
           showToast(data.message || "Successfully synced to WeKnora!");

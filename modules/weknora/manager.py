@@ -10,6 +10,7 @@ import atexit
 import collections
 import ipaddress
 import json
+import logging
 import os
 import re
 import secrets
@@ -23,6 +24,16 @@ from typing import Any, Dict, List, Optional
 import urllib.error
 import urllib.parse
 import urllib.request
+try:
+    from server.security import secure_path_permissions
+except Exception:
+    _root = Path(__file__).resolve().parent.parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from server.security import secure_path_permissions
+
+
+logger = logging.getLogger("one_ead.weknora.manager")
 
 MODULE_DIR = Path(__file__).resolve().parent
 REPO_DIR = MODULE_DIR / "WeKnora"
@@ -62,23 +73,27 @@ def get_setup_token() -> str:
     global _lite_setup_token
     token_file = DATA_DIR / "setup_token.txt"
     if token_file.exists():
-        try:
-            with open(token_file, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    _lite_setup_token = content
-                    return _lite_setup_token
-        except Exception:
-            pass
+        tok = token_file.read_text(encoding="utf-8").strip()
+        if tok:
+            _lite_setup_token = tok
+            if not secure_path_permissions(token_file, is_dir=False):
+                raise PermissionError(f"Failed to confirm secure permissions on WeKnora setup token at {token_file}")
+            return _lite_setup_token
 
-    if not _lite_setup_token:
-        _lite_setup_token = secrets.token_urlsafe(32)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not secure_path_permissions(DATA_DIR, is_dir=True):
+        raise PermissionError(f"Failed to confirm secure permissions on WeKnora data directory at {DATA_DIR}")
+
+    new_token = secrets.token_urlsafe(32)
+    token_file.write_text(new_token, encoding="utf-8")
+    if not secure_path_permissions(token_file, is_dir=False):
         try:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            with open(token_file, "w", encoding="utf-8") as f:
-                f.write(_lite_setup_token)
-        except Exception:
+            token_file.unlink()
+        except OSError:
             pass
+        raise PermissionError(f"Failed to apply secure permissions on newly created WeKnora setup token at {token_file}")
+
+    _lite_setup_token = new_token
     return _lite_setup_token
 
 
@@ -188,11 +203,56 @@ def append_log(line: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{timestamp}] {line.rstrip()}"
     _logs.append(formatted)
+    if LOG_FILE:
+        try:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(formatted + "\n")
+        except Exception as log_err:
+            # Ordinary logging write failures must not mask application operations
+            logger.debug("Non-fatal error appending to WeKnora log: %s", log_err)
+
+
+def verify_binary_integrity(target_exe: Optional[Path] = None) -> Dict[str, Any]:
+    """Verifies the SHA-256 digest of the WeKnora Lite executable against pinned release digest.
+
+    Fails closed if the binary does not exist, has an unexpected digest, or lacks a trusted hash.
+    Covers both primary and fallback binary paths.
+    """
+    binary = target_exe or get_active_binary()
+    if not binary:
+        return {
+            "ok": False,
+            "verified": False,
+            "message": "Binary not found",
+            "binary_path": None,
+        }
+
+    binary_path = Path(binary)
+    if not binary_path.exists():
+        return {
+            "ok": False,
+            "verified": False,
+            "message": f"Binary file not found at {binary_path}",
+            "binary_path": str(binary_path),
+        }
+
     try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(formatted + "\n")
-    except Exception:
-        pass
+        from .scripts.download_binary import verify_existing_binary
+    except ImportError:
+        try:
+            scripts_dir = str(MODULE_DIR / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from download_binary import verify_existing_binary
+        except Exception as exc:
+            return {
+                "ok": False,
+                "verified": False,
+                "message": f"Unable to import verification submodule: {exc}",
+                "binary_path": str(binary_path),
+            }
+
+    return verify_existing_binary(binary_path)
 
 
 def get_active_binary() -> Optional[Path]:
@@ -426,6 +486,51 @@ def check_http_alive(port: int, host: str = "127.0.0.1") -> bool:
         return False
 
 
+def get_listening_pid_for_port(port: int) -> Optional[int]:
+    """Finds the PID of the process listening on the given port using netstat without shell=True."""
+    if sys.platform == "win32":
+        try:
+            res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 5 and "LISTENING" in parts:
+                        local_addr = parts[1]
+                        addr_str, _, port_str = local_addr.rpartition(":")
+                        if port_str.isdigit() and int(port_str) == port:
+                            try:
+                                return int(parts[-1])
+                            except ValueError:
+                                pass
+        except Exception:
+            pass
+    return None
+
+
+def is_verified_weknora_running(port: int, host: str = "127.0.0.1") -> tuple[bool, Optional[int]]:
+    """Verifies that an HTTP service is responding on the port AND that the actual listening
+    process identity matches the verified WeKnora binary.
+    Fails closed if the port is responding to HTTP but the listening process is unverified or unrelated.
+    """
+    if not check_http_alive(port, host):
+        return False, None
+
+    global _process
+    if _process is not None and _process.poll() is None:
+        if _is_expected_weknora_process(_process.pid):
+            return True, _process.pid
+
+    listening_pid = get_listening_pid_for_port(port)
+    if listening_pid and _is_expected_weknora_process(listening_pid):
+        return True, listening_pid
+
+    append_log(
+        f"[Security Warning] Process on port {port} (PID {listening_pid}) does not match verified WeKnora executable; "
+        "refusing to treat as running WeKnora service."
+    )
+    return False, None
+
+
 _tool_cache: Dict[str, tuple[bool, float]] = {}
 _ollama_cache: Dict[str, tuple[Dict[str, Any], float]] = {}
 
@@ -502,6 +607,19 @@ def is_safe_ollama_url(url: str) -> bool:
     return canonicalize_ollama_url(url) is not None
 
 
+class _SafeLoopbackRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Validates every redirect hop to guarantee that requests strictly remain on approved local loopback."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        canonical = canonicalize_ollama_url(newurl)
+        if not canonical:
+            raise urllib.error.HTTPError(
+                newurl, 403,
+                f"SSRF Protection: Redirect outside approved loopback rejected: {newurl}",
+                headers, None
+            )
+        return super().redirect_request(req, fp, code, msg, headers, canonical)
+
+
 def check_ollama(url: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
     if not url:
         cfg = read_env()
@@ -526,7 +644,11 @@ def check_ollama(url: Optional[str] = None, force_refresh: bool = False) -> Dict
     endpoint = f"{canonical_url}/api/tags"
     try:
         req = urllib.request.Request(endpoint, headers={"User-Agent": "One-EAD-WeKnora"})
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
+        opener = urllib.request.build_opener(
+            _SafeLoopbackRedirectHandler,
+            urllib.request.ProxyHandler({})
+        )
+        with opener.open(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             models = [m.get("name") for m in data.get("models", [])]
             res = {
@@ -636,20 +758,12 @@ def status() -> Dict[str, Any]:
     )
 
     with _lock:
-        is_proc_alive = _process is not None and _process.poll() is None
-        http_alive = check_http_alive(port, host)
-        is_running = is_proc_alive and http_alive
+        is_running, active_pid = is_verified_weknora_running(port, host)
         if is_running:
-            pid = _process.pid
-            start_math_watchdog()
-        elif is_proc_alive:
-            pid = _process.pid
-        elif http_alive:
-            is_running = True
-            pid = None
+            pid = active_pid
             start_math_watchdog()
         else:
-            pid = None
+            pid = _process.pid if (_process and _process.poll() is None) else None
 
     ollama_info = check_ollama(cfg.get("OLLAMA_BASE_URL"))
 
@@ -671,6 +785,7 @@ def status() -> Dict[str, Any]:
         "service_url": f"http://{host}:{port}",
         "proxy_url": f"/api/weknora/proxy",
         "installed": binary is not None,
+        "verified": verify_binary_integrity(binary).get("ok", False) if binary else False,
         "binary_path": str(binary) if binary else None,
         "repo_exists": repo_exists,
         "frontend_built": web_dist_exists,
@@ -720,10 +835,12 @@ def start_service() -> Dict[str, Any]:
         port = int(cfg.get("SERVER_PORT", cfg.get("PORT", "8082")))
         host = cfg.get("SERVER_HOST", "127.0.0.1")
 
+        is_running, active_pid = is_verified_weknora_running(port, host)
+        if is_running:
+            return {"ok": True, "message": "Service is already running", "pid": active_pid}
+
         if _process and _process.poll() is None:
-            if check_http_alive(port, host):
-                return {"ok": True, "message": "Service is already running", "pid": _process.pid}
-            append_log(f"Process PID {_process.pid} is alive but unresponsive on port {port}. Cleaning up...")
+            append_log(f"Managed process PID {_process.pid} is unresponsive or unverified on port {port}. Cleaning up...")
             stop_service()
             time.sleep(0.5)
 
@@ -733,14 +850,31 @@ def start_service() -> Dict[str, Any]:
                 "WeKnora-lite binary not found. Please build the Lite binary first."
             )
 
-        if check_http_alive(port, host):
-            return {"ok": True, "message": f"Port {port} is already active", "pid": None}
-
         # If an unresponsive process or zombie socket is holding the port, clear it
         if check_port(port, host):
             append_log(f"Cleaning up unresponsive process holding port {port}...")
             stop_service()
             time.sleep(0.5)
+
+        # Fail-closed executable integrity verification before subprocess.Popen()
+        # Covers both primary (BINARY_PATH) and fallback (FALLBACK_BINARY_PATH) binary paths.
+        verif = verify_binary_integrity(binary)
+        if not verif.get("ok"):
+            err_msg = verif.get("message", "Integrity verification failed")
+            append_log(f"[Security] Binary integrity verification failed for {binary}: {err_msg}")
+            raise RuntimeError(f"WeKnora executable integrity verification failed for {binary}: {err_msg}")
+
+        # Strictly verify sensitive WeKnora data directories and logs before starting
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "files").mkdir(parents=True, exist_ok=True)
+        if not secure_path_permissions(DATA_DIR, is_dir=True):
+            raise PermissionError(f"Failed to confirm secure NTFS permissions on WeKnora data directory at {DATA_DIR}")
+        if not secure_path_permissions(DATA_DIR / "files", is_dir=True):
+            raise PermissionError(f"Failed to confirm secure NTFS permissions on WeKnora files directory at {DATA_DIR / 'files'}")
+        if not LOG_FILE.exists():
+            LOG_FILE.touch()
+        if not secure_path_permissions(LOG_FILE, is_dir=False):
+            raise PermissionError(f"Failed to confirm secure NTFS permissions on WeKnora log file at {LOG_FILE}")
 
         # Build clean environment dictionary
         env = dict(os.environ)
@@ -805,6 +939,79 @@ def start_service() -> Dict[str, Any]:
             raise RuntimeError(f"Failed to launch WeKnora Lite: {exc}")
 
 
+def _get_process_executable_path_win32(pid: int) -> Optional[Path]:
+    """Queries process executable path via supported Win32 API without deprecated WMIC."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        h_process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h_process:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(size)):
+                return Path(buf.value).resolve()
+            return None
+        finally:
+            kernel32.CloseHandle(h_process)
+    except Exception:
+        return None
+
+
+def _is_expected_weknora_process(pid: int) -> bool:
+    """Verifies that a running PID matches an exact approved WeKnora binary path.
+
+    Replaces deprecated WMIC with supported Windows process query APIs (ctypes / CIM).
+    Verifies exact executable identity and fails closed on unverified, unknown, or mismatched processes.
+    """
+    if pid <= 0 or pid == os.getpid():
+        return False
+    if hasattr(os, "getppid") and pid == os.getppid():
+        return False
+
+    expected_paths = set()
+    if BINARY_PATH.exists():
+        expected_paths.add(BINARY_PATH.resolve())
+    if FALLBACK_BINARY_PATH.exists():
+        expected_paths.add(FALLBACK_BINARY_PATH.resolve())
+
+    if not expected_paths:
+        append_log("No approved WeKnora binary exists on disk; refusing process termination.")
+        return False
+
+    if sys.platform == "win32":
+        exe_path = _get_process_executable_path_win32(pid)
+        if not exe_path:
+            try:
+                cmd = [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').ExecutablePath",
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=3.0)
+                if res.returncode == 0 and res.stdout.strip():
+                    exe_path = Path(res.stdout.strip()).resolve()
+            except Exception:
+                exe_path = None
+
+        if not exe_path:
+            append_log(f"Process identity could not be established for PID {pid}; refusing termination.")
+            return False
+
+        # Verify exact executable identity against known trusted binary paths
+        if exe_path in expected_paths:
+            return True
+
+        append_log(f"Executable path {exe_path} does not match verified WeKnora binary; refusing termination.")
+        return False
+    return False
+
+
 def stop_service() -> Dict[str, Any]:
     global _process
     stop_math_watchdog()
@@ -816,25 +1023,33 @@ def stop_service() -> Dict[str, Any]:
             if check_port(port, "127.0.0.1"):
                 try:
                     if sys.platform == "win32":
-                        subprocess.run(["taskkill", "/F", "/IM", "WeKnora-lite.exe"], capture_output=True)
-                        out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True, text=True)
-                        for line in out.strip().splitlines():
-                            parts = line.split()
-                            if len(parts) >= 5 and "LISTENING" in parts:
-                                orphan_pid = int(parts[-1])
-                                append_log(f"Terminating orphaned WeKnora instance (PID {orphan_pid})...")
-                                subprocess.run(["taskkill", "/F", "/T", "/PID", str(orphan_pid)], capture_output=True)
+                        # Safely inspect listening sockets without shell=True
+                        res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
+                        if res.returncode == 0:
+                            for line in res.stdout.splitlines():
+                                parts = line.strip().split()
+                                if len(parts) >= 5 and "LISTENING" in parts:
+                                    local_addr = parts[1]
+                                    addr_str, _, port_str = local_addr.rpartition(":")
+                                    if port_str.isdigit() and int(port_str) == port:
+                                        try:
+                                            orphan_pid = int(parts[-1])
+                                            if _is_expected_weknora_process(orphan_pid):
+                                                append_log(f"Terminating verified orphaned WeKnora instance (PID {orphan_pid})...")
+                                                subprocess.run(["taskkill", "/F", "/T", "/PID", str(orphan_pid)], capture_output=True)
+                                            else:
+                                                append_log(f"[Security Warning] Process on port {port} (PID {orphan_pid}) does not match verified WeKnora executable path; refusing termination.")
+                                        except (ValueError, Exception) as parse_err:
+                                            append_log(f"Error inspecting candidate PID on port {port}: {parse_err}")
                 except Exception as exc:
-                    append_log(f"Error terminating orphaned process on port {port}: {exc}")
-            elif sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/IM", "WeKnora-lite.exe"], capture_output=True)
+                    append_log(f"Error inspecting orphaned process on port {port}: {exc}")
             return {"ok": True, "message": "Service is not running"}
 
         append_log(f"Stopping WeKnora Lite (PID {_process.pid})...")
         try:
+            pid = _process.pid
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(_process.pid)], capture_output=True)
-                subprocess.run(["taskkill", "/F", "/IM", "WeKnora-lite.exe"], capture_output=True)
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
             else:
                 _process.terminate()
             try:
@@ -847,8 +1062,7 @@ def stop_service() -> Dict[str, Any]:
             append_log(f"Error stopping process: {exc}")
         finally:
             _process = None
-
-    return {"ok": True, "message": "Service stopped"}
+        return {"ok": True, "message": "WeKnora Lite stopped"}
 
 
 def restart_service() -> Dict[str, Any]:

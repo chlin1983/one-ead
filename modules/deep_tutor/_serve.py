@@ -113,7 +113,9 @@ def main() -> None:
     from deeptutor.runtime import launcher
 
     patched = _patch(launcher)
-    print(f"[one-ead] loopback-only binding: {'on' if patched else 'UNAVAILABLE (upstream launcher changed)'}", flush=True)
+    if not patched:
+        raise RuntimeError("Failed to patch DeepTutor launcher for loopback-only binding: refusing to expose service on 0.0.0.0")
+    print("[one-ead] loopback-only binding: on", flush=True)
     launcher.start(home=home, dev=False, detach=False, open_browser=False)
 
 

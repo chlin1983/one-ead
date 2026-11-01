@@ -253,6 +253,19 @@ def install_from_zip(zip_path: Path, module_dir: Path) -> Dict[str, Any]:
                         target_exe.chmod(0o755)
                     except OSError:
                         pass
+                else:
+                    sec_ok = False
+                    try:
+                        from server.security import secure_path_permissions
+                        sec_ok = secure_path_permissions(target_exe, is_dir=False)
+                    except Exception:
+                        sec_ok = False
+                    if not sec_ok:
+                        try:
+                            target_exe.unlink()
+                        except OSError:
+                            pass
+                        raise IntegrityError(f"Failed to secure NTFS permissions on installed binary {target_exe}")
                 extracted["binary"] = True
                 extracted["files"].append(str(target_exe))
 
@@ -370,6 +383,19 @@ def download_weknora_binary(
                             target_exe.chmod(0o755)
                         except Exception:
                             pass
+                    else:
+                        sec_ok = False
+                        try:
+                            from server.security import secure_path_permissions
+                            sec_ok = secure_path_permissions(target_exe, is_dir=False)
+                        except Exception:
+                            sec_ok = False
+                        if not sec_ok:
+                            try:
+                                target_exe.unlink()
+                            except OSError:
+                                pass
+                            raise IntegrityError(f"Failed to secure NTFS permissions on downloaded binary {target_exe}")
 
                 # Record build info
                 build_info_path = MODULE_DIR / "build_info.json"
